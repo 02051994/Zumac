@@ -6,7 +6,10 @@ import 'package:sqflite/sqflite.dart';
 
 class LocalDb {
   static final LocalDb instance = LocalDb._();
-  LocalDb._();
+  LocalDb._({Database? database}) : _db = database;
+
+  factory LocalDb.forTesting(Database database) =>
+      LocalDb._(database: database);
 
   Database? _db;
 
@@ -80,7 +83,6 @@ class LocalDb {
     ''');
   }
 
-
   Future<void> _ensureColumn(
     Database db,
     String table,
@@ -128,19 +130,24 @@ class LocalDb {
     await _ensureColumn(db, 'local_form_fields', 'numero_decimales', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'grid_fila', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'grid_columna', 'integer');
-    await _ensureColumn(db, 'local_form_fields', 'grid_fila_pendientes', 'integer');
-    await _ensureColumn(db, 'local_form_fields', 'grid_columna_pendientes', 'integer');
+    await _ensureColumn(
+        db, 'local_form_fields', 'grid_fila_pendientes', 'integer');
+    await _ensureColumn(
+        db, 'local_form_fields', 'grid_columna_pendientes', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'rango_valor', 'text');
     await _ensureColumn(db, 'local_form_fields', 'num_caracteres', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'numero_fotos', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'photo_depende_de', 'text');
     await _ensureColumn(db, 'local_form_fields', 'lista_destino_photo', 'text');
-    await _ensureColumn(db, 'local_form_fields', 'orden_lista_photo', 'integer');
-    await _ensureColumn(db, 'local_form_fields', 'formato_condicional_campo', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'orden_lista_photo', 'integer');
+    await _ensureColumn(
+        db, 'local_form_fields', 'formato_condicional_campo', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_texto', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_fondo', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_borde', 'text');
-    await _ensureColumn(db, 'local_form_fields', 'aplicar_formato_condicional_tabla', 'integer');
+    await _ensureColumn(db, 'local_form_fields',
+        'aplicar_formato_condicional_tabla', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'sub_titulo', 'text');
     await _ensureColumn(db, 'local_form_fields', 'fila_sub_titulo', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'grupo_captura', 'text');
@@ -165,7 +172,6 @@ class LocalDb {
     ''');
   }
 
-
   Future<void> _createLocalLotesVariedades(Database db) async {
     await db.execute('''
       create table if not exists local_lotes_variedades(
@@ -174,7 +180,6 @@ class LocalDb {
       )
     ''');
   }
-
 
   Future<void> _createLocalPlagasConceptos(Database db) async {
     await db.execute("""
@@ -226,22 +231,26 @@ class LocalDb {
     """);
   }
 
-
-
   Future<void> _ensureIndexes(Database db) async {
     // Índices seguros: no cambian lógica ni datos; solo aceleran búsquedas frecuentes.
     // IMPORTANTE: en una instalación limpia, algunos índices podían ejecutarse antes
     // de que la tabla local exista. Eso rompía el login/actualización con:
     // "no such table: main.local_dynamic_views".
-    await _safeCreateIndex(db, 'local_matrix_rows', 'create index if not exists idx_local_matrix_rows_source_table on local_matrix_rows(source_table)');
-    await _safeCreateIndex(db, 'local_form_fields', 'create index if not exists idx_local_form_fields_table_active_order on local_form_fields(tabla_destino, activo, orden)');
-    await _safeCreateIndex(db, 'local_catalog_values', 'create index if not exists idx_local_catalog_values_key_value on local_catalog_values(catalog_key, value)');
-    await _safeCreateIndex(db, 'local_format_tables', 'create index if not exists idx_local_format_tables_formato_active_order on local_format_tables(formato_id, activo, orden)');
-    await _safeCreateIndex(db, 'local_dynamic_views', 'create index if not exists idx_local_dynamic_views_section_table on local_dynamic_views(seccion, tabla_destino, activo)');
-    await _safeCreateIndex(db, 'local_permissions', 'create index if not exists idx_local_permissions_user_format on local_permissions(user_id, formato)');
-    await _safeCreateIndex(db, 'local_table_cache', 'create index if not exists idx_local_table_cache_updated on local_table_cache(source_table, updated_at)');
+    await _safeCreateIndex(db, 'local_matrix_rows',
+        'create index if not exists idx_local_matrix_rows_source_table on local_matrix_rows(source_table)');
+    await _safeCreateIndex(db, 'local_form_fields',
+        'create index if not exists idx_local_form_fields_table_active_order on local_form_fields(tabla_destino, activo, orden)');
+    await _safeCreateIndex(db, 'local_catalog_values',
+        'create index if not exists idx_local_catalog_values_key_value on local_catalog_values(catalog_key, value)');
+    await _safeCreateIndex(db, 'local_format_tables',
+        'create index if not exists idx_local_format_tables_formato_active_order on local_format_tables(formato_id, activo, orden)');
+    await _safeCreateIndex(db, 'local_dynamic_views',
+        'create index if not exists idx_local_dynamic_views_section_table on local_dynamic_views(seccion, tabla_destino, activo)');
+    await _safeCreateIndex(db, 'local_permissions',
+        'create index if not exists idx_local_permissions_user_format on local_permissions(user_id, formato)');
+    await _safeCreateIndex(db, 'local_table_cache',
+        'create index if not exists idx_local_table_cache_updated on local_table_cache(source_table, updated_at)');
   }
-
 
   Future<void> _createLocalSyncMeta(Database db) async {
     await db.execute("""
@@ -251,7 +260,6 @@ class LocalDb {
       )
     """);
   }
-
 
   Future<void> _createLocalTableCache(Database db) async {
     await db.execute("""
@@ -324,8 +332,6 @@ class LocalDb {
     ''');
   }
 
-
-
   Future<void> _upgradeLocalFormatTables(Database db) async {
     await _ensureColumn(db, 'local_format_tables', 'tipo_relacion', 'text');
     await _ensureColumn(db, 'local_format_tables', 'tabla_padre', 'text');
@@ -336,7 +342,8 @@ class LocalDb {
     await _ensureColumn(db, 'local_format_tables', 'campo_iterador', 'text');
     await _ensureColumn(db, 'local_format_tables', 'iterador_desde', 'integer');
     await _ensureColumn(db, 'local_format_tables', 'iterador_hasta', 'integer');
-    await _ensureColumn(db, 'local_format_tables', 'copiar_campos_desde_padre', 'text');
+    await _ensureColumn(
+        db, 'local_format_tables', 'copiar_campos_desde_padre', 'text');
     await _ensureColumn(db, 'local_format_tables', 'modo_captura', 'text');
   }
 
@@ -344,7 +351,8 @@ class LocalDb {
     await _ensureColumn(db, 'local_permissions', 'can_export', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_import', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_view_pending', 'integer');
-    await _ensureColumn(db, 'local_permissions', 'can_complete_pending', 'integer');
+    await _ensureColumn(
+        db, 'local_permissions', 'can_complete_pending', 'integer');
     await _ensureColumn(db, 'local_permissions', 'seccion', 'text');
     await _ensureColumn(db, 'local_permissions', 'campos_restringidos', 'text');
     await _ensureColumn(db, 'local_permissions', 'permisos_flujo', 'text');
@@ -376,8 +384,8 @@ class LocalDb {
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
     if (oldVersion < 2) {
       await _ensureColumn(db, 'local_profile', 'dni', 'text');
-    await _ensureColumn(db, 'local_profile', 'email', 'text');
-    await _createLocalFormFields(db);
+      await _ensureColumn(db, 'local_profile', 'email', 'text');
+      await _createLocalFormFields(db);
     }
     if (oldVersion < 3) {
       await _createLocalSpecialFormats(db);
@@ -397,26 +405,26 @@ class LocalDb {
     }
     if (oldVersion < 8) {
       await _createLocalCatalogValues(db);
-    await _createLocalMatrixRows(db);
+      await _createLocalMatrixRows(db);
     }
     if (oldVersion < 9) {
       await _ensureColumn(db, 'local_profile', 'dni', 'text');
-    await _ensureColumn(db, 'local_profile', 'email', 'text');
-    await _createLocalFormFields(db);
+      await _ensureColumn(db, 'local_profile', 'email', 'text');
+      await _createLocalFormFields(db);
       await _upgradeLocalFormFields(db);
       await _createLocalMatrixRows(db);
     }
     if (oldVersion < 10) {
       await _ensureColumn(db, 'local_profile', 'dni', 'text');
-    await _ensureColumn(db, 'local_profile', 'email', 'text');
-    await _createLocalFormFields(db);
+      await _ensureColumn(db, 'local_profile', 'email', 'text');
+      await _createLocalFormFields(db);
       await _upgradeLocalFormFields(db);
       await _createLocalMatrixRows(db);
     }
     if (oldVersion < 11) {
       await _ensureColumn(db, 'local_profile', 'dni', 'text');
-    await _ensureColumn(db, 'local_profile', 'email', 'text');
-    await _createLocalFormFields(db);
+      await _ensureColumn(db, 'local_profile', 'email', 'text');
+      await _createLocalFormFields(db);
       await _upgradeLocalFormFields(db);
       await _createLocalMatrixRows(db);
     }
@@ -571,12 +579,35 @@ class LocalDb {
     ''');
   }
 
-  Map<String, dynamic> _cleanForTable(Map<String, dynamic> row, Set<String> validColumns) {
+  Map<String, dynamic> _cleanForTable(
+      Map<String, dynamic> row, Set<String> validColumns) {
     final cleanRow = <String, dynamic>{};
     for (final entry in row.entries) {
       if (validColumns.contains(entry.key)) cleanRow[entry.key] = entry.value;
     }
     return cleanRow;
+  }
+
+  Future<void> _insertRowsChunkedWithExecutor(
+    DatabaseExecutor executor,
+    String table,
+    List<Map<String, dynamic>> rows,
+    Set<String> validColumns,
+  ) async {
+    const chunkSize = 250;
+    for (var start = 0; start < rows.length; start += chunkSize) {
+      final end =
+          (start + chunkSize > rows.length) ? rows.length : start + chunkSize;
+      final batch = executor.batch();
+      for (final row in rows.sublist(start, end)) {
+        final cleanRow = _cleanForTable(row, validColumns);
+        if (cleanRow.isNotEmpty) {
+          batch.insert(table, cleanRow,
+              conflictAlgorithm: ConflictAlgorithm.replace);
+        }
+      }
+      await batch.commit(noResult: true);
+    }
   }
 
   Future<void> _insertRowsChunked(
@@ -587,62 +618,162 @@ class LocalDb {
   ) async {
     const chunkSize = 250;
     for (var start = 0; start < rows.length; start += chunkSize) {
-      final end = (start + chunkSize > rows.length) ? rows.length : start + chunkSize;
+      final end =
+          (start + chunkSize > rows.length) ? rows.length : start + chunkSize;
       await database.transaction((txn) async {
-        final batch = txn.batch();
-        for (final row in rows.sublist(start, end)) {
-          final cleanRow = _cleanForTable(row, validColumns);
-          if (cleanRow.isNotEmpty) {
-            batch.insert(table, cleanRow, conflictAlgorithm: ConflictAlgorithm.replace);
-          }
-        }
-        await batch.commit(noResult: true);
+        await _insertRowsChunkedWithExecutor(
+          txn,
+          table,
+          rows.sublist(start, end),
+          validColumns,
+        );
       });
       await Future<void>.delayed(const Duration(milliseconds: 1));
     }
   }
 
-  Future<void> replaceTable(String table, List<Map<String, dynamic>> rows) async {
+  Future<void> replaceTable(
+      String table, List<Map<String, dynamic>> rows) async {
     final database = await db;
     final columnsInfo = await database.rawQuery('PRAGMA table_info($table)');
-    final validColumns = columnsInfo.map((c) => c['name']?.toString()).whereType<String>().toSet();
+    final validColumns = columnsInfo
+        .map((c) => c['name']?.toString())
+        .whereType<String>()
+        .toSet();
 
-    await database.delete(table);
+    await database.transaction((txn) async {
+      await txn.delete(table);
+      if (rows.isNotEmpty) {
+        await _insertRowsChunkedWithExecutor(txn, table, rows, validColumns);
+      }
+    });
+  }
+
+  Future<void> upsertTable(
+      String table, List<Map<String, dynamic>> rows) async {
     if (rows.isEmpty) return;
+    final database = await db;
+    final columnsInfo = await database.rawQuery('PRAGMA table_info($table)');
+    final validColumns = columnsInfo
+        .map((c) => c['name']?.toString())
+        .whereType<String>()
+        .toSet();
+
     await _insertRowsChunked(database, table, rows, validColumns);
   }
 
-  Future<void> upsertTable(String table, List<Map<String, dynamic>> rows) async {
-    if (rows.isEmpty) return;
+  Future<void> applyTableDelta(
+    String table,
+    List<Map<String, dynamic>> rows, {
+    Iterable<String> deletedIds = const <String>[],
+    String keyColumn = 'id',
+  }) async {
+    final safeIdentifier = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+    if (!safeIdentifier.hasMatch(table) ||
+        !safeIdentifier.hasMatch(keyColumn)) {
+      throw ArgumentError('Identificador SQLite no valido.');
+    }
+
     final database = await db;
     final columnsInfo = await database.rawQuery('PRAGMA table_info($table)');
-    final validColumns = columnsInfo.map((c) => c['name']?.toString()).whereType<String>().toSet();
+    final validColumns = columnsInfo
+        .map((c) => c['name']?.toString())
+        .whereType<String>()
+        .toSet();
+    if (!validColumns.contains(keyColumn)) {
+      throw ArgumentError('La tabla $table no contiene la clave $keyColumn.');
+    }
 
-    await _insertRowsChunked(database, table, rows, validColumns);
+    final ids = deletedIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList();
+
+    await database.transaction((txn) async {
+      const deleteChunkSize = 400;
+      for (var start = 0; start < ids.length; start += deleteChunkSize) {
+        final end = (start + deleteChunkSize > ids.length)
+            ? ids.length
+            : start + deleteChunkSize;
+        final chunk = ids.sublist(start, end);
+        final placeholders = List.filled(chunk.length, '?').join(',');
+        await txn.delete(
+          table,
+          where: '$keyColumn in ($placeholders)',
+          whereArgs: chunk,
+        );
+      }
+      if (rows.isNotEmpty) {
+        await _insertRowsChunkedWithExecutor(txn, table, rows, validColumns);
+      }
+    });
   }
 
-
-
-
+  Future<void> replaceRowsWhere(
+    String table,
+    List<Map<String, dynamic>> rows, {
+    required String where,
+    required List<Object?> whereArgs,
+  }) async {
+    final safeIdentifier = RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$');
+    if (!safeIdentifier.hasMatch(table)) {
+      throw ArgumentError('Identificador SQLite no valido.');
+    }
+    final database = await db;
+    final columnsInfo = await database.rawQuery('PRAGMA table_info($table)');
+    final validColumns = columnsInfo
+        .map((c) => c['name']?.toString())
+        .whereType<String>()
+        .toSet();
+    await database.transaction((txn) async {
+      await txn.delete(table, where: where, whereArgs: whereArgs);
+      if (rows.isNotEmpty) {
+        await _insertRowsChunkedWithExecutor(txn, table, rows, validColumns);
+      }
+    });
+  }
 
   bool _payloadBool(dynamic value) {
     if (value == true) return true;
     if (value == false || value == null) return false;
     final s = value.toString().trim().toLowerCase();
-    return s == 'true' || s == 't' || s == '1' || s == 'si' || s == 'sí' || s == 's' || s == 'yes';
+    return s == 'true' ||
+        s == 't' ||
+        s == '1' ||
+        s == 'si' ||
+        s == 'sí' ||
+        s == 's' ||
+        s == 'yes';
   }
 
   bool _payloadIsDeleted(Map<String, dynamic> payload) {
-    if (_payloadBool(_payloadValue(payload, ['eliminado', 'ELIMINADO', 'deleted', 'DELETED']))) return true;
-    final estado = (_payloadValue(payload, ['estado_sync', 'ESTADO_SYNC']) ?? '').toString().trim().toLowerCase();
-    if (estado == 'eliminado' || estado == 'deleted' || estado == 'delete') return true;
-    final deletedAt = (_payloadValue(payload, ['deleted_at', 'DELETED_AT']) ?? '').toString().trim();
+    if (_payloadBool(_payloadValue(
+        payload, ['eliminado', 'ELIMINADO', 'deleted', 'DELETED'])))
+      return true;
+    final estado =
+        (_payloadValue(payload, ['estado_sync', 'ESTADO_SYNC']) ?? '')
+            .toString()
+            .trim()
+            .toLowerCase();
+    if (estado == 'eliminado' || estado == 'deleted' || estado == 'delete')
+      return true;
+    final deletedAt =
+        (_payloadValue(payload, ['deleted_at', 'DELETED_AT']) ?? '')
+            .toString()
+            .trim();
     return deletedAt.isNotEmpty && deletedAt.toUpperCase() != 'NULL';
   }
 
-  String _matrixRowKeyForPayload(String table, Map<String, dynamic> payload, int index) {
-    final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-    final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+  String _matrixRowKeyForPayload(
+      String table, Map<String, dynamic> payload, int index) {
+    final idLocal =
+        _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ??
+            '';
+    final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])
+            ?.toString()
+            .trim() ??
+        '';
     if (idLocal.isNotEmpty) return idLocal;
     if (idValue.isNotEmpty) return idValue;
     return '${table}_$index';
@@ -669,8 +800,35 @@ class LocalDb {
       final payloads = entry.value;
 
       if (replaceSources) {
-        await database.delete('local_matrix_rows', where: 'source_table = ?', whereArgs: [table]);
+        await database.transaction((txn) async {
+          await txn.delete(
+            'local_matrix_rows',
+            where: 'source_table = ?',
+            whereArgs: [table],
+          );
+          for (var offset = 0; offset < payloads.length; offset += chunkSize) {
+            final limit = (offset + chunkSize < payloads.length)
+                ? offset + chunkSize
+                : payloads.length;
+            final batch = txn.batch();
+            for (var index = offset; index < limit; index++) {
+              final payload = payloads[index];
+              if (_payloadIsDeleted(payload)) continue;
+              batch.insert(
+                'local_matrix_rows',
+                {
+                  'source_table': table,
+                  'row_key': _matrixRowKeyForPayload(table, payload, index),
+                  'payload_json': jsonEncode(payload),
+                },
+                conflictAlgorithm: ConflictAlgorithm.replace,
+              );
+            }
+            await batch.commit(noResult: true);
+          }
+        });
         await _yieldToRenderer();
+        continue;
       }
 
       final existingRows = await database.query(
@@ -687,9 +845,18 @@ class LocalDb {
         final rowKey = row['row_key']?.toString() ?? '';
         if (rowKey.isNotEmpty) {
           try {
-            final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-            final cachedIdLocal = _payloadValue(decoded, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-            final cachedId = _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+            final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}')
+                as Map<String, dynamic>;
+            final cachedIdLocal =
+                _payloadValue(decoded, ['id_local', 'ID_LOCAL'])
+                        ?.toString()
+                        .trim() ??
+                    '';
+            final cachedId =
+                _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])
+                        ?.toString()
+                        .trim() ??
+                    '';
             if (cachedIdLocal.isNotEmpty) byIdLocal[cachedIdLocal] = rowKey;
             if (cachedId.isNotEmpty) byIdValue[cachedId] = rowKey;
           } catch (_) {}
@@ -698,19 +865,29 @@ class LocalDb {
       }
 
       for (var offset = 0; offset < payloads.length; offset += chunkSize) {
-        final limit = (offset + chunkSize < payloads.length) ? offset + chunkSize : payloads.length;
+        final limit = (offset + chunkSize < payloads.length)
+            ? offset + chunkSize
+            : payloads.length;
         await database.transaction((txn) async {
           final batch = txn.batch();
           for (var index = offset; index < limit; index++) {
             final payload = payloads[index];
-            final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-            final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+            final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])
+                    ?.toString()
+                    .trim() ??
+                '';
+            final idValue =
+                _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])
+                        ?.toString()
+                        .trim() ??
+                    '';
             final existingKey = idLocal.isNotEmpty ? byIdLocal[idLocal] : null;
-            final rowKey = (existingKey != null && existingKey.trim().isNotEmpty)
-                ? existingKey
-                : (idValue.isNotEmpty && byIdValue[idValue] != null)
-                    ? byIdValue[idValue]!
-                    : _matrixRowKeyForPayload(table, payload, index);
+            final rowKey =
+                (existingKey != null && existingKey.trim().isNotEmpty)
+                    ? existingKey
+                    : (idValue.isNotEmpty && byIdValue[idValue] != null)
+                        ? byIdValue[idValue]!
+                        : _matrixRowKeyForPayload(table, payload, index);
 
             if (_payloadIsDeleted(payload)) {
               batch.delete(
@@ -738,7 +915,8 @@ class LocalDb {
     }
   }
 
-  Future<void> upsertMatrixRowPayloads(String sourceTable, List<Map<String, dynamic>> payloads) async {
+  Future<void> upsertMatrixRowPayloads(
+      String sourceTable, List<Map<String, dynamic>> payloads) async {
     final table = sourceTable.trim();
     if (table.isEmpty || payloads.isEmpty) return;
     final database = await db;
@@ -758,9 +936,17 @@ class LocalDb {
       final rowKey = row['row_key']?.toString() ?? '';
       if (rowKey.isEmpty) continue;
       try {
-        final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-        final cachedIdLocal = _payloadValue(decoded, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-        final cachedId = _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+        final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
+        final cachedIdLocal = _payloadValue(decoded, ['id_local', 'ID_LOCAL'])
+                ?.toString()
+                .trim() ??
+            '';
+        final cachedId =
+            _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])
+                    ?.toString()
+                    .trim() ??
+                '';
         if (cachedIdLocal.isNotEmpty) byIdLocal[cachedIdLocal] = rowKey;
         if (cachedId.isNotEmpty) byIdValue[cachedId] = rowKey;
       } catch (_) {}
@@ -769,14 +955,24 @@ class LocalDb {
     await database.transaction((txn) async {
       final batch = txn.batch();
       for (final payload in payloads) {
-        final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-        final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+        final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])
+                ?.toString()
+                .trim() ??
+            '';
+        final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])
+                ?.toString()
+                .trim() ??
+            '';
         final existingKey = idLocal.isNotEmpty ? byIdLocal[idLocal] : null;
         final rowKey = (existingKey != null && existingKey.trim().isNotEmpty)
             ? existingKey
             : (idValue.isNotEmpty && byIdValue[idValue] != null)
                 ? byIdValue[idValue]!
-                : (idLocal.isNotEmpty ? idLocal : (idValue.isNotEmpty ? idValue : '${table}_${DateTime.now().microsecondsSinceEpoch}'));
+                : (idLocal.isNotEmpty
+                    ? idLocal
+                    : (idValue.isNotEmpty
+                        ? idValue
+                        : '${table}_${DateTime.now().microsecondsSinceEpoch}'));
         if (_payloadIsDeleted(payload)) {
           batch.delete(
             'local_matrix_rows',
@@ -799,12 +995,18 @@ class LocalDb {
     });
   }
 
-  Future<void> upsertMatrixRowPayload(String sourceTable, Map<String, dynamic> payload) async {
+  Future<void> upsertMatrixRowPayload(
+      String sourceTable, Map<String, dynamic> payload) async {
     final table = sourceTable.trim();
     if (table.isEmpty) return;
     final database = await db;
-    final idLocal = _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-    final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+    final idLocal =
+        _payloadValue(payload, ['id_local', 'ID_LOCAL'])?.toString().trim() ??
+            '';
+    final idValue = _payloadValue(payload, ['id', 'ID', 'codigo', 'CODIGO'])
+            ?.toString()
+            .trim() ??
+        '';
     String? existingKey;
 
     if (idLocal.isNotEmpty || idValue.isNotEmpty) {
@@ -816,9 +1018,17 @@ class LocalDb {
       );
       for (final row in rows) {
         try {
-          final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-          final cachedIdLocal = _payloadValue(decoded, ['id_local', 'ID_LOCAL'])?.toString().trim() ?? '';
-          final cachedId = _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim() ?? '';
+          final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>;
+          final cachedIdLocal = _payloadValue(decoded, ['id_local', 'ID_LOCAL'])
+                  ?.toString()
+                  .trim() ??
+              '';
+          final cachedId =
+              _payloadValue(decoded, ['id', 'ID', 'codigo', 'CODIGO'])
+                      ?.toString()
+                      .trim() ??
+                  '';
           if ((idLocal.isNotEmpty && cachedIdLocal == idLocal) ||
               (idValue.isNotEmpty && cachedId == idValue)) {
             existingKey = row['row_key']?.toString();
@@ -830,7 +1040,11 @@ class LocalDb {
 
     final rowKey = (existingKey != null && existingKey!.trim().isNotEmpty)
         ? existingKey!
-        : (idLocal.isNotEmpty ? idLocal : (idValue.isNotEmpty ? idValue : '${table}_${DateTime.now().microsecondsSinceEpoch}'));
+        : (idLocal.isNotEmpty
+            ? idLocal
+            : (idValue.isNotEmpty
+                ? idValue
+                : '${table}_${DateTime.now().microsecondsSinceEpoch}'));
 
     if (_payloadIsDeleted(payload)) {
       await database.delete(
@@ -855,7 +1069,8 @@ class LocalDb {
   Future<String?> getMetaValue(String key) async {
     final database = await db;
     await _createLocalSyncMeta(database);
-    final rows = await database.query('local_sync_meta', where: 'key = ?', whereArgs: [key], limit: 1);
+    final rows = await database.query('local_sync_meta',
+        where: 'key = ?', whereArgs: [key], limit: 1);
     if (rows.isEmpty) return null;
     return rows.first['value']?.toString();
   }
@@ -870,6 +1085,23 @@ class LocalDb {
     );
   }
 
+  Future<void> setMetaValues(Map<String, String> values) async {
+    if (values.isEmpty) return;
+    final database = await db;
+    await _createLocalSyncMeta(database);
+    await database.transaction((txn) async {
+      final batch = txn.batch();
+      for (final entry in values.entries) {
+        batch.insert(
+          'local_sync_meta',
+          {'key': entry.key, 'value': entry.value},
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+    });
+  }
+
   Future<int> countMatrixRowsForTable(String sourceTable) async {
     final table = sourceTable.trim();
     if (table.isEmpty) return 0;
@@ -880,7 +1112,6 @@ class LocalDb {
     );
     return (result.first['total'] as int?) ?? 0;
   }
-
 
   Future<Map<String, dynamic>?> getTableCacheInfo(String sourceTable) async {
     final cleanTable = sourceTable.trim();
@@ -954,7 +1185,8 @@ class LocalDb {
     }
   }
 
-  Future<List<Map<String, dynamic>>> getAll(String table, {String? orderBy}) async {
+  Future<List<Map<String, dynamic>>> getAll(String table,
+      {String? orderBy}) async {
     final database = await db;
     return database.query(table, orderBy: orderBy);
   }
@@ -966,7 +1198,8 @@ class LocalDb {
     String? orderBy,
   }) async {
     final database = await db;
-    return database.query(table, where: where, whereArgs: args, orderBy: orderBy);
+    return database.query(table,
+        where: where, whereArgs: args, orderBy: orderBy);
   }
 
   static const int maxSyncedLocalRecords = 150;
@@ -975,7 +1208,8 @@ class LocalDb {
     final database = await db;
     // Guardado local debe ser mínimo: solo persistir la cola pendiente.
     // No depurar, no recargar matrices y no ejecutar trabajos secundarios aquí.
-    await database.insert('pending_records', row, conflictAlgorithm: ConflictAlgorithm.replace);
+    await database.insert('pending_records', row,
+        conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> _pruneLocalRecords(Database database) async {
@@ -996,7 +1230,8 @@ class LocalDb {
 
   Future<List<Map<String, dynamic>>> pendingRecords() async {
     final database = await db;
-    return database.query('pending_records', where: 'estado = ?', whereArgs: ['pendiente']);
+    return database.query('pending_records',
+        where: 'estado = ?', whereArgs: ['pendiente']);
   }
 
   Future<List<Map<String, dynamic>>> allRecords({String? estado}) async {
@@ -1018,9 +1253,9 @@ class LocalDb {
 
   Future<void> deleteRecord(String idLocal) async {
     final database = await db;
-    await database.delete('pending_records', where: 'id_local = ?', whereArgs: [idLocal]);
+    await database
+        .delete('pending_records', where: 'id_local = ?', whereArgs: [idLocal]);
   }
-
 
   Future<void> deletePendingRecordsByPrefix(String idLocalPrefix) async {
     final database = await db;
@@ -1031,13 +1266,22 @@ class LocalDb {
     );
   }
 
-
-
   String _normKey(String value) {
     var s = value.trim().toUpperCase();
-    const map = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'};
+    const map = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     map.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_\$'), '');
+    return s
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_\$'), '');
   }
 
   dynamic _payloadValue(Map<String, dynamic> payload, List<String> candidates) {
@@ -1064,8 +1308,11 @@ class LocalDb {
     final idsToDelete = <String>[];
     for (final row in rows) {
       try {
-        final payload = jsonDecode(row['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-        final candidateId = _payloadValue(payload, ['ID_REGISTRO', 'ID'])?.toString().trim() ?? '';
+        final payload = jsonDecode(row['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
+        final candidateId =
+            _payloadValue(payload, ['ID_REGISTRO', 'ID'])?.toString().trim() ??
+                '';
         if (candidateId == id) {
           final idLocal = row['id_local']?.toString() ?? '';
           if (idLocal.isNotEmpty) idsToDelete.add(idLocal);
@@ -1073,7 +1320,8 @@ class LocalDb {
       } catch (_) {}
     }
     for (final idLocal in idsToDelete) {
-      await database.delete('pending_records', where: 'id_local = ?', whereArgs: [idLocal]);
+      await database.delete('pending_records',
+          where: 'id_local = ?', whereArgs: [idLocal]);
     }
   }
 

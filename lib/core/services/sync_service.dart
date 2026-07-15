@@ -25,20 +25,33 @@ class SyncService {
     await Future<void>.delayed(const Duration(milliseconds: 1));
   }
 
-
   String friendlyError(Object error) {
     final raw = error.toString();
     final msg = raw.toLowerCase();
-    if (msg.contains('sin conexión') || msg.contains('sin conexion') || msg.contains('internet') || msg.contains('socketexception') || msg.contains('network')) {
+    if (msg.contains('sin conexión') ||
+        msg.contains('sin conexion') ||
+        msg.contains('internet') ||
+        msg.contains('socketexception') ||
+        msg.contains('network')) {
       return 'No hay conexión a internet. El registro quedó pendiente; vuelve a sincronizar cuando tengas señal.';
     }
-    if (msg.contains('invalid login') || msg.contains('invalid credentials') || msg.contains('credenciales') || msg.contains('password')) {
+    if (msg.contains('invalid login') ||
+        msg.contains('invalid credentials') ||
+        msg.contains('credenciales') ||
+        msg.contains('password')) {
       return 'Usuario o contraseña incorrectos.';
     }
-    if (msg.contains('jwt') || msg.contains('not authorized') || msg.contains('unauthorized') || msg.contains('permission denied') || msg.contains('row-level security') || msg.contains('rls')) {
+    if (msg.contains('jwt') ||
+        msg.contains('not authorized') ||
+        msg.contains('unauthorized') ||
+        msg.contains('permission denied') ||
+        msg.contains('row-level security') ||
+        msg.contains('rls')) {
       return 'No autorizado. La sesión online venció o el usuario no tiene permiso para enviar este registro.';
     }
-    if (msg.contains('storage') || msg.contains('bucket') || msg.contains('upload')) {
+    if (msg.contains('storage') ||
+        msg.contains('bucket') ||
+        msg.contains('upload')) {
       return 'No se pudo subir la foto o firma. Revisa internet y permisos del almacenamiento.';
     }
     if (msg.contains('duplicate key') || msg.contains('unique constraint')) {
@@ -47,7 +60,9 @@ class SyncService {
     if (msg.contains('violates not-null') || msg.contains('null value')) {
       return 'Falta completar un campo obligatorio para poder enviar el registro.';
     }
-    if (msg.contains('invalid input syntax') || msg.contains('type') || msg.contains('cast')) {
+    if (msg.contains('invalid input syntax') ||
+        msg.contains('type') ||
+        msg.contains('cast')) {
       return 'Un campo tiene un tipo de dato incorrecto. Revisa números, fechas y textos antes de sincronizar.';
     }
     return raw.replaceFirst('Exception: ', '').trim().isEmpty
@@ -58,7 +73,8 @@ class SyncService {
   Future<void> _ensureOnlineAuthSession() async {
     // Ruta rápida: si la sesión ya existe en memoria, no hacemos login otra vez.
     // Reautenticar en cada sincronización agregaba segundos incluso para 1 registro.
-    if (_supabase.auth.currentUser != null && _supabase.auth.currentSession != null) {
+    if (_supabase.auth.currentUser != null &&
+        _supabase.auth.currentSession != null) {
       return;
     }
 
@@ -66,18 +82,24 @@ class SyncService {
     final email = await localSession.cachedEmail();
     final password = await localSession.cachedPasswordForReauth();
 
-    if (email != null && email.trim().isNotEmpty && password != null && password.isNotEmpty) {
+    if (email != null &&
+        email.trim().isNotEmpty &&
+        password != null &&
+        password.isNotEmpty) {
       try {
-        await _supabase.auth.signInWithPassword(email: email.trim().toLowerCase(), password: password);
+        await _supabase.auth.signInWithPassword(
+            email: email.trim().toLowerCase(), password: password);
       } catch (e) {
         throw Exception(friendlyError(e));
       }
     } else {
-      throw Exception('No hay sesión online activa. Ingresa una vez con internet y vuelve a sincronizar.');
+      throw Exception(
+          'No hay sesión online activa. Ingresa una vez con internet y vuelve a sincronizar.');
     }
 
     if (_supabase.auth.currentUser == null) {
-      throw Exception('No se pudo abrir la sesión online. Ingresa con internet y vuelve a sincronizar.');
+      throw Exception(
+          'No se pudo abrir la sesión online. Ingresa con internet y vuelve a sincronizar.');
     }
   }
 
@@ -86,16 +108,28 @@ class SyncService {
     return !result.contains(ConnectivityResult.none);
   }
 
-
   bool _isPureUuid(String value) {
-    return RegExp(r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$').hasMatch(value.trim());
+    return RegExp(
+            r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$')
+        .hasMatch(value.trim());
   }
 
   String _norm(String value) {
     var s = value.trim().toUpperCase();
-    const map = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'};
+    const map = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     map.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return s
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   dynamic _valueByColumn(Map<String, dynamic> row, List<String> candidates) {
@@ -106,12 +140,17 @@ class SyncService {
     return null;
   }
 
-
   bool _boolValue(dynamic value) {
     if (value == true) return true;
     if (value == false || value == null) return false;
     final s = value.toString().trim().toUpperCase();
-    return s == 'TRUE' || s == 'T' || s == '1' || s == 'SI' || s == 'SÍ' || s == 'S' || s == 'YES';
+    return s == 'TRUE' ||
+        s == 'T' ||
+        s == '1' ||
+        s == 'SI' ||
+        s == 'SÍ' ||
+        s == 'S' ||
+        s == 'YES';
   }
 
   bool _boolValueOrDefault(dynamic value, bool defaultValue) {
@@ -146,7 +185,6 @@ class SyncService {
     }
   }
 
-
   Future<List<dynamic>> _selectAllFieldsPaged() async {
     const pageSize = 1000;
     var from = 0;
@@ -175,10 +213,8 @@ class SyncService {
     final output = <Map<String, dynamic>>[];
 
     while (true) {
-      final page = await _supabase
-          .from(table)
-          .select()
-          .range(from, from + pageSize - 1);
+      final page =
+          await _supabase.from(table).select().range(from, from + pageSize - 1);
 
       final rows = List<Map<String, dynamic>>.from(page);
       output.addAll(rows);
@@ -189,15 +225,42 @@ class SyncService {
     return output;
   }
 
-
   static const List<Map<String, String>> _catalogSpecs = [
-    {'key': 'MATRIZ_JEFATURAS.JEFATURA', 'table': 'MATRIZ_JEFATURAS', 'column': 'JEFATURA'},
-    {'key': 'MATRIZ_SUPERVISORES.SUPERVISOR', 'table': 'MATRIZ_SUPERVISORES', 'column': 'SUPERVISOR'},
-    {'key': 'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO', 'table': 'MATRIZ_EQUIPOS_DE_MEDICION', 'column': 'CODIGO'},
-    {'key': 'MATRIZ_ESTADO_DE_EQUIPOS.ESTADO', 'table': 'MATRIZ_ESTADO_DE_EQUIPOS', 'column': 'ESTADO'},
-    {'key': 'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION.MATERIALES', 'table': 'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION', 'column': 'MATERIALES'},
-    {'key': 'MATRIZ_FRECUENCIA_DE_ACTIVIDADES.FRECUENCIA', 'table': 'MATRIZ_FRECUENCIA_DE_ACTIVIDADES', 'column': 'FRECUENCIA'},
-    {'key': 'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES.MATERIALES', 'table': 'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES', 'column': 'MATERIALES'},
+    {
+      'key': 'MATRIZ_JEFATURAS.JEFATURA',
+      'table': 'MATRIZ_JEFATURAS',
+      'column': 'JEFATURA'
+    },
+    {
+      'key': 'MATRIZ_SUPERVISORES.SUPERVISOR',
+      'table': 'MATRIZ_SUPERVISORES',
+      'column': 'SUPERVISOR'
+    },
+    {
+      'key': 'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO',
+      'table': 'MATRIZ_EQUIPOS_DE_MEDICION',
+      'column': 'CODIGO'
+    },
+    {
+      'key': 'MATRIZ_ESTADO_DE_EQUIPOS.ESTADO',
+      'table': 'MATRIZ_ESTADO_DE_EQUIPOS',
+      'column': 'ESTADO'
+    },
+    {
+      'key': 'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION.MATERIALES',
+      'table': 'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION',
+      'column': 'MATERIALES'
+    },
+    {
+      'key': 'MATRIZ_FRECUENCIA_DE_ACTIVIDADES.FRECUENCIA',
+      'table': 'MATRIZ_FRECUENCIA_DE_ACTIVIDADES',
+      'column': 'FRECUENCIA'
+    },
+    {
+      'key': 'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES.MATERIALES',
+      'table': 'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES',
+      'column': 'MATERIALES'
+    },
   ];
 
   Future<List<Map<String, dynamic>>> _downloadCatalogValues({
@@ -224,8 +287,6 @@ class SyncService {
     return output;
   }
 
-
-
   String _cleanNullable(dynamic value) {
     if (value == null) return '';
     final s = value.toString().trim();
@@ -245,10 +306,13 @@ class SyncService {
     final text = value.trim();
     if (!text.startsWith('[') || !text.endsWith(']')) return false;
     final content = _unwrapBracketReference(text);
-    return content.contains(',') || content.contains(';') || content.contains('|');
+    return content.contains(',') ||
+        content.contains(';') ||
+        content.contains('|');
   }
 
-  Map<String, dynamic>? _fieldByIdentifier(List<Map<String, dynamic>> fields, String identifier) {
+  Map<String, dynamic>? _fieldByIdentifier(
+      List<Map<String, dynamic>> fields, String identifier) {
     final wanted = _norm(_unwrapBracketReference(_cleanNullable(identifier)));
     if (wanted.isEmpty) return null;
     for (final f in fields) {
@@ -272,36 +336,43 @@ class SyncService {
       final cleanDropdownId = _unwrapBracketReference(dropdownId);
       if (cleanDropdownId.contains('.')) {
         final sourceTable = cleanDropdownId.split('.').first.trim();
-        if (sourceTable.isNotEmpty && !_excludedOfflineSourceTables.contains(sourceTable)) sourceTables.add(sourceTable);
+        if (sourceTable.isNotEmpty &&
+            !_excludedOfflineSourceTables.contains(sourceTable))
+          sourceTables.add(sourceTable);
       } else {
         final sourceField = _fieldByIdentifier(fields, cleanDropdownId);
         final sourceTable = _cleanNullable(sourceField?['tabla_destino']);
-        if (sourceTable.isNotEmpty && !_excludedOfflineSourceTables.contains(sourceTable)) sourceTables.add(sourceTable);
+        if (sourceTable.isNotEmpty &&
+            !_excludedOfflineSourceTables.contains(sourceTable))
+          sourceTables.add(sourceTable);
       }
 
       final formula = _cleanNullable(f['formula_funcion']);
-      final lookupMatch = RegExp(r'(?:LOOKU[PR]|LOOKUP|BUSCAR)\s*\(\s*([^,;\)]+)', caseSensitive: false).firstMatch(formula);
+      final lookupMatch = RegExp(
+              r'(?:LOOKU[PR]|LOOKUP|BUSCAR)\s*\(\s*([^,;\)]+)',
+              caseSensitive: false)
+          .firstMatch(formula);
       final lookupTable = lookupMatch?.group(1)?.trim() ?? '';
-      if (lookupTable.isNotEmpty && !_excludedOfflineSourceTables.contains(lookupTable)) sourceTables.add(lookupTable);
+      if (lookupTable.isNotEmpty &&
+          !_excludedOfflineSourceTables.contains(lookupTable))
+        sourceTables.add(lookupTable);
     }
 
     final output = <String, List<Map<String, dynamic>>>{};
     for (final table in sourceTables) {
       if (_excludedOfflineSourceTables.contains(table)) continue;
-      final mustRefreshFully = forceAllSources || _norm(table) == _norm('GH-REGISTRO_PERSONAL_PLANILLA');
+      final mustRefreshFully = forceAllSources ||
+          _norm(table) == _norm('GH-REGISTRO_PERSONAL_PLANILLA');
       if (!mustRefreshFully && !_tableChanged(changedTables, table)) continue;
       await _yieldToUi();
       try {
         output[table] = mustRefreshFully
             ? await _selectAllRowsPaged(table)
             : await _selectRowsPagedSince(table, since);
-      } catch (_) {
-        output[table] = <Map<String, dynamic>>[];
-      }
+      } catch (_) {}
     }
     return output;
   }
-
 
   Future<Map<String, List<Map<String, dynamic>>>> _downloadFormatRecordTables(
     List<Map<String, dynamic>> formats,
@@ -334,15 +405,13 @@ class SyncService {
         output[table] = forceAllTables
             ? await _selectAllRowsPaged(table)
             : await _selectRowsPagedSince(table, since);
-      } catch (_) {
-        output[table] = <Map<String, dynamic>>[];
-      }
+      } catch (_) {}
     }
     return output;
   }
 
-
-  Future<Map<String, List<Map<String, dynamic>>>> _downloadDynamicViewDataTables(
+  Future<Map<String, List<Map<String, dynamic>>>>
+      _downloadDynamicViewDataTables(
     List<Map<String, dynamic>> dynamicViews, {
     Set<String>? changedTables,
     String? since,
@@ -350,7 +419,8 @@ class SyncService {
   }) async {
     final tables = <String>{};
     for (final v in dynamicViews) {
-      final table = _cleanNullable(_valueByColumn(v, ['tabla_destino', 'tabla destino']));
+      final table =
+          _cleanNullable(_valueByColumn(v, ['tabla_destino', 'tabla destino']));
       if (table.isEmpty) continue;
       if (_excludedOfflineSourceTables.contains(table)) continue;
       tables.add(table);
@@ -366,12 +436,10 @@ class SyncService {
             : await _selectRowsPagedSince(table, since);
       } catch (_) {
         // No romper Actualizar datos si una vista apunta a una tabla sin permiso/RLS.
-        output[table] = <Map<String, dynamic>>[];
       }
     }
     return output;
   }
-
 
   Future<List<Map<String, dynamic>>> _downloadFlowRules() async {
     try {
@@ -410,8 +478,10 @@ class SyncService {
       if (sourceTable.isEmpty || sourceColumn.isEmpty) continue;
       final key = '$sourceTable.$sourceColumn';
       final seen = <String>{};
-      for (final row in sourceRows[sourceTable] ?? const <Map<String, dynamic>>[]) {
-        final value = _valueByColumn(row, [sourceColumn])?.toString().trim() ?? '';
+      for (final row
+          in sourceRows[sourceTable] ?? const <Map<String, dynamic>>[]) {
+        final value =
+            _valueByColumn(row, [sourceColumn])?.toString().trim() ?? '';
         if (value.isEmpty || seen.contains(value)) continue;
         seen.add(value);
         output.add({'catalog_key': key, 'value': value});
@@ -427,7 +497,9 @@ class SyncService {
     for (final entry in sourceRows.entries) {
       var index = 0;
       for (final row in entry.value) {
-        final id = _valueByColumn(row, ['id', 'ID', 'codigo', 'CODIGO'])?.toString().trim();
+        final id = _valueByColumn(row, ['id', 'ID', 'codigo', 'CODIGO'])
+            ?.toString()
+            .trim();
         output.add({
           'source_table': entry.key,
           'row_key': (id == null || id.isEmpty) ? '${entry.key}_$index' : id,
@@ -439,8 +511,8 @@ class SyncService {
     return output;
   }
 
-
-  List<Map<String, dynamic>> _rowsFromBootstrap(Map<String, dynamic> data, String key) {
+  List<Map<String, dynamic>> _rowsFromBootstrap(
+      Map<String, dynamic> data, String key) {
     final value = data[key];
     if (value is List) {
       return value
@@ -450,7 +522,6 @@ class SyncService {
     }
     return <Map<String, dynamic>>[];
   }
-
 
   Future<Set<String>?> _changedTablesSince(String? since) async {
     if (since == null || since.trim().isEmpty) return null;
@@ -462,7 +533,8 @@ class SyncService {
       if (result is! List) return <String>{};
       return result
           .whereType<Map>()
-          .map((e) => (e['tabla_nombre'] ?? e['table_name'] ?? '').toString().trim())
+          .map((e) =>
+              (e['tabla_nombre'] ?? e['table_name'] ?? '').toString().trim())
           .where((name) => name.isNotEmpty)
           .toSet();
     } catch (_) {
@@ -474,22 +546,63 @@ class SyncService {
 
   bool _tableChanged(Set<String>? changedTables, String table) {
     if (changedTables == null) return true; // fallback: comportamiento anterior
-    return changedTables.contains(table);
-  }
-
-  bool _isFullRefreshConfigTable(String table) {
-    final name = table.trim().toUpperCase();
-    return name.contains('MATRIZ') || name.contains('PERMISO');
+    final wanted = _norm(table);
+    return changedTables.any((candidate) => _norm(candidate) == wanted);
   }
 
   int _activeInt(Map<String, dynamic> row, {bool defaultValue = true}) {
-    return _boolValueOrDefault(_valueByColumn(row, ['activo', 'active']), defaultValue) ? 1 : 0;
+    return _boolValueOrDefault(
+            _valueByColumn(row, ['activo', 'active']), defaultValue)
+        ? 1
+        : 0;
   }
 
   bool _isDeletedRow(Map<String, dynamic> row) {
     if (_boolValue(_valueByColumn(row, ['eliminado', 'deleted']))) return true;
-    final deletedAt = _valueByColumn(row, ['deleted_at', 'deleted at'])?.toString().trim() ?? '';
+    final deletedAt =
+        _valueByColumn(row, ['deleted_at', 'deleted at'])?.toString().trim() ??
+            '';
     return deletedAt.isNotEmpty && deletedAt.toUpperCase() != 'NULL';
+  }
+
+  bool _isRemovedRow(
+    Map<String, dynamic> row, {
+    bool inactiveRemoves = true,
+  }) {
+    return _isDeletedRow(row) || (inactiveRemoves && _activeInt(row) != 1);
+  }
+
+  List<String> _removedIds(
+    List<Map<String, dynamic>> rows, {
+    bool inactiveRemoves = true,
+  }) {
+    return rows
+        .where((row) => _isRemovedRow(row, inactiveRemoves: inactiveRemoves))
+        .map((row) => _valueByColumn(row, ['id'])?.toString().trim() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>?> _trySelectAllRowsSnapshot(
+    String table,
+  ) async {
+    try {
+      return await _selectAllRowsPaged(table);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> _trySelectAllFieldsSnapshot() async {
+    try {
+      final rows = await _selectAllFieldsPaged();
+      return rows
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+    } catch (_) {
+      return null;
+    }
   }
 
   String _tableRefreshMetaKey(String table) {
@@ -510,17 +623,20 @@ class SyncService {
     final localCount = await _local.countMatrixRowsForTable(cleanTable);
     final tableMetaKey = _tableRefreshMetaKey(cleanTable);
     final tableLastRefresh = await _local.getMetaValue(tableMetaKey);
-    final bootstrapLastSync = await _local.getMetaValue('bootstrap_last_sync_at');
-    final since = (tableLastRefresh != null && tableLastRefresh.trim().isNotEmpty)
-        ? tableLastRefresh
-        : bootstrapLastSync;
+    final bootstrapLastSync =
+        await _local.getMetaValue('bootstrap_last_sync_at');
+    final since =
+        (tableLastRefresh != null && tableLastRefresh.trim().isNotEmpty)
+            ? tableLastRefresh
+            : bootstrapLastSync;
 
     final checkpoint = DateTime.now().toUtc().toIso8601String();
 
     // Si no hay caché local de esa tabla, hacemos una carga completa segura una sola vez.
     if (localCount <= 0) {
       final rows = await _selectAllRowsPaged(cleanTable);
-      await _local.applyMatrixRowsFromPayloads({cleanTable: rows}, replaceSources: true);
+      await _local.applyMatrixRowsFromPayloads({cleanTable: rows},
+          replaceSources: true);
       final refreshedCount = await _local.countMatrixRowsForTable(cleanTable);
       await _local.upsertTableCacheInfo(
         cleanTable,
@@ -556,7 +672,8 @@ class SyncService {
       return false;
     }
 
-    await _local.applyMatrixRowsFromPayloads({cleanTable: rows}, replaceSources: false);
+    await _local
+        .applyMatrixRowsFromPayloads({cleanTable: rows}, replaceSources: false);
     final refreshedCount = await _local.countMatrixRowsForTable(cleanTable);
     await _local.upsertTableCacheInfo(
       cleanTable,
@@ -568,7 +685,8 @@ class SyncService {
     return true;
   }
 
-  Future<List<Map<String, dynamic>>> _cachedLocalFieldsForSourceDetection() async {
+  Future<List<Map<String, dynamic>>>
+      _cachedLocalFieldsForSourceDetection() async {
     try {
       final rows = await _local.getAll('local_form_fields');
       return rows.map((e) => Map<String, dynamic>.from(e)).toList();
@@ -577,8 +695,10 @@ class SyncService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _selectRowsPagedSince(String table, String? since) async {
-    if (since == null || since.trim().isEmpty) return _selectAllRowsPaged(table);
+  Future<List<Map<String, dynamic>>> _selectRowsPagedSince(
+      String table, String? since) async {
+    if (since == null || since.trim().isEmpty)
+      return _selectAllRowsPaged(table);
 
     const pageSize = 1000;
     var from = 0;
@@ -637,18 +757,52 @@ class SyncService {
     return null;
   }
 
-  Future<void> downloadAllForOffline({bool allowFullFallback = true, void Function(String message)? onProgress}) async {
+  Future<void> downloadAllForOffline(
+      {bool allowFullFallback = true,
+      void Function(String message)? onProgress}) async {
     void progress(String message) => onProgress?.call(message);
     progress('Consultando cambios...');
     await _yieldToUi();
     final syncCheckpoint = DateTime.now().toUtc().toIso8601String();
-    final previousSync = await _local.getMetaValue('bootstrap_last_sync_at');
+    final legacyCheckpoint =
+        await _local.getMetaValue('bootstrap_last_sync_at');
+    final previousConfigSync =
+        await _local.getMetaValue('sync_checkpoint_config_at') ??
+            legacyCheckpoint;
+    final previousDataSync =
+        await _local.getMetaValue('sync_checkpoint_data_at') ??
+            legacyCheckpoint;
+    final previousMatricesSync =
+        await _local.getMetaValue('sync_checkpoint_matrices_at') ??
+            legacyCheckpoint;
+    final previousPermissionsSync =
+        await _local.getMetaValue('sync_checkpoint_permissions_at') ??
+            legacyCheckpoint;
+
+    String? oldestCheckpoint(Iterable<String?> values) {
+      final dates = values
+          .whereType<String>()
+          .map(DateTime.tryParse)
+          .whereType<DateTime>()
+          .toList();
+      if (dates.isEmpty) return null;
+      dates.sort();
+      return dates.first.toUtc().toIso8601String();
+    }
+
+    final previousSync = oldestCheckpoint([
+      previousConfigSync,
+      previousDataSync,
+      previousMatricesSync,
+      previousPermissionsSync,
+    ]);
     final hasCache = await _local.hasOfflineBootstrapCache();
 
     // Primera vez: descarga completa. Si cualquiera de los dos botones ya hizo
     // esa primera descarga, el otro botón entra por incremental usando la misma
     // marca local bootstrap_last_sync_at.
-    final changedTables = hasCache ? await _changedTablesSince(previousSync) : null;
+    final changedTables =
+        hasCache ? await _changedTablesSince(previousSync) : null;
     progress('Descargando paquete incremental...');
     await _yieldToUi();
     final bootstrap = await _tryBootstrapRpc(
@@ -664,8 +818,8 @@ class SyncService {
       if (_supabase.auth.currentUser != null) {
         await downloadCatalogs(onProgress: onProgress);
         progress('Finalizando actualización...');
-    await _yieldToUi();
-    await _local.setMetaValue('bootstrap_last_sync_at', syncCheckpoint);
+        await _yieldToUi();
+        await _local.setMetaValue('bootstrap_last_sync_at', syncCheckpoint);
         return;
       }
       throw Exception(
@@ -677,12 +831,20 @@ class SyncService {
     Future<void> saveLocal(
       String table,
       List<Map<String, dynamic>> rows, {
-      bool forceReplace = false,
+      bool snapshot = false,
+      Iterable<String> deletedIds = const <String>[],
+      String? keyColumn = 'id',
     }) async {
       await _yieldToUi();
-      if (forceReplace || !incremental) {
-        if (incremental && rows.isEmpty) return;
+      if (snapshot) {
         await _local.replaceTable(table, rows);
+      } else if (keyColumn != null) {
+        await _local.applyTableDelta(
+          table,
+          rows,
+          deletedIds: deletedIds,
+          keyColumn: keyColumn,
+        );
       } else if (rows.isNotEmpty) {
         await _local.upsertTable(table, rows);
       }
@@ -693,16 +855,34 @@ class SyncService {
     var formats = _rowsFromBootstrap(bootstrap, 'formats');
     var formatTables = _rowsFromBootstrap(bootstrap, 'format_tables');
     var permissions = _rowsFromBootstrap(bootstrap, 'permissions');
-    final profiles = _rowsFromBootstrap(bootstrap, 'profiles');
+    var profiles = _rowsFromBootstrap(bootstrap, 'profiles');
     var sections = _rowsFromBootstrap(bootstrap, 'sections');
-    var sectionPermissions = _rowsFromBootstrap(bootstrap, 'section_permissions');
+    var sectionPermissions =
+        _rowsFromBootstrap(bootstrap, 'section_permissions');
     var specialFormats = _rowsFromBootstrap(bootstrap, 'special_formats');
     var fields = _rowsFromBootstrap(bootstrap, 'fields');
     final lotesVariedades = _rowsFromBootstrap(bootstrap, 'lotes_variedades');
     final plagasConceptos = _rowsFromBootstrap(bootstrap, 'plagas_conceptos');
-    final etapasFenologicas = _rowsFromBootstrap(bootstrap, 'etapas_fenologicas');
+    final etapasFenologicas =
+        _rowsFromBootstrap(bootstrap, 'etapas_fenologicas');
     final conteoEstadios = _rowsFromBootstrap(bootstrap, 'conteo_estadios');
     var dynamicViews = _rowsFromBootstrap(bootstrap, 'dynamic_views');
+    bool bootstrapSnapshot(String key) =>
+        !incremental && bootstrap[key] is List;
+    var modulesSnapshot = bootstrapSnapshot('modules');
+    var formatsSnapshot = bootstrapSnapshot('formats');
+    var formatTablesSnapshot = bootstrapSnapshot('format_tables');
+    var permissionsSnapshot = bootstrapSnapshot('permissions');
+    var profilesSnapshot = bootstrapSnapshot('profiles');
+    var sectionsSnapshot = bootstrapSnapshot('sections');
+    var sectionPermissionsSnapshot = bootstrapSnapshot('section_permissions');
+    var specialFormatsSnapshot = bootstrapSnapshot('special_formats');
+    var fieldsSnapshot = bootstrapSnapshot('fields');
+    var dynamicViewsSnapshot = bootstrapSnapshot('dynamic_views');
+    final lotesSnapshot = bootstrapSnapshot('lotes_variedades');
+    final plagasSnapshot = bootstrapSnapshot('plagas_conceptos');
+    final fenologiasSnapshot = bootstrapSnapshot('etapas_fenologicas');
+    final conteoSnapshot = bootstrapSnapshot('conteo_estadios');
     final flowRules = <Map<String, dynamic>>[
       ..._rowsFromBootstrap(bootstrap, 'flow_rules'),
       ..._rowsFromBootstrap(bootstrap, 'estados_flujo'),
@@ -721,59 +901,108 @@ class SyncService {
       'MATRIZ_VISTAS_DINAMICAS_APPGT',
       'MATRIZ_FORMATOS_ESPECIALES_APPGT',
     };
-    final lastConfigFullRefresh = await _local.getMetaValue('config_full_refresh_at');
+    final lastConfigFullRefresh =
+        await _local.getMetaValue('config_full_refresh_at');
     final lastConfigDate = DateTime.tryParse(lastConfigFullRefresh ?? '');
     final periodicSafetyRefresh = lastConfigDate == null ||
-        DateTime.now().toUtc().difference(lastConfigDate.toUtc()) >= const Duration(hours: 24);
+        DateTime.now().toUtc().difference(lastConfigDate.toUtc()) >=
+            const Duration(hours: 24);
     final configChanged = changedTables == null ||
-        changedTables.any((table) => configTables.contains(table));
-    final refreshFullConfig = !incremental || configChanged || periodicSafetyRefresh;
+        configTables.any((table) => _tableChanged(changedTables, table));
+    final refreshFullConfig =
+        !incremental || configChanged || periodicSafetyRefresh;
 
     if (refreshFullConfig) {
       progress('Actualizando configuración...');
       await _yieldToUi();
-      final results = await Future.wait<dynamic>([
-        _selectAllFieldsPaged().catchError((_) => <dynamic>[]),
-        _selectAllRowsPaged('MATRIZ_FORMATOS_APPGT').catchError((_) => <Map<String, dynamic>>[]),
-        _selectAllRowsPaged('MATRIZ_FORMATO_TABLAS_APPGT').catchError((_) => <Map<String, dynamic>>[]),
-        _selectAllRowsPaged('MATRIZ_MODULOS_APPGT').catchError((_) => <Map<String, dynamic>>[]),
-        _selectAllRowsPaged('MATRIZ_SECCIONES_APPGT').catchError((_) => <Map<String, dynamic>>[]),
-        _selectAllRowsPaged('MATRIZ_VISTAS_DINAMICAS_APPGT').catchError((_) => <Map<String, dynamic>>[]),
-        _selectAllRowsPaged('MATRIZ_FORMATOS_ESPECIALES_APPGT').catchError((_) => <Map<String, dynamic>>[]),
+      final results = await Future.wait<List<Map<String, dynamic>>?>([
+        _trySelectAllFieldsSnapshot(),
+        _trySelectAllRowsSnapshot('MATRIZ_FORMATOS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_FORMATO_TABLAS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_MODULOS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_SECCIONES_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_VISTAS_DINAMICAS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_FORMATOS_ESPECIALES_APPGT'),
       ]);
-      final forcedFields = List<dynamic>.from(results[0] as List);
-      if (forcedFields.isNotEmpty) fields = forcedFields.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
-      final forcedFormats = List<Map<String, dynamic>>.from(results[1] as List); if (forcedFormats.isNotEmpty) formats = forcedFormats;
-      final forcedFormatTables = List<Map<String, dynamic>>.from(results[2] as List); if (forcedFormatTables.isNotEmpty) formatTables = forcedFormatTables;
-      final forcedModules = List<Map<String, dynamic>>.from(results[3] as List); if (forcedModules.isNotEmpty) modules = forcedModules;
-      final forcedSections = List<Map<String, dynamic>>.from(results[4] as List); if (forcedSections.isNotEmpty) sections = forcedSections;
-      final forcedDynamicViews = List<Map<String, dynamic>>.from(results[5] as List); if (forcedDynamicViews.isNotEmpty) dynamicViews = forcedDynamicViews;
-      final forcedSpecialFormats = List<Map<String, dynamic>>.from(results[6] as List); if (forcedSpecialFormats.isNotEmpty) specialFormats = forcedSpecialFormats;
-      await _local.setMetaValue('config_full_refresh_at', syncCheckpoint);
+      final forcedFields = results[0];
+      if (forcedFields != null) {
+        fields = forcedFields;
+        fieldsSnapshot = true;
+      }
+      final forcedFormats = results[1];
+      if (forcedFormats != null) {
+        formats = forcedFormats;
+        formatsSnapshot = true;
+      }
+      final forcedFormatTables = results[2];
+      if (forcedFormatTables != null) {
+        formatTables = forcedFormatTables;
+        formatTablesSnapshot = true;
+      }
+      final forcedModules = results[3];
+      if (forcedModules != null) {
+        modules = forcedModules;
+        modulesSnapshot = true;
+      }
+      final forcedSections = results[4];
+      if (forcedSections != null) {
+        sections = forcedSections;
+        sectionsSnapshot = true;
+      }
+      final forcedDynamicViews = results[5];
+      if (forcedDynamicViews != null) {
+        dynamicViews = forcedDynamicViews;
+        dynamicViewsSnapshot = true;
+      }
+      final forcedSpecialFormats = results[6];
+      if (forcedSpecialFormats != null) {
+        specialFormats = forcedSpecialFormats;
+        specialFormatsSnapshot = true;
+      }
     }
 
     // Los permisos del usuario son pequeños y sí deben comprobarse en cada ingreso/actualización.
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId != null && currentUserId.isNotEmpty) {
-      final permissionResults = await Future.wait<dynamic>([
-        _supabase.from('PERMISOS_DE_USUARIOS_APPGT').select().eq('user_id', currentUserId).catchError((_) => <dynamic>[]),
-        _supabase.from('PERMISOS_SECCIONES_APPGT').select().eq('user_id', currentUserId).catchError((_) => <dynamic>[]),
-      ]);
-      final forcedPermissions = List<Map<String, dynamic>>.from(permissionResults[0] as List);
-      final forcedSectionPermissions = List<Map<String, dynamic>>.from(permissionResults[1] as List);
-      if (forcedPermissions.isNotEmpty) permissions = forcedPermissions;
-      if (forcedSectionPermissions.isNotEmpty) sectionPermissions = forcedSectionPermissions;
+      try {
+        final rows = await _supabase
+            .from('PERMISOS_DE_USUARIOS_APPGT')
+            .select()
+            .eq('user_id', currentUserId);
+        permissions = List<Map<String, dynamic>>.from(rows);
+        permissionsSnapshot = true;
+      } catch (_) {}
+      try {
+        final rows = await _supabase
+            .from('PERMISOS_SECCIONES_APPGT')
+            .select()
+            .eq('user_id', currentUserId);
+        sectionPermissions = List<Map<String, dynamic>>.from(rows);
+        sectionPermissionsSnapshot = true;
+      } catch (_) {}
     }
 
-    modules.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    formats.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    formatTables.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    permissions.removeWhere(_isDeletedRow);
-    sections.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    sectionPermissions.removeWhere(_isDeletedRow);
-    specialFormats.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    fields.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
-    dynamicViews.removeWhere((e) => _isDeletedRow(e) || _activeInt(e) != 1);
+    final removedModuleIds = _removedIds(modules);
+    final removedFormatIds = _removedIds(formats);
+    final removedFormatTableIds = _removedIds(formatTables);
+    final removedPermissionIds = _removedIds(permissions);
+    final removedProfileIds = _removedIds(profiles);
+    final removedSectionIds = _removedIds(sections);
+    final removedSectionPermissionIds = _removedIds(sectionPermissions);
+    final removedSpecialFormatIds = _removedIds(specialFormats);
+    final removedFieldIds = _removedIds(fields);
+    final removedDynamicViewIds = _removedIds(dynamicViews);
+
+    modules.removeWhere(_isRemovedRow);
+    formats.removeWhere(_isRemovedRow);
+    formatTables.removeWhere(_isRemovedRow);
+    permissions.removeWhere(_isRemovedRow);
+    profiles.removeWhere(_isRemovedRow);
+    sections.removeWhere(_isRemovedRow);
+    sectionPermissions.removeWhere(_isRemovedRow);
+    specialFormats.removeWhere(_isRemovedRow);
+    fields.removeWhere(_isRemovedRow);
+    dynamicViews.removeWhere(_isRemovedRow);
 
     await _yieldToUi();
     progress('Detectando catálogos necesarios...');
@@ -781,7 +1010,9 @@ class SyncService {
     final dynamicFields = List<Map<String, dynamic>>.from(fields);
     final fieldsForSourceDetection = dynamicFields.isNotEmpty
         ? dynamicFields
-        : (incremental ? await _cachedLocalFieldsForSourceDetection() : dynamicFields);
+        : (incremental
+            ? await _cachedLocalFieldsForSourceDetection()
+            : dynamicFields);
     // Los dropdowns dependen de datos completos de sus tablas fuente. Si se actualiza
     // MATRIZ_CAMPOS_FORMATO_APPGT pero la tabla fuente no aparece en APPGT_TABLAS_CAMBIADAS,
     // un incremental estricto deja catálogos vacíos/viejos. Se fuerza descarga completa
@@ -794,7 +1025,7 @@ class SyncService {
         : await _downloadDynamicSourceTables(
             fieldsForSourceDetection,
             changedTables: changedTables,
-            since: incremental ? previousSync : null,
+            since: incremental ? previousMatricesSync : null,
             forceAllSources: forceAllSourceTables,
           );
     dynamicSourceRows['SN-MATRIZ_ESTADIOS_CONTEO_FRUTA'] = conteoEstadios;
@@ -803,7 +1034,9 @@ class SyncService {
     dynamicSourceRows['LOTES_VARIEDADES_GT'] = lotesVariedades;
     final flowRulesForCache = flowRules.isNotEmpty
         ? flowRules
-        : ((!incremental || changedTables == null || _tableChanged(changedTables, 'MATRIZ_ESTADOS_FLUJO_APPGT'))
+        : ((!incremental ||
+                changedTables == null ||
+                _tableChanged(changedTables, 'MATRIZ_ESTADOS_FLUJO_APPGT'))
             ? await _downloadFlowRules()
             : <Map<String, dynamic>>[]);
     if (flowRulesForCache.isNotEmpty) {
@@ -820,10 +1053,9 @@ class SyncService {
     dynamicSourceRows.addAll(await _downloadDynamicViewDataTables(
       dynamicViewsForDataTables,
       changedTables: changedTables,
-      since: incremental ? previousSync : null,
+      since: incremental ? previousDataSync : null,
       forceAllTables: !incremental || changedTables == null,
     ));
-
 
     // Cachear tablas reales de formatos con estrategia incremental inteligente.
     // Primera descarga: completo. Siguientes actualizaciones: solo tablas marcadas
@@ -835,7 +1067,7 @@ class SyncService {
       formats,
       formatTables,
       changedTables: changedTables,
-      since: incremental ? previousSync : null,
+      since: incremental ? previousDataSync : null,
       forceAllTables: !incremental || changedTables == null,
     ));
 
@@ -852,163 +1084,244 @@ class SyncService {
     await _yieldToUi();
     await saveLocal(
       'local_modules',
-      modules.map((e) => {
-        'id': e['id'],
-        'nombre': e['nombre'],
-        'seccion': e['seccion']?.toString().trim() ?? '',
-        'orden': e['orden'] ?? 0,
-        'activo': _activeInt(e),
-      }).where((e) => (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      modules
+          .map((e) => {
+                'id': e['id'],
+                'nombre': e['nombre'],
+                'seccion': e['seccion']?.toString().trim() ?? '',
+                'orden': e['orden'] ?? 0,
+                'activo': _activeInt(e),
+              })
+          .where((e) => (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: modulesSnapshot,
+      deletedIds: removedModuleIds,
     );
 
     await saveLocal(
       'local_formats',
-      formats.map((e) => {
-        'id': e['id'],
-        'modulo_id': e['modulo_id'],
-        'nombre': e['nombre'],
-        'tabla_destino': e['tabla_destino'],
-        'ruta_flutter': e['ruta_flutter'],
-        'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
-        'orden': e['orden'] ?? 0,
-        'activo': _activeInt(e),
-      }).where((e) => (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      formats
+          .map((e) => {
+                'id': e['id'],
+                'modulo_id': e['modulo_id'],
+                'nombre': e['nombre'],
+                'tabla_destino': e['tabla_destino'],
+                'ruta_flutter': e['ruta_flutter'],
+                'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
+                'orden': e['orden'] ?? 0,
+                'activo': _activeInt(e),
+              })
+          .where((e) => (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: formatsSnapshot,
+      deletedIds: removedFormatIds,
     );
 
     await saveLocal(
       'local_format_tables',
-      formatTables.map((e) => {
-        'id': e['id'],
-        'formato_id': e['formato_id'],
-        'nombre': e['nombre'],
-        'tabla_destino': e['tabla_destino'],
-        'orden': e['orden'] ?? 0,
-        'tipo_relacion': _valueByColumn(e, ['tipo_relacion', 'tipo relacion'])?.toString(),
-        'tabla_padre': _valueByColumn(e, ['tabla_padre', 'tabla padre'])?.toString(),
-        'campo_pk_padre': _valueByColumn(e, ['campo_pk_padre', 'campo pk padre', 'pk_padre'])?.toString(),
-        'campo_fk_hijo': _valueByColumn(e, ['campo_fk_hijo', 'campo fk hijo', 'fk_hijo'])?.toString(),
-        'es_cabecera': _boolValueOrDefault(_valueByColumn(e, ['es_cabecera', 'es cabecera']), false) ? 1 : 0,
-        'es_detalle': _boolValueOrDefault(_valueByColumn(e, ['es_detalle', 'es detalle']), false) ? 1 : 0,
-        'campo_iterador': _valueByColumn(e, ['campo_iterador', 'campo iterador'])?.toString(),
-        'iterador_desde': _valueByColumn(e, ['iterador_desde', 'iterador desde']),
-        'iterador_hasta': _valueByColumn(e, ['iterador_hasta', 'iterador hasta']),
-        'copiar_campos_desde_padre': _valueByColumn(e, ['copiar_campos_desde_padre', 'copiar campos desde padre'])?.toString(),
-        'modo_captura': _valueByColumn(e, ['modo_captura', 'modo captura'])?.toString(),
-        'activo': _activeInt(e),
-      }).where((e) => (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      formatTables
+          .map((e) => {
+                'id': e['id'],
+                'formato_id': e['formato_id'],
+                'nombre': e['nombre'],
+                'tabla_destino': e['tabla_destino'],
+                'orden': e['orden'] ?? 0,
+                'tipo_relacion':
+                    _valueByColumn(e, ['tipo_relacion', 'tipo relacion'])
+                        ?.toString(),
+                'tabla_padre': _valueByColumn(e, ['tabla_padre', 'tabla padre'])
+                    ?.toString(),
+                'campo_pk_padre': _valueByColumn(
+                        e, ['campo_pk_padre', 'campo pk padre', 'pk_padre'])
+                    ?.toString(),
+                'campo_fk_hijo': _valueByColumn(
+                        e, ['campo_fk_hijo', 'campo fk hijo', 'fk_hijo'])
+                    ?.toString(),
+                'es_cabecera': _boolValueOrDefault(
+                        _valueByColumn(e, ['es_cabecera', 'es cabecera']),
+                        false)
+                    ? 1
+                    : 0,
+                'es_detalle': _boolValueOrDefault(
+                        _valueByColumn(e, ['es_detalle', 'es detalle']), false)
+                    ? 1
+                    : 0,
+                'campo_iterador':
+                    _valueByColumn(e, ['campo_iterador', 'campo iterador'])
+                        ?.toString(),
+                'iterador_desde':
+                    _valueByColumn(e, ['iterador_desde', 'iterador desde']),
+                'iterador_hasta':
+                    _valueByColumn(e, ['iterador_hasta', 'iterador hasta']),
+                'copiar_campos_desde_padre': _valueByColumn(e, [
+                  'copiar_campos_desde_padre',
+                  'copiar campos desde padre'
+                ])?.toString(),
+                'modo_captura':
+                    _valueByColumn(e, ['modo_captura', 'modo captura'])
+                        ?.toString(),
+                'activo': _activeInt(e),
+              })
+          .where((e) => (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: formatTablesSnapshot,
+      deletedIds: removedFormatTableIds,
     );
 
     await saveLocal(
       'local_permissions',
-      permissions.map((e) => {
-        'id': e['id'],
-        'user_id': e['user_id'],
-        'modulo': e['modulo'],
-        'formato': e['formato'],
-        'can_view': _boolValue(e['can_view']) ? 1 : 0,
-        'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
-        'can_update': _boolValue(e['can_update']) ? 1 : 0,
-        'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
-        'can_export': _boolValue(e['can_export']) ? 1 : 0,
-        'can_import': _boolValue(e['can_import']) ? 1 : 0,
-        'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
-        'can_complete_pending': _boolValue(e['can_complete_pending']) ? 1 : 0,
-        'seccion': e['seccion']?.toString() ?? '',
-        'campos_restringidos': e['campos_restringidos'] is List ? jsonEncode(e['campos_restringidos']) : (e['campos_restringidos']?.toString() ?? '[]'),
-        'permisos_flujo': e['permisos_flujo'] is List ? jsonEncode(e['permisos_flujo']) : (e['permisos_flujo']?.toString() ?? '[]'),
-      }).toList(),
-      forceReplace: true,
+      permissions
+          .map((e) => {
+                'id': e['id'],
+                'user_id': e['user_id'],
+                'modulo': e['modulo'],
+                'formato': e['formato'],
+                'can_view': _boolValue(e['can_view']) ? 1 : 0,
+                'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
+                'can_update': _boolValue(e['can_update']) ? 1 : 0,
+                'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
+                'can_export': _boolValue(e['can_export']) ? 1 : 0,
+                'can_import': _boolValue(e['can_import']) ? 1 : 0,
+                'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
+                'can_complete_pending':
+                    _boolValue(e['can_complete_pending']) ? 1 : 0,
+                'seccion': e['seccion']?.toString() ?? '',
+                'campos_restringidos': e['campos_restringidos'] is List
+                    ? jsonEncode(e['campos_restringidos'])
+                    : (e['campos_restringidos']?.toString() ?? '[]'),
+                'permisos_flujo': e['permisos_flujo'] is List
+                    ? jsonEncode(e['permisos_flujo'])
+                    : (e['permisos_flujo']?.toString() ?? '[]'),
+              })
+          .toList(),
+      snapshot: permissionsSnapshot,
+      deletedIds: removedPermissionIds,
     );
 
     await saveLocal(
       'local_dynamic_views',
-      List<Map<String, dynamic>>.from(dynamicViews).map((e) => {
-        'id': e['id']?.toString() ?? '${e['seccion']}_${e['modulo']}_${e['nombre_vista']}',
-        'seccion': e['seccion']?.toString() ?? '',
-        'modulo': e['modulo']?.toString() ?? '',
-        'tipo_vista': e['tipo_vista']?.toString() ?? 'tabla',
-        'tabla_destino': e['tabla_destino']?.toString() ?? '',
-        'nombre_vista': e['nombre_vista']?.toString() ?? '',
-        'estado_origen': e['estado_origen']?.toString() ?? '',
-        'estado_destino': e['estado_destino']?.toString() ?? '',
-        'filtro_estado': e['filtro_estado']?.toString() ?? '',
-        'campos_pendientes': e['campos_pendientes']?.toString() ?? '',
-        'campos_editables': e['campos_editables']?.toString() ?? '',
-        'campos_visibles': e['campos_visibles']?.toString() ?? '',
-        'requiere_todos_campos': _boolValue(e['requiere_todos_campos']) ? 1 : 0,
-        'activo': _activeInt(e),
-        'orden': e['orden'] ?? 0,
-        'payload_json': jsonEncode(e),
-      }).where((e) => (e['seccion'] as String).isNotEmpty && (e['tabla_destino'] as String).isNotEmpty && (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      List<Map<String, dynamic>>.from(dynamicViews)
+          .map((e) => {
+                'id': e['id']?.toString() ??
+                    '${e['seccion']}_${e['modulo']}_${e['nombre_vista']}',
+                'seccion': e['seccion']?.toString() ?? '',
+                'modulo': e['modulo']?.toString() ?? '',
+                'tipo_vista': e['tipo_vista']?.toString() ?? 'tabla',
+                'tabla_destino': e['tabla_destino']?.toString() ?? '',
+                'nombre_vista': e['nombre_vista']?.toString() ?? '',
+                'estado_origen': e['estado_origen']?.toString() ?? '',
+                'estado_destino': e['estado_destino']?.toString() ?? '',
+                'filtro_estado': e['filtro_estado']?.toString() ?? '',
+                'campos_pendientes': e['campos_pendientes']?.toString() ?? '',
+                'campos_editables': e['campos_editables']?.toString() ?? '',
+                'campos_visibles': e['campos_visibles']?.toString() ?? '',
+                'requiere_todos_campos':
+                    _boolValue(e['requiere_todos_campos']) ? 1 : 0,
+                'activo': _activeInt(e),
+                'orden': e['orden'] ?? 0,
+                'payload_json': jsonEncode(e),
+              })
+          .where((e) =>
+              (e['seccion'] as String).isNotEmpty &&
+              (e['tabla_destino'] as String).isNotEmpty &&
+              (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: dynamicViewsSnapshot,
+      deletedIds: removedDynamicViewIds,
     );
 
     await saveLocal(
       'local_profile',
-      profiles.map((e) => {
-        'id': e['id']?.toString() ?? '',
-        'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])?.toString() ?? '',
-        'cargo': e['cargo']?.toString() ?? '',
-        'area': e['area']?.toString() ?? '',
-        'dni': (e['dni'] ?? e['DNI'] ?? e['documento'] ?? e['DOCUMENTO'] ?? e['numero_documento'] ?? e['NUMERO_DOCUMENTO'])?.toString() ?? '',
-        'email': (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ?? '',
-        'activo': 1,
-      }).where((e) => (e['id'] as String).isNotEmpty).toList(),
+      profiles
+          .map((e) => {
+                'id': e['id']?.toString() ?? '',
+                'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])
+                        ?.toString() ??
+                    '',
+                'cargo': e['cargo']?.toString() ?? '',
+                'area': e['area']?.toString() ?? '',
+                'dni': (e['dni'] ??
+                            e['DNI'] ??
+                            e['documento'] ??
+                            e['DOCUMENTO'] ??
+                            e['numero_documento'] ??
+                            e['NUMERO_DOCUMENTO'])
+                        ?.toString() ??
+                    '',
+                'email':
+                    (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ??
+                        '',
+                'activo': 1,
+              })
+          .where((e) => (e['id'] as String).isNotEmpty)
+          .toList(),
+      snapshot: profilesSnapshot,
+      deletedIds: removedProfileIds,
     );
 
     await saveLocal(
       'local_sections',
-      sections.map((e) {
-        final id = e['id']?.toString() ?? '';
-        return {
-          'id': id,
-          'nombre': e['nombre']?.toString() ?? id,
-          'icono': e['icono']?.toString() ?? 'apps',
-          'orden': e['orden'] ?? 0,
-          'numero_decimales': e['numero_decimales'],
-          'grid_fila': e['grid_fila'],
-          'grid_columna': e['grid_columna'] ?? e['grid columna'],
-          'activo': _activeInt(e),
-        };
-      }).where((e) => (e['id'] as String).isNotEmpty && (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      sections
+          .map((e) {
+            final id = e['id']?.toString() ?? '';
+            return {
+              'id': id,
+              'nombre': e['nombre']?.toString() ?? id,
+              'icono': e['icono']?.toString() ?? 'apps',
+              'orden': e['orden'] ?? 0,
+              'numero_decimales': e['numero_decimales'],
+              'grid_fila': e['grid_fila'],
+              'grid_columna': e['grid_columna'] ?? e['grid columna'],
+              'activo': _activeInt(e),
+            };
+          })
+          .where((e) =>
+              (e['id'] as String).isNotEmpty && (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: sectionsSnapshot,
+      deletedIds: removedSectionIds,
     );
 
     await saveLocal(
       'local_section_permissions',
-      sectionPermissions.map((e) {
-        final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
-            ? e['seccion'].toString().trim()
-            : (e['seccion_id']?.toString().trim() ?? '');
-        final userId = e['user_id']?.toString() ?? '';
-        return {
-          'id': e['id']?.toString() ?? '${userId}_$sectionId',
-          'user_id': userId,
-          'seccion_id': sectionId,
-          'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
-          'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
-          'can_update': _boolValue(e['can_update']) ? 1 : 0,
-          'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
-        };
-      }).where((e) => (e['seccion_id'] as String).isNotEmpty).toList(),
-      forceReplace: true,
+      sectionPermissions
+          .map((e) {
+            final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
+                ? e['seccion'].toString().trim()
+                : (e['seccion_id']?.toString().trim() ?? '');
+            final userId = e['user_id']?.toString() ?? '';
+            return {
+              'id': e['id']?.toString() ?? '${userId}_$sectionId',
+              'user_id': userId,
+              'seccion_id': sectionId,
+              'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
+              'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
+              'can_update': _boolValue(e['can_update']) ? 1 : 0,
+              'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
+            };
+          })
+          .where((e) => (e['seccion_id'] as String).isNotEmpty)
+          .toList(),
+      snapshot: sectionPermissionsSnapshot,
+      deletedIds: removedSectionPermissionIds,
     );
 
     await saveLocal(
       'local_special_formats',
-      specialFormats.map((e) => {
-        'id': e['id'],
-        'modulo_id': e['modulo_id'],
-        'formato_id': e['formato_id'],
-        'tipo_pantalla': e['tipo_pantalla'],
-        'descripcion': e['descripcion'],
-        'activo': _activeInt(e),
-        'orden': e['orden'] ?? 0,
-      }).where((e) => (e['activo'] as int) == 1).toList(),
-      forceReplace: true,
+      specialFormats
+          .map((e) => {
+                'id': e['id'],
+                'modulo_id': e['modulo_id'],
+                'formato_id': e['formato_id'],
+                'tipo_pantalla': e['tipo_pantalla'],
+                'descripcion': e['descripcion'],
+                'activo': _activeInt(e),
+                'orden': e['orden'] ?? 0,
+              })
+          .where((e) => (e['activo'] as int) == 1)
+          .toList(),
+      snapshot: specialFormatsSnapshot,
+      deletedIds: removedSpecialFormatIds,
     );
 
     progress('Guardando matriz de campos...');
@@ -1029,92 +1342,265 @@ class SyncService {
         'id_generador': e['id_generador']?.toString(),
         'editable': e['editable'] == false ? 0 : 1,
         'visible': e['visible'] == false ? 0 : 1,
-        'visible_tabla': (_boolValueOrDefault(_valueByColumn(e, ['visible_tabla', 'visible tabla', 'visible_en_tabla', 'visible en tabla']), e['visible'] == false ? false : true) ? 1 : 0),
+        'visible_tabla': (_boolValueOrDefault(
+                _valueByColumn(e, [
+                  'visible_tabla',
+                  'visible tabla',
+                  'visible_en_tabla',
+                  'visible en tabla'
+                ]),
+                e['visible'] == false ? false : true)
+            ? 1
+            : 0),
         'requerido': _boolValue(e['requerido']) ? 1 : 0,
         'orden': e['orden'] ?? 0,
-        'numero_decimales': _valueByColumn(e, ['numero_decimales', 'numero decimales', 'decimales']),
-        'grid_fila': _valueByColumn(e, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
-        'grid_columna': _valueByColumn(e, ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
-        'grid_fila_pendientes': _valueByColumn(e, ['grid_fila_pendientes', 'grid fila pendientes', 'fila_pendientes', 'fila pendientes']),
-        'grid_columna_pendientes': _valueByColumn(e, ['grid_columna_pendientes', 'grid columna pendientes', 'columna_pendientes', 'columna pendientes']),
-        'rango_valor': _valueByColumn(e, ['rango_valor', 'rango valor', 'rango', 'validacion_rango'])?.toString(),
-        'num_caracteres': _valueByColumn(e, ['num_caracteres', 'num caracteres', 'max_caracteres', 'max caracteres']),
-        'numero_fotos': _valueByColumn(e, ['numero_fotos', 'numero fotos', 'fotos', 'max_fotos', 'max fotos']),
-        'photo_depende_de': _valueByColumn(e, ['photo_depende_de', 'photo depende de', 'depende_de_photo', 'depende de photo', 'depende_de'])?.toString(),
-        'lista_destino_photo': _valueByColumn(e, ['lista_destino_photo', 'lista destino photo', 'grupo_photo', 'grupo photo', 'lista_photo', 'lista photo'])?.toString(),
-        'orden_lista_photo': _valueByColumn(e, ['orden_lista_photo', 'orden lista photo', 'orden_photo', 'orden photo', 'orden_lista']),
-        'formato_condicional_campo': _valueByColumn(e, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional'])?.toString(),
-        'color_texto': _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])?.toString(),
-        'color_fondo': _valueByColumn(e, ['color_fondo', 'color fondo', 'fondo_color'])?.toString(),
-        'color_borde': _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])?.toString(),
-        'aplicar_formato_condicional_tabla': _boolValueOrDefault(_valueByColumn(e, ['aplicar_formato_condicional_tabla', 'aplicar formato condicional tabla', 'aplicar_condicional_tabla', 'formato_condicional_tabla']), false) ? 1 : 0,
-        'sub_titulo': _valueByColumn(e, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo'])?.toString(),
-        'fila_sub_titulo': _valueByColumn(e, ['fila_sub_titulo', 'fila sub titulo', 'fila_subtitulo', 'fila subtitulo']),
-        'grupo_captura': _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
-        'titulo1': _valueByColumn(e, ['titulo1', 'titulo_1', 'titulo v1', 'titulo_v1'])?.toString(),
-        'titulo2': _valueByColumn(e, ['titulo2', 'titulo_2', 'titulo v2', 'titulo_v2'])?.toString(),
-        'codigo1': _valueByColumn(e, ['codigo1', 'codigo_1', 'codigo v1', 'codigo_v1'])?.toString(),
-        'codigo2': _valueByColumn(e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])?.toString(),
+        'numero_decimales': _valueByColumn(
+            e, ['numero_decimales', 'numero decimales', 'decimales']),
+        'grid_fila':
+            _valueByColumn(e, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
+        'grid_columna': _valueByColumn(
+            e, ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
+        'grid_fila_pendientes': _valueByColumn(e, [
+          'grid_fila_pendientes',
+          'grid fila pendientes',
+          'fila_pendientes',
+          'fila pendientes'
+        ]),
+        'grid_columna_pendientes': _valueByColumn(e, [
+          'grid_columna_pendientes',
+          'grid columna pendientes',
+          'columna_pendientes',
+          'columna pendientes'
+        ]),
+        'rango_valor': _valueByColumn(
+                e, ['rango_valor', 'rango valor', 'rango', 'validacion_rango'])
+            ?.toString(),
+        'num_caracteres': _valueByColumn(e, [
+          'num_caracteres',
+          'num caracteres',
+          'max_caracteres',
+          'max caracteres'
+        ]),
+        'numero_fotos': _valueByColumn(e, [
+          'numero_fotos',
+          'numero fotos',
+          'fotos',
+          'max_fotos',
+          'max fotos'
+        ]),
+        'photo_depende_de': _valueByColumn(e, [
+          'photo_depende_de',
+          'photo depende de',
+          'depende_de_photo',
+          'depende de photo',
+          'depende_de'
+        ])?.toString(),
+        'lista_destino_photo': _valueByColumn(e, [
+          'lista_destino_photo',
+          'lista destino photo',
+          'grupo_photo',
+          'grupo photo',
+          'lista_photo',
+          'lista photo'
+        ])?.toString(),
+        'orden_lista_photo': _valueByColumn(e, [
+          'orden_lista_photo',
+          'orden lista photo',
+          'orden_photo',
+          'orden photo',
+          'orden_lista'
+        ]),
+        'formato_condicional_campo': _valueByColumn(e, [
+          'formato_condicional_campo',
+          'formato condicional campo',
+          'condicion_formato',
+          'condición formato',
+          'formato_condicional'
+        ])?.toString(),
+        'color_texto':
+            _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])
+                ?.toString(),
+        'color_fondo':
+            _valueByColumn(e, ['color_fondo', 'color fondo', 'fondo_color'])
+                ?.toString(),
+        'color_borde':
+            _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])
+                ?.toString(),
+        'aplicar_formato_condicional_tabla': _boolValueOrDefault(
+                _valueByColumn(e, [
+                  'aplicar_formato_condicional_tabla',
+                  'aplicar formato condicional tabla',
+                  'aplicar_condicional_tabla',
+                  'formato_condicional_tabla'
+                ]),
+                false)
+            ? 1
+            : 0,
+        'sub_titulo': _valueByColumn(
+                e, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo'])
+            ?.toString(),
+        'fila_sub_titulo': _valueByColumn(e, [
+          'fila_sub_titulo',
+          'fila sub titulo',
+          'fila_subtitulo',
+          'fila subtitulo'
+        ]),
+        'grupo_captura':
+            _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
+        'titulo1':
+            _valueByColumn(e, ['titulo1', 'titulo_1', 'titulo v1', 'titulo_v1'])
+                ?.toString(),
+        'titulo2':
+            _valueByColumn(e, ['titulo2', 'titulo_2', 'titulo v2', 'titulo_v2'])
+                ?.toString(),
+        'codigo1':
+            _valueByColumn(e, ['codigo1', 'codigo_1', 'codigo v1', 'codigo_v1'])
+                ?.toString(),
+        'codigo2':
+            _valueByColumn(e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])
+                ?.toString(),
         'activo': _activeInt(e),
       });
     }
     fieldRows.removeWhere((e) => (e['activo'] as int? ?? 1) != 1);
-    await saveLocal('local_form_fields', fieldRows, forceReplace: true);
+    await saveLocal(
+      'local_form_fields',
+      fieldRows,
+      snapshot: fieldsSnapshot,
+      deletedIds: removedFieldIds,
+    );
 
     final lotesRows = <String, Map<String, dynamic>>{};
     for (final e in lotesVariedades) {
       final turno = e['TURNO']?.toString().trim() ?? '';
       if (turno.isEmpty) continue;
-      lotesRows[turno] = {'turno': turno, 'variedad': e['VARIEDAD']?.toString().trim() ?? ''};
+      lotesRows[turno] = {
+        'turno': turno,
+        'variedad': e['VARIEDAD']?.toString().trim() ?? ''
+      };
     }
-    await saveLocal('local_lotes_variedades', lotesRows.values.toList());
-    await saveLocal('local_catalog_values', catalogValues, forceReplace: true);
+    await saveLocal(
+      'local_lotes_variedades',
+      lotesRows.values.toList(),
+      snapshot: lotesSnapshot,
+      keyColumn: null,
+    );
+    await saveLocal(
+      'local_catalog_values',
+      catalogValues,
+      snapshot: !incremental,
+      keyColumn: null,
+    );
     await _yieldToUi();
     progress('Guardando caché local de registros...');
     await _yieldToUi();
-    final fullRefreshSourceRows = <String, List<Map<String, dynamic>>>{};
-    final incrementalSourceRows = <String, List<Map<String, dynamic>>>{};
-    for (final entry in dynamicSourceRows.entries) {
-      if (_isFullRefreshConfigTable(entry.key)) {
-        fullRefreshSourceRows[entry.key] = entry.value;
-      } else {
-        incrementalSourceRows[entry.key] = entry.value;
-      }
-    }
-    await _local.applyMatrixRowsFromPayloads(incrementalSourceRows, replaceSources: !incremental);
-    await _local.applyMatrixRowsFromPayloads(fullRefreshSourceRows, replaceSources: true);
+    await _local.applyMatrixRowsFromPayloads(
+      dynamicSourceRows,
+      replaceSources: !incremental,
+    );
     await _yieldToUi();
 
     final conceptoRows = <String, Map<String, dynamic>>{};
     for (final e in plagasConceptos) {
       final concepto = _valueByColumn(e, ['CONCEPTO'])?.toString().trim() ?? '';
-      final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+      final estadio = _valueByColumn(e, [
+            'ESTADIO O TIPO',
+            'ESTADIOS O TIPOS',
+            'ESTADIOS O TIPO',
+            'ESTADIO_O_TIPO',
+            'ESTADIOS_O_TIPOS',
+            'ESTADIO',
+            'TIPO'
+          ])?.toString().trim() ??
+          '';
       if (concepto.isEmpty || estadio.isEmpty) continue;
       final id = '$concepto$estadio';
-      conceptoRows[id] = {'id': id, 'concepto': concepto, 'estadio': estadio, 'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? ''};
+      conceptoRows[id] = {
+        'id': id,
+        'concepto': concepto,
+        'estadio': estadio,
+        'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? ''
+      };
     }
-    await saveLocal('local_plagas_conceptos', conceptoRows.values.toList());
+    await saveLocal(
+      'local_plagas_conceptos',
+      conceptoRows.values.toList(),
+      snapshot: plagasSnapshot,
+    );
 
     final fenologiaRows = <String, Map<String, dynamic>>{};
     for (final e in etapasFenologicas) {
-      final etapa = _valueByColumn(e, ['ETAPA_FENOLOGICA', 'ETAPA FENOLOGICA', 'ETAPA FENOLÓGICA', 'FENOLOGIA', 'FENOLOGÍA', 'FENOLOGICA', 'FENOLÓGICA', 'ETAPA'])?.toString().trim() ?? '';
+      final etapa = _valueByColumn(e, [
+            'ETAPA_FENOLOGICA',
+            'ETAPA FENOLOGICA',
+            'ETAPA FENOLÓGICA',
+            'FENOLOGIA',
+            'FENOLOGÍA',
+            'FENOLOGICA',
+            'FENOLÓGICA',
+            'ETAPA'
+          ])?.toString().trim() ??
+          '';
       if (etapa.isEmpty) continue;
       fenologiaRows[etapa] = {'etapa_fenologica': etapa};
     }
-    await saveLocal('local_fenologias', fenologiaRows.isNotEmpty ? fenologiaRows.values.toList() : _fallbackFenologiaRows());
+    await saveLocal(
+      'local_fenologias',
+      fenologiaRows.isNotEmpty
+          ? fenologiaRows.values.toList()
+          : (fenologiasSnapshot
+              ? _fallbackFenologiaRows()
+              : <Map<String, dynamic>>[]),
+      snapshot: fenologiasSnapshot,
+      keyColumn: 'etapa_fenologica',
+    );
 
     final conteoRows = <String, Map<String, dynamic>>{};
     for (final e in conteoEstadios) {
-      final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+      final estadio = _valueByColumn(e, [
+            'ESTADIO O TIPO',
+            'ESTADIOS O TIPOS',
+            'ESTADIOS O TIPO',
+            'ESTADIO_O_TIPO',
+            'ESTADIOS_O_TIPOS',
+            'ESTADIO',
+            'TIPO'
+          ])?.toString().trim() ??
+          '';
       if (estadio.isEmpty) continue;
-      conteoRows[estadio] = {'estadio': estadio, 'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? ''};
+      conteoRows[estadio] = {
+        'estadio': estadio,
+        'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? ''
+      };
     }
-    await saveLocal('local_conteo_estadios', conteoRows.values.toList());
+    await saveLocal(
+      'local_conteo_estadios',
+      conteoRows.values.toList(),
+      snapshot: conteoSnapshot,
+      keyColumn: 'estadio',
+    );
     progress('Finalizando actualización...');
     await _yieldToUi();
-    await _local.setMetaValue('bootstrap_last_sync_at', syncCheckpoint);
+    final fullConfigSnapshotReady = modulesSnapshot &&
+        formatsSnapshot &&
+        formatTablesSnapshot &&
+        sectionsSnapshot &&
+        specialFormatsSnapshot &&
+        fieldsSnapshot &&
+        dynamicViewsSnapshot;
+    final checkpoints = <String, String>{
+      'bootstrap_last_sync_at': syncCheckpoint,
+      'sync_checkpoint_config_at': syncCheckpoint,
+      'sync_checkpoint_data_at': syncCheckpoint,
+      'sync_checkpoint_permissions_at': syncCheckpoint,
+      'sync_checkpoint_matrices_at': syncCheckpoint,
+      'sync_schema_version': '26',
+    };
+    if (refreshFullConfig && fullConfigSnapshotReady) {
+      checkpoints['config_full_refresh_at'] = syncCheckpoint;
+    }
+    await _local.setMetaValues(checkpoints);
   }
-
 
   Future<void> refreshLoginPermissionsOnly() async {
     final user = _supabase.auth.currentUser;
@@ -1137,65 +1623,100 @@ class SyncService {
 
     final profiles = List<Map<String, dynamic>>.from(profileRows as List);
     final permissions = List<Map<String, dynamic>>.from(permissionRows as List);
-    final sectionPermissions = List<Map<String, dynamic>>.from(sectionPermissionRows as List);
+    final sectionPermissions =
+        List<Map<String, dynamic>>.from(sectionPermissionRows as List);
 
     await _local.upsertTable(
       'local_profile',
-      profiles.map((e) => {
-        'id': e['id']?.toString() ?? '',
-        'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])?.toString() ?? '',
-        'cargo': e['cargo']?.toString() ?? '',
-        'area': e['area']?.toString() ?? '',
-        'dni': (e['dni'] ?? e['DNI'] ?? e['documento'] ?? e['DOCUMENTO'] ?? e['numero_documento'] ?? e['NUMERO_DOCUMENTO'])?.toString() ?? '',
-        'email': (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ?? '',
-        'activo': 1,
-      }).where((e) => (e['id'] as String).isNotEmpty).toList(),
+      profiles
+          .map((e) => {
+                'id': e['id']?.toString() ?? '',
+                'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])
+                        ?.toString() ??
+                    '',
+                'cargo': e['cargo']?.toString() ?? '',
+                'area': e['area']?.toString() ?? '',
+                'dni': (e['dni'] ??
+                            e['DNI'] ??
+                            e['documento'] ??
+                            e['DOCUMENTO'] ??
+                            e['numero_documento'] ??
+                            e['NUMERO_DOCUMENTO'])
+                        ?.toString() ??
+                    '',
+                'email':
+                    (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ??
+                        '',
+                'activo': 1,
+              })
+          .where((e) => (e['id'] as String).isNotEmpty)
+          .toList(),
     );
 
-    await _local.upsertTable(
+    await _local.replaceRowsWhere(
       'local_permissions',
-      permissions.map((e) => {
-        'id': e['id'],
-        'user_id': e['user_id'],
-        'modulo': e['modulo'],
-        'formato': e['formato'],
-        'can_view': _boolValue(e['can_view']) ? 1 : 0,
-        'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
-        'can_update': _boolValue(e['can_update']) ? 1 : 0,
-        'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
-        'can_export': _boolValue(e['can_export']) ? 1 : 0,
-        'can_import': _boolValue(e['can_import']) ? 1 : 0,
-        'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
-        'can_complete_pending': _boolValue(e['can_complete_pending']) ? 1 : 0,
-        'seccion': e['seccion']?.toString() ?? '',
-        'campos_restringidos': e['campos_restringidos'] is List ? jsonEncode(e['campos_restringidos']) : (e['campos_restringidos']?.toString() ?? '[]'),
-        'permisos_flujo': e['permisos_flujo'] is List ? jsonEncode(e['permisos_flujo']) : (e['permisos_flujo']?.toString() ?? '[]'),
-      }).toList(),
+      permissions
+          .map((e) => {
+                'id': e['id'],
+                'user_id': e['user_id'],
+                'modulo': e['modulo'],
+                'formato': e['formato'],
+                'can_view': _boolValue(e['can_view']) ? 1 : 0,
+                'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
+                'can_update': _boolValue(e['can_update']) ? 1 : 0,
+                'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
+                'can_export': _boolValue(e['can_export']) ? 1 : 0,
+                'can_import': _boolValue(e['can_import']) ? 1 : 0,
+                'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
+                'can_complete_pending':
+                    _boolValue(e['can_complete_pending']) ? 1 : 0,
+                'seccion': e['seccion']?.toString() ?? '',
+                'campos_restringidos': e['campos_restringidos'] is List
+                    ? jsonEncode(e['campos_restringidos'])
+                    : (e['campos_restringidos']?.toString() ?? '[]'),
+                'permisos_flujo': e['permisos_flujo'] is List
+                    ? jsonEncode(e['permisos_flujo'])
+                    : (e['permisos_flujo']?.toString() ?? '[]'),
+              })
+          .where((e) => e['id'] != null)
+          .toList(),
+      where: 'user_id = ?',
+      whereArgs: [user.id],
     );
 
-    await _local.upsertTable(
+    await _local.replaceRowsWhere(
       'local_section_permissions',
-      sectionPermissions.map((e) {
-        final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
-            ? e['seccion'].toString().trim()
-            : (e['seccion_id']?.toString().trim() ?? '');
-        final userId = e['user_id']?.toString() ?? '';
-        return {
-          'id': e['id']?.toString() ?? '${userId}_$sectionId',
-          'user_id': userId,
-          'seccion_id': sectionId,
-          'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
-          'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
-          'can_update': _boolValue(e['can_update']) ? 1 : 0,
-          'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
-        };
-      }).where((e) => (e['seccion_id'] as String).isNotEmpty).toList(),
+      sectionPermissions
+          .map((e) {
+            final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
+                ? e['seccion'].toString().trim()
+                : (e['seccion_id']?.toString().trim() ?? '');
+            final userId = e['user_id']?.toString() ?? '';
+            return {
+              'id': e['id']?.toString() ?? '${userId}_$sectionId',
+              'user_id': userId,
+              'seccion_id': sectionId,
+              'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
+              'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
+              'can_update': _boolValue(e['can_update']) ? 1 : 0,
+              'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
+            };
+          })
+          .where((e) => (e['seccion_id'] as String).isNotEmpty)
+          .toList(),
+      where: 'user_id = ?',
+      whereArgs: [user.id],
     );
 
-    await _local.setMetaValue('permissions_last_check_at', DateTime.now().toUtc().toIso8601String());
+    final checkpoint = DateTime.now().toUtc().toIso8601String();
+    await _local.setMetaValues({
+      'permissions_last_check_at': checkpoint,
+      'sync_checkpoint_permissions_at': checkpoint,
+    });
   }
 
-  Future<void> downloadCatalogs({void Function(String message)? onProgress}) async {
+  Future<void> downloadCatalogs(
+      {void Function(String message)? onProgress}) async {
     void progress(String message) => onProgress?.call(message);
     final user = _supabase.auth.currentUser;
     if (user == null) throw Exception('Usuario no autenticado');
@@ -1206,10 +1727,8 @@ class SyncService {
         .eq('activo', true)
         .order('orden');
 
-    final formats = await _supabase
-        .from('MATRIZ_FORMATOS_APPGT')
-        .select()
-        .order('orden');
+    final formats =
+        await _supabase.from('MATRIZ_FORMATOS_APPGT').select().order('orden');
 
     final formatTables = await _supabase
         .from('MATRIZ_FORMATO_TABLAS_APPGT')
@@ -1279,7 +1798,6 @@ class SyncService {
       fields = [];
     }
 
-
     progress('Detectando catálogos necesarios...');
     await _yieldToUi();
     final dynamicFields = List<Map<String, dynamic>>.from(fields);
@@ -1308,7 +1826,8 @@ class SyncService {
     List<dynamic> conteoEstadios = [];
     try {
       // Se descarga paginado y con select completo para no depender de nombres de columnas con espacios/comillas.
-      conteoEstadios = await _selectAllRowsPaged('SN-MATRIZ_ESTADIOS_CONTEO_FRUTA');
+      conteoEstadios =
+          await _selectAllRowsPaged('SN-MATRIZ_ESTADIOS_CONTEO_FRUTA');
     } catch (_) {
       conteoEstadios = await _safeSelect(
         'SN-MATRIZ_ESTADIOS_CONTEO_FRUTA',
@@ -1316,10 +1835,14 @@ class SyncService {
       );
     }
 
-    dynamicSourceRows['SN-MATRIZ_ESTADIOS_CONTEO_FRUTA'] = List<Map<String, dynamic>>.from(conteoEstadios);
-    dynamicSourceRows['SN-MATRIZ_CONCEPTOS_ESTADIOS_PLAGAS'] = List<Map<String, dynamic>>.from(plagasConceptos);
-    dynamicSourceRows['SN-MATRIZ_ETAPAS_FENOLOGICAS'] = List<Map<String, dynamic>>.from(etapasFenologicas);
-    dynamicSourceRows['LOTES_VARIEDADES_GT'] = List<Map<String, dynamic>>.from(lotesVariedades);
+    dynamicSourceRows['SN-MATRIZ_ESTADIOS_CONTEO_FRUTA'] =
+        List<Map<String, dynamic>>.from(conteoEstadios);
+    dynamicSourceRows['SN-MATRIZ_CONCEPTOS_ESTADIOS_PLAGAS'] =
+        List<Map<String, dynamic>>.from(plagasConceptos);
+    dynamicSourceRows['SN-MATRIZ_ETAPAS_FENOLOGICAS'] =
+        List<Map<String, dynamic>>.from(etapasFenologicas);
+    dynamicSourceRows['LOTES_VARIEDADES_GT'] =
+        List<Map<String, dynamic>>.from(lotesVariedades);
     if (flowRulesForCache.isNotEmpty) {
       dynamicSourceRows['MATRIZ_ESTADOS_FLUJO_APPGT'] = flowRulesForCache;
     }
@@ -1328,7 +1851,8 @@ class SyncService {
     final dynamicViewsForDataTables = dynamicViews.isNotEmpty
         ? List<Map<String, dynamic>>.from(dynamicViews)
         : await _local.getAll('local_dynamic_views');
-    dynamicSourceRows.addAll(await _downloadDynamicViewDataTables(dynamicViewsForDataTables));
+    dynamicSourceRows.addAll(
+        await _downloadDynamicViewDataTables(dynamicViewsForDataTables));
 
     await _yieldToUi();
     final catalogValues = <Map<String, dynamic>>[
@@ -1338,155 +1862,219 @@ class SyncService {
 
     await _local.replaceTable(
       'local_modules',
-      List<Map<String, dynamic>>.from(modules).map((e) => {
-        'id': e['id'],
-        'nombre': e['nombre'],
-        'seccion': e['seccion']?.toString().trim() ?? '',
-        'orden': e['orden'] ?? 0,
-        'activo': _activeInt(e),
-      }).toList(),
+      List<Map<String, dynamic>>.from(modules)
+          .map((e) => {
+                'id': e['id'],
+                'nombre': e['nombre'],
+                'seccion': e['seccion']?.toString().trim() ?? '',
+                'orden': e['orden'] ?? 0,
+                'activo': _activeInt(e),
+              })
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_formats',
-      List<Map<String, dynamic>>.from(formats).map((e) => {
-        'id': e['id'],
-        'modulo_id': e['modulo_id'],
-        'nombre': e['nombre'],
-        'tabla_destino': e['tabla_destino'],
-        'ruta_flutter': e['ruta_flutter'],
-        'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
-        'orden': e['orden'] ?? 0,
-        'activo': 1,
-      }).toList(),
+      List<Map<String, dynamic>>.from(formats)
+          .map((e) => {
+                'id': e['id'],
+                'modulo_id': e['modulo_id'],
+                'nombre': e['nombre'],
+                'tabla_destino': e['tabla_destino'],
+                'ruta_flutter': e['ruta_flutter'],
+                'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
+                'orden': e['orden'] ?? 0,
+                'activo': 1,
+              })
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_format_tables',
-      List<Map<String, dynamic>>.from(formatTables).map((e) => {
-        'id': e['id'],
-        'formato_id': e['formato_id'],
-        'nombre': e['nombre'],
-        'tabla_destino': e['tabla_destino'],
-        'orden': e['orden'] ?? 0,
-        'tipo_relacion': _valueByColumn(e, ['tipo_relacion', 'tipo relacion'])?.toString(),
-        'tabla_padre': _valueByColumn(e, ['tabla_padre', 'tabla padre'])?.toString(),
-        'campo_pk_padre': _valueByColumn(e, ['campo_pk_padre', 'campo pk padre', 'pk_padre'])?.toString(),
-        'campo_fk_hijo': _valueByColumn(e, ['campo_fk_hijo', 'campo fk hijo', 'fk_hijo'])?.toString(),
-        'es_cabecera': _boolValueOrDefault(_valueByColumn(e, ['es_cabecera', 'es cabecera']), false) ? 1 : 0,
-        'es_detalle': _boolValueOrDefault(_valueByColumn(e, ['es_detalle', 'es detalle']), false) ? 1 : 0,
-        'campo_iterador': _valueByColumn(e, ['campo_iterador', 'campo iterador'])?.toString(),
-        'iterador_desde': _valueByColumn(e, ['iterador_desde', 'iterador desde']),
-        'iterador_hasta': _valueByColumn(e, ['iterador_hasta', 'iterador hasta']),
-        'copiar_campos_desde_padre': _valueByColumn(e, ['copiar_campos_desde_padre', 'copiar campos desde padre'])?.toString(),
-        'modo_captura': _valueByColumn(e, ['modo_captura', 'modo captura'])?.toString(),
-        'activo': _activeInt(e),
-      }).toList(),
+      List<Map<String, dynamic>>.from(formatTables)
+          .map((e) => {
+                'id': e['id'],
+                'formato_id': e['formato_id'],
+                'nombre': e['nombre'],
+                'tabla_destino': e['tabla_destino'],
+                'orden': e['orden'] ?? 0,
+                'tipo_relacion':
+                    _valueByColumn(e, ['tipo_relacion', 'tipo relacion'])
+                        ?.toString(),
+                'tabla_padre': _valueByColumn(e, ['tabla_padre', 'tabla padre'])
+                    ?.toString(),
+                'campo_pk_padre': _valueByColumn(
+                        e, ['campo_pk_padre', 'campo pk padre', 'pk_padre'])
+                    ?.toString(),
+                'campo_fk_hijo': _valueByColumn(
+                        e, ['campo_fk_hijo', 'campo fk hijo', 'fk_hijo'])
+                    ?.toString(),
+                'es_cabecera': _boolValueOrDefault(
+                        _valueByColumn(e, ['es_cabecera', 'es cabecera']),
+                        false)
+                    ? 1
+                    : 0,
+                'es_detalle': _boolValueOrDefault(
+                        _valueByColumn(e, ['es_detalle', 'es detalle']), false)
+                    ? 1
+                    : 0,
+                'campo_iterador':
+                    _valueByColumn(e, ['campo_iterador', 'campo iterador'])
+                        ?.toString(),
+                'iterador_desde':
+                    _valueByColumn(e, ['iterador_desde', 'iterador desde']),
+                'iterador_hasta':
+                    _valueByColumn(e, ['iterador_hasta', 'iterador hasta']),
+                'copiar_campos_desde_padre': _valueByColumn(e, [
+                  'copiar_campos_desde_padre',
+                  'copiar campos desde padre'
+                ])?.toString(),
+                'modo_captura':
+                    _valueByColumn(e, ['modo_captura', 'modo captura'])
+                        ?.toString(),
+                'activo': _activeInt(e),
+              })
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_permissions',
-      List<Map<String, dynamic>>.from(permissions).map((e) => {
-        'id': e['id'],
-        'user_id': e['user_id'],
-        'modulo': e['modulo'],
-        'formato': e['formato'],
-        'can_view': _boolValue(e['can_view']) ? 1 : 0,
-        'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
-        'can_update': _boolValue(e['can_update']) ? 1 : 0,
-        'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
-        'can_export': _boolValue(e['can_export']) ? 1 : 0,
-        'can_import': _boolValue(e['can_import']) ? 1 : 0,
-        'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
-        'can_complete_pending': _boolValue(e['can_complete_pending']) ? 1 : 0,
-        'seccion': e['seccion']?.toString() ?? '',
-        'campos_restringidos': e['campos_restringidos'] is List ? jsonEncode(e['campos_restringidos']) : (e['campos_restringidos']?.toString() ?? '[]'),
-        'permisos_flujo': e['permisos_flujo'] is List ? jsonEncode(e['permisos_flujo']) : (e['permisos_flujo']?.toString() ?? '[]'),
-      }).toList(),
+      List<Map<String, dynamic>>.from(permissions)
+          .map((e) => {
+                'id': e['id'],
+                'user_id': e['user_id'],
+                'modulo': e['modulo'],
+                'formato': e['formato'],
+                'can_view': _boolValue(e['can_view']) ? 1 : 0,
+                'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
+                'can_update': _boolValue(e['can_update']) ? 1 : 0,
+                'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
+                'can_export': _boolValue(e['can_export']) ? 1 : 0,
+                'can_import': _boolValue(e['can_import']) ? 1 : 0,
+                'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
+                'can_complete_pending':
+                    _boolValue(e['can_complete_pending']) ? 1 : 0,
+                'seccion': e['seccion']?.toString() ?? '',
+                'campos_restringidos': e['campos_restringidos'] is List
+                    ? jsonEncode(e['campos_restringidos'])
+                    : (e['campos_restringidos']?.toString() ?? '[]'),
+                'permisos_flujo': e['permisos_flujo'] is List
+                    ? jsonEncode(e['permisos_flujo'])
+                    : (e['permisos_flujo']?.toString() ?? '[]'),
+              })
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_dynamic_views',
-      List<Map<String, dynamic>>.from(dynamicViews).map((e) => {
-        'id': e['id']?.toString() ?? '${e['seccion']}_${e['modulo']}_${e['nombre_vista']}',
-        'seccion': e['seccion']?.toString() ?? '',
-        'modulo': e['modulo']?.toString() ?? '',
-        'tipo_vista': e['tipo_vista']?.toString() ?? 'tabla',
-        'tabla_destino': e['tabla_destino']?.toString() ?? '',
-        'nombre_vista': e['nombre_vista']?.toString() ?? '',
-        'estado_origen': e['estado_origen']?.toString() ?? '',
-        'estado_destino': e['estado_destino']?.toString() ?? '',
-        'filtro_estado': e['filtro_estado']?.toString() ?? '',
-        'campos_pendientes': e['campos_pendientes']?.toString() ?? '',
-        'campos_editables': e['campos_editables']?.toString() ?? '',
-        'campos_visibles': e['campos_visibles']?.toString() ?? '',
-        'requiere_todos_campos': _boolValue(e['requiere_todos_campos']) ? 1 : 0,
-        'activo': (e['activo'] == false ? false : true) ? 1 : 0,
-        'orden': e['orden'] ?? 0,
-        'payload_json': jsonEncode(e),
-      }).where((e) => (e['seccion'] as String).isNotEmpty && (e['tabla_destino'] as String).isNotEmpty).toList(),
+      List<Map<String, dynamic>>.from(dynamicViews)
+          .map((e) => {
+                'id': e['id']?.toString() ??
+                    '${e['seccion']}_${e['modulo']}_${e['nombre_vista']}',
+                'seccion': e['seccion']?.toString() ?? '',
+                'modulo': e['modulo']?.toString() ?? '',
+                'tipo_vista': e['tipo_vista']?.toString() ?? 'tabla',
+                'tabla_destino': e['tabla_destino']?.toString() ?? '',
+                'nombre_vista': e['nombre_vista']?.toString() ?? '',
+                'estado_origen': e['estado_origen']?.toString() ?? '',
+                'estado_destino': e['estado_destino']?.toString() ?? '',
+                'filtro_estado': e['filtro_estado']?.toString() ?? '',
+                'campos_pendientes': e['campos_pendientes']?.toString() ?? '',
+                'campos_editables': e['campos_editables']?.toString() ?? '',
+                'campos_visibles': e['campos_visibles']?.toString() ?? '',
+                'requiere_todos_campos':
+                    _boolValue(e['requiere_todos_campos']) ? 1 : 0,
+                'activo': (e['activo'] == false ? false : true) ? 1 : 0,
+                'orden': e['orden'] ?? 0,
+                'payload_json': jsonEncode(e),
+              })
+          .where((e) =>
+              (e['seccion'] as String).isNotEmpty &&
+              (e['tabla_destino'] as String).isNotEmpty)
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_profile',
-      List<Map<String, dynamic>>.from(profiles).map((e) => {
-        'id': e['id']?.toString() ?? user.id,
-        'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])?.toString() ?? '',
-        'cargo': e['cargo']?.toString() ?? '',
-        'area': e['area']?.toString() ?? '',
-        'dni': (e['dni'] ?? e['DNI'] ?? e['documento'] ?? e['DOCUMENTO'] ?? e['numero_documento'] ?? e['NUMERO_DOCUMENTO'])?.toString() ?? '',
-        'email': (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ?? '',
-        'activo': 1,
-      }).toList(),
+      List<Map<String, dynamic>>.from(profiles)
+          .map((e) => {
+                'id': e['id']?.toString() ?? user.id,
+                'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])
+                        ?.toString() ??
+                    '',
+                'cargo': e['cargo']?.toString() ?? '',
+                'area': e['area']?.toString() ?? '',
+                'dni': (e['dni'] ??
+                            e['DNI'] ??
+                            e['documento'] ??
+                            e['DOCUMENTO'] ??
+                            e['numero_documento'] ??
+                            e['NUMERO_DOCUMENTO'])
+                        ?.toString() ??
+                    '',
+                'email':
+                    (e['email'] ?? e['correo'] ?? e['CORREO'])?.toString() ??
+                        '',
+                'activo': 1,
+              })
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_sections',
-      List<Map<String, dynamic>>.from(sections).map((e) {
-        final id = e['id']?.toString() ?? '';
-        return {
-          'id': id,
-          'nombre': e['nombre']?.toString() ?? id,
-          'icono': e['icono']?.toString() ?? 'apps',
-          'orden': e['orden'] ?? 0,
-          'numero_decimales': e['numero_decimales'],
-          'grid_fila': e['grid_fila'],
-          'grid_columna': e['grid_columna'] ?? e['grid columna'],
-          'activo': 1,
-        };
-      }).where((e) => (e['id'] as String).isNotEmpty).toList(),
+      List<Map<String, dynamic>>.from(sections)
+          .map((e) {
+            final id = e['id']?.toString() ?? '';
+            return {
+              'id': id,
+              'nombre': e['nombre']?.toString() ?? id,
+              'icono': e['icono']?.toString() ?? 'apps',
+              'orden': e['orden'] ?? 0,
+              'numero_decimales': e['numero_decimales'],
+              'grid_fila': e['grid_fila'],
+              'grid_columna': e['grid_columna'] ?? e['grid columna'],
+              'activo': 1,
+            };
+          })
+          .where((e) => (e['id'] as String).isNotEmpty)
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_section_permissions',
-      List<Map<String, dynamic>>.from(sectionPermissions).map((e) {
-        final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
-            ? e['seccion'].toString().trim()
-            : (e['seccion_id']?.toString().trim() ?? '');
-        final userId = e['user_id']?.toString() ?? '';
-        return {
-          'id': e['id']?.toString() ?? '${userId}_$sectionId',
-          'user_id': userId,
-          'seccion_id': sectionId,
-          'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
-          'can_insert': e['can_insert'] == true ? 1 : 0,
-          'can_update': e['can_update'] == true ? 1 : 0,
-          'can_delete': e['can_delete'] == true ? 1 : 0,
-        };
-      }).where((e) => (e['seccion_id'] as String).isNotEmpty).toList(),
+      List<Map<String, dynamic>>.from(sectionPermissions)
+          .map((e) {
+            final sectionId = e['seccion']?.toString().trim().isNotEmpty == true
+                ? e['seccion'].toString().trim()
+                : (e['seccion_id']?.toString().trim() ?? '');
+            final userId = e['user_id']?.toString() ?? '';
+            return {
+              'id': e['id']?.toString() ?? '${userId}_$sectionId',
+              'user_id': userId,
+              'seccion_id': sectionId,
+              'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
+              'can_insert': e['can_insert'] == true ? 1 : 0,
+              'can_update': e['can_update'] == true ? 1 : 0,
+              'can_delete': e['can_delete'] == true ? 1 : 0,
+            };
+          })
+          .where((e) => (e['seccion_id'] as String).isNotEmpty)
+          .toList(),
     );
 
     await _local.replaceTable(
       'local_special_formats',
-      List<Map<String, dynamic>>.from(specialFormats).map((e) => {
-        'id': e['id'],
-        'modulo_id': e['modulo_id'],
-        'formato_id': e['formato_id'],
-        'tipo_pantalla': e['tipo_pantalla'],
-        'descripcion': e['descripcion'],
-        'activo': 1,
-        'orden': e['orden'] ?? 0,
-      }).toList(),
+      List<Map<String, dynamic>>.from(specialFormats)
+          .map((e) => {
+                'id': e['id'],
+                'modulo_id': e['modulo_id'],
+                'formato_id': e['formato_id'],
+                'tipo_pantalla': e['tipo_pantalla'],
+                'descripcion': e['descripcion'],
+                'activo': 1,
+                'orden': e['orden'] ?? 0,
+              })
+          .toList(),
     );
 
     progress('Guardando matriz de campos...');
@@ -1507,30 +2095,111 @@ class SyncService {
           'id_generador': e['id_generador']?.toString(),
           'editable': e['editable'] == false ? 0 : 1,
           'visible': e['visible'] == false ? 0 : 1,
-          'visible_tabla': (_boolValueOrDefault(_valueByColumn(e, ['visible_tabla', 'visible tabla', 'visible_en_tabla', 'visible en tabla']), e['visible'] == false ? false : true) ? 1 : 0),
-          'requerido': e['requerido'] == true ? 1 : (e['requerido'] == 1 ? 1 : 0),
+          'visible_tabla': (_boolValueOrDefault(
+                  _valueByColumn(e, [
+                    'visible_tabla',
+                    'visible tabla',
+                    'visible_en_tabla',
+                    'visible en tabla'
+                  ]),
+                  e['visible'] == false ? false : true)
+              ? 1
+              : 0),
+          'requerido':
+              e['requerido'] == true ? 1 : (e['requerido'] == 1 ? 1 : 0),
           'orden': e['orden'] ?? 0,
-          'numero_decimales': _valueByColumn(e, ['numero_decimales', 'numero decimales', 'decimales']),
-          'grid_fila': _valueByColumn(e, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
-          'grid_columna': _valueByColumn(e, ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
-          'rango_valor': _valueByColumn(e, ['rango_valor', 'rango valor', 'rango', 'validacion_rango'])?.toString(),
-          'num_caracteres': _valueByColumn(e, ['num_caracteres', 'num caracteres', 'max_caracteres', 'max caracteres']),
-          'numero_fotos': _valueByColumn(e, ['numero_fotos', 'numero fotos', 'fotos', 'max_fotos', 'max fotos']),
-          'photo_depende_de': _valueByColumn(e, ['photo_depende_de', 'photo depende de', 'depende_de_photo', 'depende de photo', 'depende_de'])?.toString(),
-          'lista_destino_photo': _valueByColumn(e, ['lista_destino_photo', 'lista destino photo', 'grupo_photo', 'grupo photo', 'lista_photo', 'lista photo'])?.toString(),
-          'orden_lista_photo': _valueByColumn(e, ['orden_lista_photo', 'orden lista photo', 'orden_photo', 'orden photo', 'orden_lista']),
-          'formato_condicional_campo': _valueByColumn(e, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional'])?.toString(),
-          'color_texto': _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])?.toString(),
-          'color_fondo': _valueByColumn(e, ['color_fondo', 'color fondo', 'fondo_color'])?.toString(),
-          'color_borde': _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])?.toString(),
-          'aplicar_formato_condicional_tabla': _boolValueOrDefault(_valueByColumn(e, ['aplicar_formato_condicional_tabla', 'aplicar formato condicional tabla', 'aplicar_condicional_tabla', 'formato_condicional_tabla']), false) ? 1 : 0,
-          'sub_titulo': _valueByColumn(e, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo'])?.toString(),
-          'fila_sub_titulo': _valueByColumn(e, ['fila_sub_titulo', 'fila sub titulo', 'fila_subtitulo', 'fila subtitulo']),
-          'grupo_captura': _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
-          'titulo1': _valueByColumn(e, ['titulo1', 'titulo_1', 'titulo v1', 'titulo_v1'])?.toString(),
-          'titulo2': _valueByColumn(e, ['titulo2', 'titulo_2', 'titulo v2', 'titulo_v2'])?.toString(),
-          'codigo1': _valueByColumn(e, ['codigo1', 'codigo_1', 'codigo v1', 'codigo_v1'])?.toString(),
-          'codigo2': _valueByColumn(e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])?.toString(),
+          'numero_decimales': _valueByColumn(
+              e, ['numero_decimales', 'numero decimales', 'decimales']),
+          'grid_fila': _valueByColumn(
+              e, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
+          'grid_columna': _valueByColumn(
+              e, ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
+          'rango_valor': _valueByColumn(e, [
+            'rango_valor',
+            'rango valor',
+            'rango',
+            'validacion_rango'
+          ])?.toString(),
+          'num_caracteres': _valueByColumn(e, [
+            'num_caracteres',
+            'num caracteres',
+            'max_caracteres',
+            'max caracteres'
+          ]),
+          'numero_fotos': _valueByColumn(e, [
+            'numero_fotos',
+            'numero fotos',
+            'fotos',
+            'max_fotos',
+            'max fotos'
+          ]),
+          'photo_depende_de': _valueByColumn(e, [
+            'photo_depende_de',
+            'photo depende de',
+            'depende_de_photo',
+            'depende de photo',
+            'depende_de'
+          ])?.toString(),
+          'lista_destino_photo': _valueByColumn(e, [
+            'lista_destino_photo',
+            'lista destino photo',
+            'grupo_photo',
+            'grupo photo',
+            'lista_photo',
+            'lista photo'
+          ])?.toString(),
+          'orden_lista_photo': _valueByColumn(e, [
+            'orden_lista_photo',
+            'orden lista photo',
+            'orden_photo',
+            'orden photo',
+            'orden_lista'
+          ]),
+          'formato_condicional_campo': _valueByColumn(e, [
+            'formato_condicional_campo',
+            'formato condicional campo',
+            'condicion_formato',
+            'condición formato',
+            'formato_condicional'
+          ])?.toString(),
+          'color_texto':
+              _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])
+                  ?.toString(),
+          'color_fondo':
+              _valueByColumn(e, ['color_fondo', 'color fondo', 'fondo_color'])
+                  ?.toString(),
+          'color_borde':
+              _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])
+                  ?.toString(),
+          'aplicar_formato_condicional_tabla': _boolValueOrDefault(
+                  _valueByColumn(e, [
+                    'aplicar_formato_condicional_tabla',
+                    'aplicar formato condicional tabla',
+                    'aplicar_condicional_tabla',
+                    'formato_condicional_tabla'
+                  ]),
+                  false)
+              ? 1
+              : 0,
+          'sub_titulo': _valueByColumn(
+                  e, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo'])
+              ?.toString(),
+          'fila_sub_titulo': _valueByColumn(e, [
+            'fila_sub_titulo',
+            'fila sub titulo',
+            'fila_subtitulo',
+            'fila subtitulo'
+          ]),
+          'grupo_captura':
+              _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
+          'titulo1': _valueByColumn(
+              e, ['titulo1', 'titulo_1', 'titulo v1', 'titulo_v1'])?.toString(),
+          'titulo2': _valueByColumn(
+              e, ['titulo2', 'titulo_2', 'titulo v2', 'titulo_v2'])?.toString(),
+          'codigo1': _valueByColumn(
+              e, ['codigo1', 'codigo_1', 'codigo v1', 'codigo_v1'])?.toString(),
+          'codigo2': _valueByColumn(
+              e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])?.toString(),
           'activo': 1,
         });
       }
@@ -1556,12 +2225,27 @@ class SyncService {
             'visible_tabla': 1,
             'requerido': field['requerido'] ?? 0,
             'orden': field['orden'] ?? 0,
-            'numero_decimales': _valueByColumn(field, ['numero_decimales', 'numero decimales', 'decimales']),
-            'grid_fila': _valueByColumn(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
-            'grid_columna': _valueByColumn(field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
-            'rango_valor': _valueByColumn(field, ['rango_valor', 'rango valor', 'rango', 'validacion_rango']),
-            'num_caracteres': _valueByColumn(field, ['num_caracteres', 'num caracteres', 'max_caracteres', 'max caracteres']),
-            'numero_fotos': _valueByColumn(field, ['numero_fotos', 'numero fotos', 'fotos', 'max_fotos', 'max fotos']),
+            'numero_decimales': _valueByColumn(
+                field, ['numero_decimales', 'numero decimales', 'decimales']),
+            'grid_fila': _valueByColumn(
+                field, ['grid_fila', 'grid fila', 'fila', 'fila_grid']),
+            'grid_columna': _valueByColumn(field,
+                ['grid_columna', 'grid columna', 'columna', 'columna_grid']),
+            'rango_valor': _valueByColumn(field,
+                ['rango_valor', 'rango valor', 'rango', 'validacion_rango']),
+            'num_caracteres': _valueByColumn(field, [
+              'num_caracteres',
+              'num caracteres',
+              'max_caracteres',
+              'max caracteres'
+            ]),
+            'numero_fotos': _valueByColumn(field, [
+              'numero_fotos',
+              'numero fotos',
+              'fotos',
+              'max_fotos',
+              'max fotos'
+            ]),
             'photo_depende_de': null,
             'lista_destino_photo': null,
             'orden_lista_photo': null,
@@ -1595,16 +2279,27 @@ class SyncService {
         'variedad': e['VARIEDAD']?.toString().trim() ?? '',
       };
     }
-    await _local.replaceTable('local_lotes_variedades', lotesRows.values.toList());
+    await _local.replaceTable(
+        'local_lotes_variedades', lotesRows.values.toList());
     await _local.replaceTable('local_catalog_values', catalogValues);
     await _yieldToUi();
-    await _local.applyMatrixRowsFromPayloads(dynamicSourceRows, replaceSources: true);
+    await _local.applyMatrixRowsFromPayloads(dynamicSourceRows,
+        replaceSources: true);
     await _yieldToUi();
 
     final conceptoRows = <String, Map<String, dynamic>>{};
     for (final e in List<Map<String, dynamic>>.from(plagasConceptos)) {
       final concepto = _valueByColumn(e, ['CONCEPTO'])?.toString().trim() ?? '';
-      final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+      final estadio = _valueByColumn(e, [
+            'ESTADIO O TIPO',
+            'ESTADIOS O TIPOS',
+            'ESTADIOS O TIPO',
+            'ESTADIO_O_TIPO',
+            'ESTADIOS_O_TIPOS',
+            'ESTADIO',
+            'TIPO'
+          ])?.toString().trim() ??
+          '';
       if (concepto.isEmpty || estadio.isEmpty) continue;
       final id = '$concepto$estadio';
       conceptoRows[id] = {
@@ -1614,29 +2309,52 @@ class SyncService {
         'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? '',
       };
     }
-    await _local.replaceTable('local_plagas_conceptos', conceptoRows.values.toList());
+    await _local.replaceTable(
+        'local_plagas_conceptos', conceptoRows.values.toList());
 
     final fenologiaRows = <String, Map<String, dynamic>>{};
     for (final e in List<Map<String, dynamic>>.from(etapasFenologicas)) {
-      final etapa = _valueByColumn(e, ['ETAPA_FENOLOGICA', 'ETAPA FENOLOGICA', 'ETAPA FENOLÓGICA', 'FENOLOGIA', 'FENOLOGÍA', 'FENOLOGICA', 'FENOLÓGICA', 'ETAPA'])?.toString().trim() ?? '';
+      final etapa = _valueByColumn(e, [
+            'ETAPA_FENOLOGICA',
+            'ETAPA FENOLOGICA',
+            'ETAPA FENOLÓGICA',
+            'FENOLOGIA',
+            'FENOLOGÍA',
+            'FENOLOGICA',
+            'FENOLÓGICA',
+            'ETAPA'
+          ])?.toString().trim() ??
+          '';
       if (etapa.isEmpty) continue;
       fenologiaRows[etapa] = {'etapa_fenologica': etapa};
     }
     await _local.replaceTable(
       'local_fenologias',
-      fenologiaRows.isNotEmpty ? fenologiaRows.values.toList() : _fallbackFenologiaRows(),
+      fenologiaRows.isNotEmpty
+          ? fenologiaRows.values.toList()
+          : _fallbackFenologiaRows(),
     );
 
     final conteoRows = <String, Map<String, dynamic>>{};
     for (final e in List<Map<String, dynamic>>.from(conteoEstadios)) {
-      final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+      final estadio = _valueByColumn(e, [
+            'ESTADIO O TIPO',
+            'ESTADIOS O TIPOS',
+            'ESTADIOS O TIPO',
+            'ESTADIO_O_TIPO',
+            'ESTADIOS_O_TIPOS',
+            'ESTADIO',
+            'TIPO'
+          ])?.toString().trim() ??
+          '';
       if (estadio.isEmpty) continue;
       conteoRows[estadio] = {
         'estadio': estadio,
         'formula': _valueByColumn(e, ['FORMULA'])?.toString().trim() ?? '',
       };
     }
-    await _local.replaceTable('local_conteo_estadios', conteoRows.values.toList());
+    await _local.replaceTable(
+        'local_conteo_estadios', conteoRows.values.toList());
   }
 
   String _sanitizePathPart(String value) {
@@ -1654,14 +2372,16 @@ class SyncService {
   }
 
   String _contentType(String value) {
-    if (value.startsWith('data:image/jpeg') || value.startsWith('data:image/jpg')) {
+    if (value.startsWith('data:image/jpeg') ||
+        value.startsWith('data:image/jpg')) {
       return 'image/jpeg';
     }
     return 'image/png';
   }
 
   String _extension(String value) {
-    if (value.startsWith('data:image/jpeg') || value.startsWith('data:image/jpg')) {
+    if (value.startsWith('data:image/jpeg') ||
+        value.startsWith('data:image/jpg')) {
       return 'jpg';
     }
     return 'png';
@@ -1678,11 +2398,17 @@ class SyncService {
     required Map<String, dynamic> queueRow,
   }) async {
     final cleaned = Map<String, dynamic>.from(payload);
-    final table = _sanitizePathPart(queueRow['tabla_destino']?.toString() ?? 'tabla');
-    final modulo = _sanitizePathPart(queueRow['modulo_id']?.toString() ?? 'modulo');
-    final formato = _sanitizePathPart(queueRow['formato_id']?.toString() ?? 'formato');
-    final subtabla = _sanitizePathPart(queueRow['formato_tabla_id']?.toString() ?? 'subtabla');
-    final idLocal = _sanitizePathPart(payload['ID_REGISTRO']?.toString() ?? queueRow['id_local']?.toString() ?? DateTime.now().millisecondsSinceEpoch.toString());
+    final table =
+        _sanitizePathPart(queueRow['tabla_destino']?.toString() ?? 'tabla');
+    final modulo =
+        _sanitizePathPart(queueRow['modulo_id']?.toString() ?? 'modulo');
+    final formato =
+        _sanitizePathPart(queueRow['formato_id']?.toString() ?? 'formato');
+    final subtabla = _sanitizePathPart(
+        queueRow['formato_tabla_id']?.toString() ?? 'subtabla');
+    final idLocal = _sanitizePathPart(payload['ID_REGISTRO']?.toString() ??
+        queueRow['id_local']?.toString() ??
+        DateTime.now().millisecondsSinceEpoch.toString());
 
     final uploads = <Future<void>>[];
     for (final entry in payload.entries) {
@@ -1692,7 +2418,8 @@ class SyncService {
       final bytes = _decodeBase64Image(rawValue);
       final ext = _extension(rawValue);
       final folder = field.toUpperCase().contains('FOTO') ? 'fotos' : 'firmas';
-      final path = '$folder/$modulo/$formato/$subtabla/$table/$idLocal/$field.$ext';
+      final path =
+          '$folder/$modulo/$formato/$subtabla/$table/$idLocal/$field.$ext';
 
       uploads.add(() async {
         await _supabase.storage.from(EvidenceStorage.bucket).uploadBinary(
@@ -1732,7 +2459,8 @@ class SyncService {
       final keyText = key.toString();
       final normalized = _norm(keyText);
 
-      if (localOnlyKeys.contains(keyText) || localOnlyKeys.contains(normalized.toLowerCase())) {
+      if (localOnlyKeys.contains(keyText) ||
+          localOnlyKeys.contains(normalized.toLowerCase())) {
         return true;
       }
 
@@ -1753,11 +2481,13 @@ class SyncService {
     return cleaned;
   }
 
-
   String _generateHiddenIdValue(String prefix) {
-    final safePrefix = prefix.trim().toUpperCase().isEmpty ? 'REGI' : prefix.trim().toUpperCase();
+    final safePrefix = prefix.trim().toUpperCase().isEmpty
+        ? 'REGI'
+        : prefix.trim().toUpperCase();
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
-    final seed = DateTime.now().microsecondsSinceEpoch.toRadixString(36).toUpperCase();
+    final seed =
+        DateTime.now().microsecondsSinceEpoch.toRadixString(36).toUpperCase();
     final uuidPart = _uuid.v4().replaceAll('-', '').toUpperCase();
     final raw = '$seed$uuidPart';
     final suffix = raw
@@ -1769,12 +2499,23 @@ class SyncService {
     return '$safePrefix$suffix';
   }
 
-
-  Future<Map<String, dynamic>> _filterPayloadToKnownFields(String table, Map<String, dynamic> payload) async {
-    final fieldRows = await _local.where('local_form_fields', 'tabla_destino = ? and activo = 1', [table]);
+  Future<Map<String, dynamic>> _filterPayloadToKnownFields(
+      String table, Map<String, dynamic> payload) async {
+    final fieldRows = await _local.where(
+        'local_form_fields', 'tabla_destino = ? and activo = 1', [table]);
     final allowed = <String>{
-      'ID_LOCAL', 'CREATED_AT', 'UPDATED_AT', 'DELETED_AT', 'ESTADO_SYNC', 'ACTIVO', 'ELIMINADO',
-      'ESTADO_REGISTRO', 'ID_REGISTRO', 'HASH_FILA_SIN_IDS', 'ID_FILA_SERIAL', 'HIDDEN_ID',
+      'ID_LOCAL',
+      'CREATED_AT',
+      'UPDATED_AT',
+      'DELETED_AT',
+      'ESTADO_SYNC',
+      'ACTIVO',
+      'ELIMINADO',
+      'ESTADO_REGISTRO',
+      'ID_REGISTRO',
+      'HASH_FILA_SIN_IDS',
+      'ID_FILA_SERIAL',
+      'HIDDEN_ID',
     };
     for (final f in fieldRows) {
       final campo = f['campo']?.toString().trim() ?? '';
@@ -1812,8 +2553,10 @@ class SyncService {
     for (final entry in payload.entries) {
       final key = entry.key.toString();
       final norm = _norm(key);
-      if (table == 'GT-ASISTENCIA_PERSONAL' && norm == 'TIPO_MOVIMIENTO') continue;
-      if (allowed.contains(norm)) out[canonicalByNorm[norm] ?? key] = entry.value;
+      if (table == 'GT-ASISTENCIA_PERSONAL' && norm == 'TIPO_MOVIMIENTO')
+        continue;
+      if (allowed.contains(norm))
+        out[canonicalByNorm[norm] ?? key] = entry.value;
     }
     return out;
   }
@@ -1852,7 +2595,9 @@ class SyncService {
 
   Future<int> syncPending() async {
     final online = await hasInternet();
-    if (!online) throw Exception('No hay conexión a internet. Tus registros siguen guardados como pendientes.');
+    if (!online)
+      throw Exception(
+          'No hay conexión a internet. Tus registros siguen guardados como pendientes.');
 
     await _ensureOnlineAuthSession();
 
@@ -1864,11 +2609,15 @@ class SyncService {
       final table = row['tabla_destino']?.toString() ?? '';
       if (table != 'GT-TAREO_PERSONAL') continue;
       try {
-        final payload = jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
-        final horaFin = (payload['HORA_FIN'] ?? payload['HORA FIN'] ?? '').toString().trim();
+        final payload =
+            jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
+        final horaFin = (payload['HORA_FIN'] ?? payload['HORA FIN'] ?? '')
+            .toString()
+            .trim();
         if (horaFin.isEmpty || horaFin.toLowerCase() == 'null') {
           tareosSinHoraFin++;
-          await _local.markError(row['id_local'] as String, 'Todos los tareos deben tener hora fin');
+          await _local.markError(row['id_local'] as String,
+              'Todos los tareos deben tener hora fin');
         }
       } catch (_) {}
     }
@@ -1885,16 +2634,22 @@ class SyncService {
       final storedIdLocal = row['id_local'] as String;
       final idLocal = _isPureUuid(storedIdLocal) ? storedIdLocal : _uuid.v4();
       final table = row['tabla_destino'] as String;
-      final payload = jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
+      final payload =
+          jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
       payload['id_local'] = idLocal;
 
       try {
-        final withHiddenIds = await _ensureHiddenIdsForSync(table: table, payload: payload);
+        final withHiddenIds =
+            await _ensureHiddenIdsForSync(table: table, payload: payload);
         final cleanedPayload = _cleanPayloadForInsert(withHiddenIds);
-        final knownPayload = await _filterPayloadToKnownFields(table, cleanedPayload);
-        final finalPayload = await _uploadEvidenceFiles(payload: knownPayload, queueRow: row);
+        final knownPayload =
+            await _filterPayloadToKnownFields(table, cleanedPayload);
+        final finalPayload =
+            await _uploadEvidenceFiles(payload: knownPayload, queueRow: row);
         finalPayload['__stored_id_local__'] = storedIdLocal;
-        byTable.putIfAbsent(table, () => <Map<String, dynamic>>[]).add(finalPayload);
+        byTable
+            .putIfAbsent(table, () => <Map<String, dynamic>>[])
+            .add(finalPayload);
       } catch (e) {
         await _local.markError(storedIdLocal, friendlyError(e));
       }
@@ -1914,13 +2669,16 @@ class SyncService {
         }).toList();
 
         try {
-          await _supabase.from(table).upsert(payloadChunk, onConflict: 'id_local');
+          await _supabase
+              .from(table)
+              .upsert(payloadChunk, onConflict: 'id_local');
           final syncedIds = <String>[];
           final cachePayloads = <Map<String, dynamic>>[];
           for (final row in chunk) {
             final storedIdLocal = row['__stored_id_local__']?.toString() ?? '';
             if (storedIdLocal.isEmpty) continue;
-            final cachePayload = Map<String, dynamic>.from(row)..remove('__stored_id_local__');
+            final cachePayload = Map<String, dynamic>.from(row)
+              ..remove('__stored_id_local__');
             syncedIds.add(storedIdLocal);
             cachePayloads.add(cachePayload);
           }
@@ -1931,7 +2689,8 @@ class SyncService {
           // Respaldo fino: si un lote falla por una fila defectuosa, no bloquea a las demás.
           for (final row in chunk) {
             final storedIdLocal = row['__stored_id_local__']?.toString() ?? '';
-            final clean = Map<String, dynamic>.from(row)..remove('__stored_id_local__');
+            final clean = Map<String, dynamic>.from(row)
+              ..remove('__stored_id_local__');
             try {
               await _supabase.from(table).upsert(clean, onConflict: 'id_local');
               await _local.markSynced(storedIdLocal);
@@ -1947,5 +2706,4 @@ class SyncService {
 
     return synced;
   }
-
 }

@@ -39,23 +39,31 @@ class _LoginPageState extends State<LoginPage> {
     userCtrl.text = loginId;
   }
 
-
   String _friendlyError(Object error) {
     final raw = error.toString();
     final msg = raw.toLowerCase();
-    if (msg.contains('invalid login') || msg.contains('invalid credentials') || msg.contains('password')) {
+    if (msg.contains('invalid login') ||
+        msg.contains('invalid credentials') ||
+        msg.contains('password')) {
       return 'Usuario o contraseña incorrectos.';
     }
-    if (msg.contains('over_email_send_rate_limit') || msg.contains('email rate limit') || msg.contains('429')) {
+    if (msg.contains('over_email_send_rate_limit') ||
+        msg.contains('email rate limit') ||
+        msg.contains('429')) {
       return 'Supabase bloqueó temporalmente el envío de correos por muchos intentos. Espera unos minutos y vuelve a probar.';
     }
-    if (msg.contains('network') || msg.contains('socketexception') || msg.contains('internet')) {
+    if (msg.contains('network') ||
+        msg.contains('socketexception') ||
+        msg.contains('internet')) {
       return 'Se necesita conexión a internet para actualizar datos.';
     }
     if (msg.contains('no existe un usuario activo')) {
       return raw.replaceFirst('Exception: ', '');
     }
-    if (msg.contains('not authorized') || msg.contains('unauthorized') || msg.contains('permission denied') || msg.contains('jwt')) {
+    if (msg.contains('not authorized') ||
+        msg.contains('unauthorized') ||
+        msg.contains('permission denied') ||
+        msg.contains('jwt')) {
       return 'No autorizado. Revisa que el usuario esté activo y tenga permisos asignados.';
     }
     return raw.replaceFirst('Exception: ', '').trim().isEmpty
@@ -73,7 +81,8 @@ class _LoginPageState extends State<LoginPage> {
     await Future<void>.delayed(const Duration(milliseconds: 48));
     try {
       if (!await SyncService().hasInternet()) {
-        throw Exception('Se necesita conexión a internet para actualizar datos.');
+        throw Exception(
+            'Se necesita conexión a internet para actualizar datos.');
       }
 
       // Este botón NO debe pedir usuario ni contraseña.
@@ -87,7 +96,8 @@ class _LoginPageState extends State<LoginPage> {
             setState(() {
               updateMessage = message;
               loadingMessage = message;
-              loadingProgress = (loadingProgress + 0.045).clamp(0.0, 0.94).toDouble();
+              loadingProgress =
+                  (loadingProgress + 0.045).clamp(0.0, 0.94).toDouble();
             });
           }
         },
@@ -97,7 +107,9 @@ class _LoginPageState extends State<LoginPage> {
       updatedDataThisSession = true;
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Datos actualizados: usuarios, permisos, formatos, matrices y catálogos.')),
+        const SnackBar(
+            content: Text(
+                'Datos actualizados: usuarios, permisos, formatos, matrices y catálogos.')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -113,8 +125,6 @@ class _LoginPageState extends State<LoginPage> {
       }
     }
   }
-
-
 
   Future<void> recoverPassword() async {
     if (loading || updatingUsers) return;
@@ -155,10 +165,21 @@ class _LoginPageState extends State<LoginPage> {
     try {
       final profiles = await LocalDb.instance.getAll('local_profile');
       for (final profile in profiles) {
-        final dni = (profile['dni'] ?? profile['DNI'] ?? profile['documento'] ?? profile['DOCUMENTO'])?.toString().trim();
-        final email = (profile['email'] ?? profile['correo'] ?? profile['CORREO'])?.toString().trim();
+        final dni = (profile['dni'] ??
+                profile['DNI'] ??
+                profile['documento'] ??
+                profile['DOCUMENTO'])
+            ?.toString()
+            .trim();
+        final email =
+            (profile['email'] ?? profile['correo'] ?? profile['CORREO'])
+                ?.toString()
+                .trim();
         final active = profile['activo'];
-        final isActive = active == null || active == 1 || active == true || active.toString().toLowerCase() == 'true';
+        final isActive = active == null ||
+            active == 1 ||
+            active == true ||
+            active.toString().toLowerCase() == 'true';
         if (isActive && dni == value && email != null && email.isNotEmpty) {
           return email.toLowerCase();
         }
@@ -185,23 +206,41 @@ class _LoginPageState extends State<LoginPage> {
     // Seguridad: un usuario offline solo debe aceptar sus propios alias
     // (correo/DNI del perfil autenticado). Antes se agregaban alias de todos
     // los perfiles locales y eso permitía ingresar con DNI de otro usuario.
-    final aliases = <String>{fallbackEmail.trim().toLowerCase(), typedLogin.trim().toLowerCase()};
+    final aliases = <String>{
+      fallbackEmail.trim().toLowerCase(),
+      typedLogin.trim().toLowerCase()
+    };
     try {
       final profiles = await LocalDb.instance.getAll('local_profile');
       for (final profile in profiles) {
         final profileId = profile['id']?.toString().trim();
-        final email = (profile['email'] ?? profile['correo'] ?? profile['CORREO'])?.toString().trim().toLowerCase();
-        final dni = (profile['dni'] ?? profile['DNI'] ?? profile['documento'] ?? profile['DOCUMENTO'] ?? profile['numero_documento'] ?? profile['NUMERO_DOCUMENTO'])?.toString().trim().toLowerCase();
-        final belongsToUser = profileId == userId || email == fallbackEmail.trim().toLowerCase();
+        final email =
+            (profile['email'] ?? profile['correo'] ?? profile['CORREO'])
+                ?.toString()
+                .trim()
+                .toLowerCase();
+        final dni = (profile['dni'] ??
+                profile['DNI'] ??
+                profile['documento'] ??
+                profile['DOCUMENTO'] ??
+                profile['numero_documento'] ??
+                profile['NUMERO_DOCUMENTO'])
+            ?.toString()
+            .trim()
+            .toLowerCase();
+        final belongsToUser =
+            profileId == userId || email == fallbackEmail.trim().toLowerCase();
         if (!belongsToUser) continue;
-        if (email != null && email.isNotEmpty && email != 'null') aliases.add(email);
+        if (email != null && email.isNotEmpty && email != 'null')
+          aliases.add(email);
         if (dni != null && dni.isNotEmpty && dni != 'null') aliases.add(dni);
       }
     } catch (_) {
       // Si el perfil local todavía no existe, el login offline seguirá funcionando
       // con el correo o identificador usado en el login online exitoso.
     }
-    aliases.removeWhere((e) => e.trim().isEmpty || e.trim().toLowerCase() == 'null');
+    aliases.removeWhere(
+        (e) => e.trim().isEmpty || e.trim().toLowerCase() == 'null');
     return aliases.toList();
   }
 
@@ -240,29 +279,46 @@ class _LoginPageState extends State<LoginPage> {
       if (online) {
         try {
           final email = await _resolveAuthEmail(loginIdentifier);
-          if (mounted) setState(() { loadingProgress = 0.34; loadingMessage = 'Iniciando sesión...'; });
+          if (mounted)
+            setState(() {
+              loadingProgress = 0.34;
+              loadingMessage = 'Iniciando sesión...';
+            });
           await Supabase.instance.client.auth.signInWithPassword(
             email: email,
             password: password,
           );
           final user = Supabase.instance.client.auth.currentUser;
-          if (user == null) throw Exception('No se pudo obtener usuario autenticado.');
-          if (mounted) setState(() { loadingProgress = 0.56; loadingMessage = 'Verificando datos locales...'; });
+          if (user == null)
+            throw Exception('No se pudo obtener usuario autenticado.');
+          if (mounted)
+            setState(() {
+              loadingProgress = 0.56;
+              loadingMessage = 'Verificando datos locales...';
+            });
           final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
           if (hasCache) {
             // Si el usuario acaba de presionar Actualizar datos en esta misma pantalla,
             // no repetimos una segunda descarga al presionar Ingresar. Mantiene el login rápido.
-            if (!updatedDataThisSession) {
-              if (mounted) setState(() { loadingProgress = 0.70; loadingMessage = 'Actualizando permisos...'; });
-              await SyncService().refreshLoginPermissionsOnly();
-            }
-          } else {
-            if (mounted) setState(() { loadingProgress = 0.64; loadingMessage = 'Descargando datos para uso offline...'; });
-            await SyncService().downloadAllForOffline(onProgress: (message) {
-              if (mounted) setState(() {
-                loadingMessage = message;
-                loadingProgress = (loadingProgress + 0.04).clamp(0.0, 0.93).toDouble();
+            if (mounted)
+              setState(() {
+                loadingProgress = 0.70;
+                loadingMessage = 'Actualizando permisos...';
               });
+            await SyncService().refreshLoginPermissionsOnly();
+          } else {
+            if (mounted)
+              setState(() {
+                loadingProgress = 0.64;
+                loadingMessage = 'Descargando datos para uso offline...';
+              });
+            await SyncService().downloadAllForOffline(onProgress: (message) {
+              if (mounted)
+                setState(() {
+                  loadingMessage = message;
+                  loadingProgress =
+                      (loadingProgress + 0.04).clamp(0.0, 0.93).toDouble();
+                });
             });
           }
           final aliases = await _offlineAliasesFromProfile(
@@ -270,7 +326,11 @@ class _LoginPageState extends State<LoginPage> {
             typedLogin: loginIdentifier,
             userId: user.id,
           );
-          if (mounted) setState(() { loadingProgress = 0.90; loadingMessage = 'Preparando la aplicación...'; });
+          if (mounted)
+            setState(() {
+              loadingProgress = 0.90;
+              loadingMessage = 'Preparando la aplicación...';
+            });
           await session.saveSuccessfulLogin(
             email: email,
             password: password,
@@ -289,7 +349,9 @@ class _LoginPageState extends State<LoginPage> {
           if (!okOffline) rethrow;
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Ingreso offline por falla de conexión. Se usarán los datos locales.')),
+            const SnackBar(
+                content: Text(
+                    'Ingreso offline por falla de conexión. Se usarán los datos locales.')),
           );
         }
       } else {
@@ -297,15 +359,21 @@ class _LoginPageState extends State<LoginPage> {
           loginIdentifier: loginIdentifier,
           password: password,
         );
-        if (!okOffline) throw Exception('Usuario o contraseña incorrectos para modo offline. Ingresa una vez con internet para actualizar credenciales locales.');
+        if (!okOffline)
+          throw Exception(
+              'Usuario o contraseña incorrectos para modo offline. Ingresa una vez con internet para actualizar credenciales locales.');
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ingreso offline. Se usarán los datos locales.')),
+          const SnackBar(
+              content: Text('Ingreso offline. Se usarán los datos locales.')),
         );
       }
 
       if (!mounted) return;
-      setState(() { loadingProgress = 1; loadingMessage = 'Listo'; });
+      setState(() {
+        loadingProgress = 1;
+        loadingMessage = 'Listo';
+      });
       await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted) return;
       Navigator.pushReplacement(
@@ -328,104 +396,127 @@ class _LoginPageState extends State<LoginPage> {
       body: Stack(
         children: [
           Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0xFFEAF4E5), Color(0xFFF8FAF4)],
-          ),
-        ),
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(22),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 430),
-              child: Card(
-                elevation: 3,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(54),
-                        child: Image.asset(
-                          'assets/images/logo_zumac.jpeg',
-                          width: 108,
-                          height: 108,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Icon(Icons.eco, size: 64),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      const Text('ZUMAC', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                      const SizedBox(height: 4),
-                      const Text('Ingreso online/offline', style: TextStyle(fontSize: 13, color: Colors.black54)),
-                      const SizedBox(height: 22),
-                      TextField(
-                        controller: userCtrl,
-                        keyboardType: TextInputType.text,
-                        style: const TextStyle(fontSize: 14),
-                        decoration: const InputDecoration(
-                          labelText: 'DNI o correo',
-                          prefixIcon: Icon(Icons.badge_outlined),
-                          border: OutlineInputBorder(),
-                          isDense: true,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: passCtrl,
-                        obscureText: !passwordVisible,
-                        style: const TextStyle(fontSize: 14),
-                        decoration: InputDecoration(
-                          labelText: 'Contraseña',
-                          prefixIcon: const Icon(Icons.lock_outline),
-                          suffixIcon: IconButton(
-                            tooltip: passwordVisible ? 'Ocultar contraseña' : 'Mostrar contraseña',
-                            onPressed: () => setState(() => passwordVisible = !passwordVisible),
-                            icon: Icon(passwordVisible ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFFEAF4E5), Color(0xFFF8FAF4)],
+              ),
+            ),
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(22),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 430),
+                  child: Card(
+                    elevation: 3,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(24)),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(54),
+                            child: Image.asset(
+                              'assets/images/logo_zumac.jpeg',
+                              width: 108,
+                              height: 108,
+                              fit: BoxFit.cover,
+                              errorBuilder: (_, __, ___) =>
+                                  const Icon(Icons.eco, size: 64),
+                            ),
                           ),
-                          border: const OutlineInputBorder(),
-                          isDense: true,
-                        ),
+                          const SizedBox(height: 14),
+                          const Text('ZUMAC',
+                              style: TextStyle(
+                                  fontSize: 22, fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 4),
+                          const Text('Ingreso online/offline',
+                              style: TextStyle(
+                                  fontSize: 13, color: Colors.black54)),
+                          const SizedBox(height: 22),
+                          TextField(
+                            controller: userCtrl,
+                            keyboardType: TextInputType.text,
+                            style: const TextStyle(fontSize: 14),
+                            decoration: const InputDecoration(
+                              labelText: 'DNI o correo',
+                              prefixIcon: Icon(Icons.badge_outlined),
+                              border: OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: passCtrl,
+                            obscureText: !passwordVisible,
+                            style: const TextStyle(fontSize: 14),
+                            decoration: InputDecoration(
+                              labelText: 'Contraseña',
+                              prefixIcon: const Icon(Icons.lock_outline),
+                              suffixIcon: IconButton(
+                                tooltip: passwordVisible
+                                    ? 'Ocultar contraseña'
+                                    : 'Mostrar contraseña',
+                                onPressed: () => setState(
+                                    () => passwordVisible = !passwordVisible),
+                                icon: Icon(passwordVisible
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined),
+                              ),
+                              border: const OutlineInputBorder(),
+                              isDense: true,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              onPressed: (loading || updatingUsers)
+                                  ? null
+                                  : recoverPassword,
+                              child: const Text('Recuperar contraseña'),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed:
+                                  (loading || updatingUsers) ? null : login,
+                              icon: const Icon(Icons.login),
+                              label:
+                                  Text(loading ? 'Ingresando...' : 'Ingresar'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: (loading || updatingUsers)
+                                  ? null
+                                  : updateUsersAndPermissions,
+                              icon: const Icon(Icons.cloud_sync_outlined),
+                              label: Text(updatingUsers
+                                  ? 'Actualizando...'
+                                  : 'Actualizar datos'),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(appVersionLabel,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.black54,
+                                  fontWeight: FontWeight.w600)),
+                        ],
                       ),
-                      const SizedBox(height: 8),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          onPressed: (loading || updatingUsers) ? null : recoverPassword,
-                          child: const Text('Recuperar contraseña'),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: (loading || updatingUsers) ? null : login,
-                          icon: const Icon(Icons.login),
-                          label: Text(loading ? 'Ingresando...' : 'Ingresar'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: (loading || updatingUsers) ? null : updateUsersAndPermissions,
-                          icon: const Icon(Icons.cloud_sync_outlined),
-                          label: Text(updatingUsers ? 'Actualizando...' : 'Actualizar datos'),
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      const Text(appVersionLabel, style: TextStyle(fontSize: 12, color: Colors.black54, fontWeight: FontWeight.w600)),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
           ),
           if (loading || updatingUsers)
             Positioned.fill(
@@ -434,7 +525,9 @@ class _LoginPageState extends State<LoginPage> {
                 child: Center(
                   child: BrandedLoading(
                     progress: loadingProgress,
-                    message: updatingUsers ? (updateMessage ?? loadingMessage) : loadingMessage,
+                    message: updatingUsers
+                        ? (updateMessage ?? loadingMessage)
+                        : loadingMessage,
                   ),
                 ),
               ),
