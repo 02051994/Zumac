@@ -18,6 +18,8 @@ import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
 import '../local_records/local_records_page.dart';
 import '../reports/reports_page.dart';
+import '../configuration_admin/configuration_admin_page.dart';
+import '../configuration_admin/configuration_admin_repository.dart';
 import 'generic_section_page.dart';
 import 'dynamic_views_page.dart';
 
@@ -56,6 +58,7 @@ class _ModulesPageState extends State<ModulesPage> {
   Map<String, dynamic>? desktopSelectedDynamicView;
   Map<String, dynamic>? mobileSelectedSpecial;
   String? _expandedSectionId;
+  bool canManageConfiguration = false;
 
   String? _desktopContentCacheKey;
   Widget? _desktopContentCache;
@@ -83,6 +86,33 @@ class _ModulesPageState extends State<ModulesPage> {
   void initState() {
     super.initState();
     loadLocal();
+    unawaited(_loadConfigurationAccess());
+  }
+
+  Future<void> _loadConfigurationAccess() async {
+    if (Supabase.instance.client.auth.currentUser == null) return;
+    try {
+      final contextData = await ConfigurationAdminRepository()
+          .loadContext()
+          .timeout(const Duration(seconds: 4));
+      if (!mounted) return;
+      setState(() =>
+          canManageConfiguration = contextData['puede_gestionar'] == true);
+    } catch (_) {
+      // El constructor requiere conexión. La navegación offline principal no
+      // debe bloquearse si Supabase no responde.
+      if (mounted && canManageConfiguration) {
+        setState(() => canManageConfiguration = false);
+      }
+    }
+  }
+
+  Future<void> _openConfigurationAdmin() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(builder: (_) => const ConfigurationAdminPage()),
+    );
+    if (!mounted) return;
+    await _loadConfigurationAccess();
   }
 
 
@@ -1687,6 +1717,12 @@ class _ModulesPageState extends State<ModulesPage> {
     final appBar = AppBar(
       title: desktopLayout ? const SizedBox.shrink() : const SizedBox.shrink(),
       actions: [
+        if (canManageConfiguration)
+          IconButton(
+            onPressed: busy ? null : _openConfigurationAdmin,
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: 'Constructor visual',
+          ),
         Row(
           mainAxisSize: MainAxisSize.min,
           children: [
