@@ -9,13 +9,16 @@
 
 ## Etapas
 
-1. Proteccion, Git, linea base y pruebas.
-2. Sincronizacion atomica, distincion snapshot/delta y checkpoints.
-3. Limpieza de metadatos y relaciones.
-4. Seguridad, usuarios y aislamiento por empresa.
-5. Matrices faltantes y reduccion de logica fija.
-6. Conflictos, estados offline, archivos, publicacion y versiones.
-7. Validacion integral y despliegue controlado.
+1. [Completada] Proteccion, Git, linea base y pruebas.
+2. [Completada] Sincronizacion atomica, distincion snapshot/delta y checkpoints.
+3. [Completada] Limpieza de metadatos y relaciones.
+4. [Completada] Seguridad, usuarios y aislamiento por empresa.
+5. [Completada] Matrices faltantes y reduccion de logica fija.
+6. [Completada] Conflictos, estados offline, archivos, publicacion y versiones.
+7. [Completada con limitacion Android] Validacion integral y despliegue controlado.
+
+El detalle de cambios, comprobaciones y limitaciones se encuentra en
+`docs/ARCHITECTURE_IMPLEMENTATION_REPORT.md`.
 
 ## Condiciones de avance
 
