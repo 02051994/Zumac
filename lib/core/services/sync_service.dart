@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -106,8 +107,43 @@ class SyncService {
   }
 
   Future<bool> hasInternet() async {
-    final result = await Connectivity().checkConnectivity();
-    return !result.contains(ConnectivityResult.none);
+    try {
+      final result = await Connectivity().checkConnectivity();
+      if (connectivityIndicatesNetwork(result)) return true;
+
+      // Algunos dispositivos Android informan `none` brevemente al volver a
+      // primer plano aunque los datos moviles ya esten activos.
+      await Future<void>.delayed(const Duration(milliseconds: 350));
+      final retry = await Connectivity().checkConnectivity();
+      if (connectivityIndicatesNetwork(retry)) return true;
+    } catch (_) {
+      // Si el plugin no responde, la consulta real de abajo decide el estado.
+    }
+
+    // Connectivity indica transporte, no acceso real a internet. Una respuesta
+    // HTTP de Supabase (incluso un rechazo RLS) confirma conectividad.
+    try {
+      await _supabase
+          .from('EMPRESAS_APPGT')
+          .select('id')
+          .limit(1)
+          .timeout(const Duration(seconds: 6));
+      return true;
+    } on PostgrestException {
+      return true;
+    } on AuthException {
+      return true;
+    } on TimeoutException {
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  static bool connectivityIndicatesNetwork(
+    Iterable<ConnectivityResult> results,
+  ) {
+    return results.any((result) => result != ConnectivityResult.none);
   }
 
   bool _isPureUuid(String value) {
