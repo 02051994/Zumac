@@ -23,6 +23,57 @@ class ConfigurationEntitySpec {
     required this.questions,
   });
 
+  static const rubro = ConfigurationEntitySpec(
+    type: 'RUBRO',
+    singularName: 'rubro',
+    questions: [
+      ConfigurationQuestion(
+        id: 'plantilla',
+        label: '¿Desea partir de una plantilla?',
+        required: false,
+        reason:
+            'Permite reutilizar una organización ya probada sin modificarla.',
+      ),
+      ConfigurationQuestion(
+        id: 'nombre',
+        label: '¿Qué nombre verá el usuario?',
+        required: true,
+        reason: 'Identifica la línea de negocio o ámbito principal.',
+      ),
+      ConfigurationQuestion(
+        id: 'codigo',
+        label: '¿Cuál será su código técnico único?',
+        required: true,
+        reason:
+            'Relaciona toda la jerarquía y no cambia con el nombre visible.',
+      ),
+      ConfigurationQuestion(
+        id: 'descripcion',
+        label: '¿Qué procesos comprende este rubro?',
+        required: false,
+        reason: 'Documenta su alcance para los administradores.',
+      ),
+      ConfigurationQuestion(
+        id: 'icono',
+        label: '¿Qué icono lo representa?',
+        required: true,
+        reason: 'Ayuda a distinguirlo en la navegación.',
+      ),
+      ConfigurationQuestion(
+        id: 'orden',
+        label: '¿En qué orden debe aparecer?',
+        required: true,
+        reason: 'Controla su posición frente a otros rubros.',
+      ),
+      ConfigurationQuestion(
+        id: 'activo',
+        label: '¿Quedará visible al publicarse?',
+        required: true,
+        reason: 'Permite preparar el rubro antes de habilitarlo.',
+      ),
+    ],
+  );
+
   static const section = ConfigurationEntitySpec(
     type: 'SECCION',
     singularName: 'sección',
@@ -142,6 +193,8 @@ class ConfigurationEntitySpec {
 
   static ConfigurationEntitySpec forType(String type) {
     switch (type.trim().toUpperCase()) {
+      case 'RUBRO':
+        return rubro;
       case 'SECCION':
         return section;
       case 'MODULO':

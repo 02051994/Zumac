@@ -50,7 +50,9 @@ class _ConfigurationEntityWizardPageState
   List<Map<String, dynamic>> templates = [];
   List<Map<String, dynamic>> sectionTemplates = [];
 
+  bool get isRubro => spec.type == 'RUBRO';
   bool get isSection => spec.type == 'SECCION';
+  bool get isModule => spec.type == 'MODULO';
   bool get canPublish => widget.contextData['puede_publicar'] == true;
   bool get isValid => validation?['valido'] == true;
 
@@ -114,15 +116,17 @@ class _ConfigurationEntityWizardPageState
     try {
       final results = await Future.wait([
         repository.listTemplates(entityType: spec.type, limit: 150),
-        if (!isSection)
+        if (isModule)
           repository.listTemplates(entityType: 'SECCION', limit: 150),
       ]);
       if (!mounted) return;
       setState(() {
         templates = _items(results.first);
-        if (!isSection) sectionTemplates = _items(results.last);
-        selectedRubroId ??=
-            rubros.isEmpty ? null : rubros.first['id']?.toString();
+        if (isModule) sectionTemplates = _items(results.last);
+        if (!isRubro) {
+          selectedRubroId ??=
+              rubros.isEmpty ? null : rubros.first['id']?.toString();
+        }
         loading = false;
       });
     } catch (exception) {
@@ -185,7 +189,9 @@ class _ConfigurationEntityWizardPageState
           orderController.text.trim(),
       'activo': active,
     };
-    if (isSection) {
+    if (isRubro) {
+      // El código del rubro se convierte en su identificador técnico.
+    } else if (isSection) {
       payload.addAll({
         'rubro_id': selectedRubroId,
         'tipo_contenido': selectedContentType,
@@ -496,13 +502,21 @@ class _ConfigurationEntityWizardPageState
         _questionField(
           questionId: 'nombre',
           controller: nameController,
-          hint: isSection ? 'Ej. Operaciones agrícolas' : 'Ej. Cosecha',
+          hint: isRubro
+              ? 'Ej. Producción agrícola'
+              : isSection
+                  ? 'Ej. Operaciones agrícolas'
+                  : 'Ej. Cosecha',
         ),
         const SizedBox(height: 14),
         _questionField(
           questionId: 'codigo',
           controller: codeController,
-          hint: isSection ? 'OPERACIONES_AGRICOLAS' : 'COSECHA',
+          hint: isRubro
+              ? 'PRODUCCION_AGRICOLA'
+              : isSection
+                  ? 'OPERACIONES_AGRICOLAS'
+                  : 'COSECHA',
           suffix: IconButton(
             tooltip: 'Generar desde el nombre',
             onPressed: () {
@@ -525,40 +539,41 @@ class _ConfigurationEntityWizardPageState
   }
 
   Widget _placementStep() {
-    final parentQuestionId = isSection ? 'rubro_id' : 'seccion_id';
     return Column(
       children: [
-        _questionCard(
-          question: _question(parentQuestionId),
-          child: DropdownButtonFormField<String>(
-            key: ValueKey(
-              'parent-${isSection ? selectedRubroId : selectedSectionId}',
+        if (!isRubro) ...[
+          _questionCard(
+            question: _question(isSection ? 'rubro_id' : 'seccion_id'),
+            child: DropdownButtonFormField<String>(
+              key: ValueKey(
+                'parent-${isSection ? selectedRubroId : selectedSectionId}',
+              ),
+              initialValue: isSection ? selectedRubroId : selectedSectionId,
+              decoration: InputDecoration(
+                labelText: isSection ? 'Rubro' : 'Sección',
+                border: const OutlineInputBorder(),
+              ),
+              items: (isSection ? rubros : sectionTemplates)
+                  .map(
+                    (row) => DropdownMenuItem(
+                      value: isSection
+                          ? row['id']?.toString()
+                          : row['entidad_origen_id']?.toString(),
+                      child: Text(row['nombre']?.toString() ?? 'Sin nombre'),
+                    ),
+                  )
+                  .toList(),
+              onChanged: (value) => setState(() {
+                if (isSection) {
+                  selectedRubroId = value;
+                } else {
+                  selectedSectionId = value;
+                }
+              }),
             ),
-            initialValue: isSection ? selectedRubroId : selectedSectionId,
-            decoration: InputDecoration(
-              labelText: isSection ? 'Rubro' : 'Sección',
-              border: const OutlineInputBorder(),
-            ),
-            items: (isSection ? rubros : sectionTemplates)
-                .map(
-                  (row) => DropdownMenuItem(
-                    value: isSection
-                        ? row['id']?.toString()
-                        : row['entidad_origen_id']?.toString(),
-                    child: Text(row['nombre']?.toString() ?? 'Sin nombre'),
-                  ),
-                )
-                .toList(),
-            onChanged: (value) => setState(() {
-              if (isSection) {
-                selectedRubroId = value;
-              } else {
-                selectedSectionId = value;
-              }
-            }),
           ),
-        ),
-        const SizedBox(height: 14),
+          const SizedBox(height: 14),
+        ],
         _questionCard(
           question: _question('icono'),
           child: DropdownButtonFormField<String>(
@@ -644,6 +659,8 @@ class _ConfigurationEntityWizardPageState
             ),
           ),
           const SizedBox(height: 14),
+        ],
+        if (isRubro || isSection) ...[
           TextField(
             controller: colorController,
             decoration: const InputDecoration(

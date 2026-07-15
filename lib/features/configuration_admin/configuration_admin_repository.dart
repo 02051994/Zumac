@@ -89,6 +89,38 @@ class ConfigurationAdminRepository {
     return _map(value);
   }
 
+  Future<Map<String, dynamic>> loadFullFormatTemplate(
+    String templateId,
+  ) async {
+    final value = await _client.rpc(
+      'appgt_obtener_plantilla_formato_completa',
+      params: {'p_plantilla_id': templateId},
+    );
+    return _map(value);
+  }
+
+  Future<Map<String, dynamic>> validateFormatStructure(String draftId) async {
+    final value = await _client.rpc(
+      'appgt_validar_estructura_formato',
+      params: {'p_borrador_id': draftId},
+    );
+    return _map(value);
+  }
+
+  Future<Map<String, dynamic>> publishFormatStructure(
+    String draftId, {
+    String? notes,
+  }) async {
+    final value = await _client.rpc(
+      'appgt_publicar_estructura_formato',
+      params: {
+        'p_borrador_id': draftId,
+        'p_notas': notes,
+      },
+    );
+    return _map(value);
+  }
+
   Map<String, dynamic> _map(dynamic value) {
     if (value is Map<String, dynamic>) return value;
     if (value is Map) return Map<String, dynamic>.from(value);

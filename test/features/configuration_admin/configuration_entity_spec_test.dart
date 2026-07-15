@@ -2,6 +2,27 @@ import 'package:appgt_offline_subtables/features/configuration_admin/configurati
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('el asistente de rubro pregunta identidad, apariencia y publicación',
+      () {
+    final ids = ConfigurationEntitySpec.rubro.questions
+        .map((question) => question.id)
+        .toSet();
+
+    expect(
+      ids,
+      containsAll({
+        'plantilla',
+        'nombre',
+        'codigo',
+        'descripcion',
+        'icono',
+        'orden',
+        'activo',
+      }),
+    );
+    expect(ConfigurationEntitySpec.forType('rubro').type, 'RUBRO');
+  });
+
   test('el asistente de sección contiene todas las preguntas indispensables',
       () {
     final ids = ConfigurationEntitySpec.section.questions

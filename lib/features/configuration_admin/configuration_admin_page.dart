@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'configuration_admin_repository.dart';
 import 'configuration_entity_wizard_page.dart';
+import 'format_structure_wizard_page.dart';
 
 class ConfigurationAdminPage extends StatefulWidget {
   const ConfigurationAdminPage({super.key});
@@ -58,14 +59,21 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     String entityType, {
     Map<String, dynamic>? draft,
   }) async {
+    final page = entityType == 'FORMATO'
+        ? FormatStructureWizardPage(
+            contextData: contextData,
+            initialDraft: draft,
+            repository: repository,
+          )
+        : ConfigurationEntityWizardPage(
+            entityType: entityType,
+            contextData: contextData,
+            initialDraft: draft,
+            repository: repository,
+          );
     final published = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => ConfigurationEntityWizardPage(
-          entityType: entityType,
-          contextData: contextData,
-          initialDraft: draft,
-          repository: repository,
-        ),
+        builder: (_) => page,
       ),
     );
     if (published == true) publicationPendingSync = true;
@@ -77,7 +85,9 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     if (id == null) return;
     setState(() => actionRunning = true);
     try {
-      final validation = await repository.validateDraft(id);
+      final validation = draft['entidad_tipo'] == 'FORMATO'
+          ? await repository.validateFormatStructure(id)
+          : await repository.validateDraft(id);
       if (!mounted) return;
       final valid = validation['valido'] == true;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -127,10 +137,16 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
 
     setState(() => actionRunning = true);
     try {
-      final result = await repository.publishDraft(
-        id,
-        notes: 'Publicación desde el panel del constructor visual.',
-      );
+      final result = draft['entidad_tipo'] == 'FORMATO'
+          ? await repository.publishFormatStructure(
+              id,
+              notes:
+                  'Publicación atómica desde el panel del constructor visual.',
+            )
+          : await repository.publishDraft(
+              id,
+              notes: 'Publicación desde el panel del constructor visual.',
+            );
       if (!mounted) return;
       if (result['publicado'] == true) {
         publicationPendingSync = true;
@@ -307,6 +323,15 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
           children: [
             _entityCard(
               width: cardWidth,
+              icon: Icons.business_center_outlined,
+              title: 'Rubro',
+              description: 'Organiza una línea de negocio completa.',
+              count: _templateCount('RUBRO'),
+              enabled: true,
+              onTap: () => _openWizard('RUBRO'),
+            ),
+            _entityCard(
+              width: cardWidth,
               icon: Icons.view_sidebar_outlined,
               title: 'Sección',
               description: 'Agrupa módulos dentro de un rubro.',
@@ -329,8 +354,8 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
               title: 'Formato, tabla y campos',
               description: 'Asistente encadenado para captura dinámica.',
               count: _templateCount('FORMATO'),
-              enabled: false,
-              onTap: () {},
+              enabled: true,
+              onTap: () => _openWizard('FORMATO'),
             ),
           ],
         );
@@ -449,7 +474,10 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         : <String, dynamic>{};
     final valid = validation['valido'] == true;
     final editable = state != 'PUBLICADO' && state != 'ARCHIVADO';
-    final supported = entityType == 'SECCION' || entityType == 'MODULO';
+    final supported = entityType == 'RUBRO' ||
+        entityType == 'SECCION' ||
+        entityType == 'MODULO' ||
+        entityType == 'FORMATO';
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 10),
@@ -543,6 +571,8 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
 
   IconData _entityIcon(String type) {
     switch (type) {
+      case 'RUBRO':
+        return Icons.business_center_outlined;
       case 'SECCION':
         return Icons.view_sidebar_outlined;
       case 'MODULO':
