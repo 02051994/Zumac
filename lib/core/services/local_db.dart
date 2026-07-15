@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import '../../config/tenant_config.dart';
+import 'offline_record_state.dart';
 
 class LocalDb {
   static final LocalDb instance = LocalDb._();
@@ -29,7 +30,7 @@ class LocalDb {
     final path = await _databasePath();
     _db = await openDatabase(
       path,
-      version: 28,
+      version: 29,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (database) async {
@@ -101,6 +102,30 @@ class LocalDb {
   Future<void> _upgradePendingRecords(Database db) async {
     if (await _tableExists(db, 'pending_records')) {
       await _ensureColumn(db, 'pending_records', 'created_by', 'text');
+      await _ensureColumn(db, 'pending_records', 'updated_at_local', 'text');
+      await _ensureColumn(db, 'pending_records', 'base_updated_at', 'text');
+      await _ensureColumn(
+          db, 'pending_records', 'version_local', 'integer default 1');
+      await _ensureColumn(db, 'pending_records', 'version_remota', 'text');
+      await _ensureColumn(db, 'pending_records', 'conflict_json', 'text');
+      await _ensureColumn(db, 'pending_records', 'last_attempt_at', 'text');
+      await _ensureColumn(db, 'pending_records', 'evidence_json', 'text');
+      await _safeCreateIndex(
+        db,
+        'pending_records',
+        'create index if not exists idx_pending_retry on pending_records(estado, last_attempt_at)',
+      );
+      // Si la aplicación se cerró durante un envío, la operación no quedó
+      // confirmada. Recuperarla como error reintentable evita colas bloqueadas.
+      await db.rawUpdate('''
+        update pending_records
+        set estado = ?,
+            error_mensaje = coalesce(error_mensaje, 'Sincronización interrumpida')
+        where estado = ?
+      ''', [
+        OfflineRecordState.error.storageValue,
+        OfflineRecordState.syncing.storageValue,
+      ]);
     }
   }
 
@@ -625,9 +650,17 @@ class LocalDb {
         error_mensaje text,
         created_at text,
         synced_at text,
-        created_by text
+        created_by text,
+        updated_at_local text,
+        base_updated_at text,
+        version_local integer default 1,
+        version_remota text,
+        conflict_json text,
+        last_attempt_at text,
+        evidence_json text
       )
     ''');
+    await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
     await _upgradeNavigationMetadata(db);
   }
@@ -1296,6 +1329,46 @@ class LocalDb {
     // Guardado local debe ser mínimo: solo persistir la cola pendiente.
     // No depurar, no recargar matrices y no ejecutar trabajos secundarios aquí.
     final scopedRow = Map<String, dynamic>.from(row);
+    final idLocal = scopedRow['id_local']?.toString().trim() ?? '';
+    final now = DateTime.now().toUtc().toIso8601String();
+    if (idLocal.isNotEmpty) {
+      final existing = await database.query(
+        'pending_records',
+        columns: ['version_local', 'created_at', 'base_updated_at'],
+        where: 'id_local = ?',
+        whereArgs: [idLocal],
+        limit: 1,
+      );
+      final currentVersion = existing.isEmpty
+          ? 0
+          : (existing.first['version_local'] as num?)?.toInt() ?? 0;
+      scopedRow['version_local'] = currentVersion + 1;
+      if (existing.isNotEmpty &&
+          (scopedRow['created_at']?.toString().trim().isEmpty ?? true)) {
+        scopedRow['created_at'] = existing.first['created_at'];
+      }
+      if (existing.isNotEmpty &&
+          (scopedRow['base_updated_at']?.toString().trim().isEmpty ?? true)) {
+        scopedRow['base_updated_at'] = existing.first['base_updated_at'];
+      }
+    }
+    scopedRow.putIfAbsent(
+      'estado',
+      () => OfflineRecordState.pending.storageValue,
+    );
+    scopedRow['updated_at_local'] = now;
+    scopedRow.putIfAbsent('created_at', () => now);
+    scopedRow.putIfAbsent('base_updated_at', () {
+      try {
+        final payload = jsonDecode(scopedRow['payload_json']?.toString() ?? '')
+            as Map<String, dynamic>;
+        return _payloadValue(payload, ['updated_at', 'UPDATED_AT'])
+            ?.toString()
+            .trim();
+      } catch (_) {
+        return null;
+      }
+    });
     scopedRow.putIfAbsent('empresa_id', () => TenantConfig.defaultEmpresaId);
     await database.insert('pending_records', scopedRow,
         conflictAlgorithm: ConflictAlgorithm.replace);
@@ -1322,8 +1395,11 @@ class LocalDb {
     String? empresaId,
   }) async {
     final database = await db;
-    final where = <String>['estado = ?'];
-    final args = <Object?>['pendiente'];
+    final where = <String>['estado in (?, ?)'];
+    final args = <Object?>[
+      OfflineRecordState.pending.storageValue,
+      OfflineRecordState.error.storageValue,
+    ];
     if (userId != null && userId.trim().isNotEmpty) {
       where.add('user_id = ?');
       args.add(userId.trim());
@@ -1349,8 +1425,13 @@ class LocalDb {
     final where = <String>[];
     final args = <Object?>[];
     if (estado != null) {
-      where.add('estado = ?');
-      args.add(estado);
+      if (estado == OfflineRecordState.pending.storageValue) {
+        where.add('estado <> ?');
+        args.add(OfflineRecordState.synced.storageValue);
+      } else {
+        where.add('estado = ?');
+        args.add(estado);
+      }
     }
     if (userId != null && userId.trim().isNotEmpty) {
       where.add('user_id = ?');
@@ -1381,8 +1462,8 @@ class LocalDb {
     final database = await db;
     await database.delete(
       'pending_records',
-      where: 'estado = ? and id_local like ?',
-      whereArgs: ['pendiente', '$idLocalPrefix%'],
+      where: 'estado <> ? and id_local like ?',
+      whereArgs: [OfflineRecordState.synced.storageValue, '$idLocalPrefix%'],
     );
   }
 
@@ -1422,8 +1503,12 @@ class LocalDb {
     final database = await db;
     final rows = await database.query(
       'pending_records',
-      where: 'estado = ? and formato_id = ? and tabla_destino = ?',
-      whereArgs: ['pendiente', formatoId, tablaDestino],
+      where: 'estado <> ? and formato_id = ? and tabla_destino = ?',
+      whereArgs: [
+        OfflineRecordState.synced.storageValue,
+        formatoId,
+        tablaDestino,
+      ],
     );
     final idsToDelete = <String>[];
     for (final row in rows) {
@@ -1448,7 +1533,8 @@ class LocalDb {
   Future<int> pendingCount() async {
     final database = await db;
     final result = await database.rawQuery(
-      "select count(*) as total from pending_records where estado = 'pendiente'",
+      'select count(*) as total from pending_records where estado <> ?',
+      [OfflineRecordState.synced.storageValue],
     );
     return (result.first['total'] as int?) ?? 0;
   }
@@ -1457,7 +1543,12 @@ class LocalDb {
     final database = await db;
     await database.update(
       'pending_records',
-      {'estado': 'sincronizado', 'synced_at': DateTime.now().toIso8601String()},
+      {
+        'estado': OfflineRecordState.synced.storageValue,
+        'synced_at': DateTime.now().toUtc().toIso8601String(),
+        'error_mensaje': null,
+        'conflict_json': null,
+      },
       where: 'id_local = ?',
       whereArgs: [idLocal],
     );
@@ -1466,14 +1557,19 @@ class LocalDb {
   Future<void> markSyncedBatch(List<String> idLocals) async {
     if (idLocals.isEmpty) return;
     final database = await db;
-    final now = DateTime.now().toIso8601String();
+    final now = DateTime.now().toUtc().toIso8601String();
     await database.transaction((txn) async {
       final batch = txn.batch();
       for (final idLocal in idLocals) {
         if (idLocal.trim().isEmpty) continue;
         batch.update(
           'pending_records',
-          {'estado': 'sincronizado', 'synced_at': now},
+          {
+            'estado': OfflineRecordState.synced.storageValue,
+            'synced_at': now,
+            'error_mensaje': null,
+            'conflict_json': null,
+          },
           where: 'id_local = ?',
           whereArgs: [idLocal],
         );
@@ -1488,9 +1584,65 @@ class LocalDb {
     final database = await db;
     await database.rawUpdate('''
       update pending_records
-      set estado = 'pendiente', intentos = intentos + 1, error_mensaje = ?
+      set estado = ?,
+          intentos = intentos + 1,
+          error_mensaje = ?,
+          last_attempt_at = ?
       where id_local = ?
-    ''', [error, idLocal]);
+    ''', [
+      OfflineRecordState.error.storageValue,
+      error,
+      DateTime.now().toUtc().toIso8601String(),
+      idLocal,
+    ]);
+  }
+
+  Future<void> markSyncing(String idLocal) async {
+    final database = await db;
+    await database.update(
+      'pending_records',
+      {
+        'estado': OfflineRecordState.syncing.storageValue,
+        'last_attempt_at': DateTime.now().toUtc().toIso8601String(),
+        'error_mensaje': null,
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<void> markConflict(
+    String idLocal,
+    Map<String, dynamic> conflict, {
+    String? remoteVersion,
+  }) async {
+    final database = await db;
+    await database.update(
+      'pending_records',
+      {
+        'estado': OfflineRecordState.conflict.storageValue,
+        'conflict_json': jsonEncode(conflict),
+        'version_remota': remoteVersion,
+        'error_mensaje': 'El registro remoto cambió desde la última descarga.',
+        'last_attempt_at': DateTime.now().toUtc().toIso8601String(),
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
+  }
+
+  Future<void> retryConflict(String idLocal) async {
+    final database = await db;
+    await database.update(
+      'pending_records',
+      {
+        'estado': OfflineRecordState.pending.storageValue,
+        'conflict_json': null,
+        'error_mensaje': null,
+      },
+      where: 'id_local = ?',
+      whereArgs: [idLocal],
+    );
   }
 
   Map<String, dynamic> decodePayload(Map<String, dynamic> row) {

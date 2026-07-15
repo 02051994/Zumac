@@ -10,6 +10,7 @@ import 'field_definitions.dart';
 import 'local_db.dart';
 import 'local_session.dart';
 import 'evidence_storage.dart';
+import 'offline_record_state.dart';
 
 class SyncService {
   final _supabase = Supabase.instance.client;
@@ -854,6 +855,9 @@ class SyncService {
       activeEmpresaId = TenantConfig.defaultEmpresaId;
     }
 
+    final configurationVersion = bootstrap['configuration_version'];
+    final offlinePolicy = bootstrap['offline_policy'];
+
     final incremental = bootstrap.remove('__incremental__') == true;
     Future<void> saveLocal(
       String table,
@@ -1650,8 +1654,24 @@ class SyncService {
       'sync_checkpoint_data_at': syncCheckpoint,
       'sync_checkpoint_permissions_at': syncCheckpoint,
       'sync_checkpoint_matrices_at': syncCheckpoint,
-      'sync_schema_version': '28',
+      'sync_schema_version': '29',
     };
+    if (configurationVersion is Map) {
+      final normalized = Map<String, dynamic>.from(configurationVersion);
+      checkpoints['configuration_version_json'] = jsonEncode(normalized);
+      final number = normalized['numero_version']?.toString().trim() ?? '';
+      final version = normalized['version']?.toString().trim() ?? '';
+      final publishedAt = normalized['published_at']?.toString().trim() ?? '';
+      if (number.isNotEmpty) checkpoints['configuration_version_number'] = number;
+      if (version.isNotEmpty) checkpoints['configuration_version'] = version;
+      if (publishedAt.isNotEmpty) {
+        checkpoints['configuration_published_at'] = publishedAt;
+      }
+    }
+    if (offlinePolicy is Map) {
+      checkpoints['offline_policy_json'] =
+          jsonEncode(Map<String, dynamic>.from(offlinePolicy));
+    }
     if (refreshFullConfig && fullConfigSnapshotReady) {
       checkpoints['config_full_refresh_at'] = syncCheckpoint;
     }
@@ -2476,8 +2496,9 @@ class SyncService {
     required Map<String, dynamic> queueRow,
   }) async {
     final cleaned = Map<String, dynamic>.from(payload);
+    final rawTable = queueRow['tabla_destino']?.toString() ?? 'tabla';
     final table =
-        _sanitizePathPart(queueRow['tabla_destino']?.toString() ?? 'tabla');
+        _sanitizePathPart(rawTable);
     final modulo =
         _sanitizePathPart(queueRow['modulo_id']?.toString() ?? 'modulo');
     final formato =
@@ -2511,10 +2532,156 @@ class SyncService {
         // Bucket privado: en BD se guarda la ruta, no una URL firmada larga.
         // La URL corta se genera solo al visualizar la evidencia.
         cleaned[entry.key] = EvidenceStorage.toStorageUri(path);
+        try {
+          final empresaId = queueRow['empresa_id']?.toString().trim() ?? '';
+          final userId = _supabase.auth.currentUser?.id ?? '';
+          final storedId = queueRow['id_local']?.toString().trim() ?? '';
+          if (empresaId.isNotEmpty && userId.isNotEmpty && storedId.isNotEmpty) {
+            await _supabase.from('ARCHIVOS_EVIDENCIA_APPGT').upsert(
+              {
+                'empresa_id': empresaId,
+                'user_id': userId,
+                'tabla_destino': rawTable,
+                'registro_id_local': storedId,
+                'campo': entry.key,
+                'bucket': EvidenceStorage.bucket,
+                'object_path': path,
+                'mime_type': _contentType(rawValue),
+                'tamano_bytes': bytes.length,
+                'estado': 'PENDIENTE_VINCULAR',
+              },
+              onConflict: 'empresa_id,bucket,object_path',
+            );
+          }
+        } catch (_) {
+          // El manifiesto mejora la trazabilidad, pero una falla al registrarlo
+          // no debe invalidar un archivo que Storage ya recibió correctamente.
+        }
       }());
     }
     if (uploads.isNotEmpty) await Future.wait(uploads);
     return cleaned;
+  }
+
+  Future<void> _markEvidenceLinked(
+    List<String> storedIds,
+    String empresaId,
+  ) async {
+    if (storedIds.isEmpty) return;
+    try {
+      await _supabase
+          .from('ARCHIVOS_EVIDENCIA_APPGT')
+          .update({
+            'estado': 'VINCULADO',
+            'linked_at': DateTime.now().toUtc().toIso8601String(),
+          })
+          .eq('empresa_id', empresaId)
+          .inFilter('registro_id_local', storedIds);
+    } catch (_) {
+      // La evidencia permanece PENDIENTE_VINCULAR y puede auditarse/repararse.
+    }
+  }
+
+  Future<Map<String, dynamic>?> _remoteConflictFor({
+    required String table,
+    required Map<String, dynamic> payload,
+    required Map<String, dynamic> queueRow,
+  }) async {
+    final idLocal = payload['id_local']?.toString().trim() ?? '';
+    final baseUpdatedAt = queueRow['base_updated_at']?.toString().trim() ?? '';
+    if (idLocal.isEmpty || baseUpdatedAt.isEmpty) return null;
+
+    try {
+      final rows = await _supabase
+          .from(table)
+          .select()
+          .eq('id_local', idLocal)
+          .limit(1);
+      if (rows.isEmpty) return null;
+      final remote = Map<String, dynamic>.from(rows.first);
+      final remoteUpdatedAt =
+          _valueByColumn(remote, ['updated_at', 'UPDATED_AT'])
+                  ?.toString()
+                  .trim() ??
+              '';
+      if (!OfflineConflictPolicy.hasRemoteChange(
+        baseUpdatedAt: baseUpdatedAt,
+        remoteUpdatedAt: remoteUpdatedAt,
+      )) {
+        return null;
+      }
+      return {
+        'tabla_destino': table,
+        'registro_id_local': queueRow['id_local'],
+        'base_updated_at': baseUpdatedAt,
+        'remote_updated_at': remoteUpdatedAt,
+        'payload_local': payload,
+        'payload_remoto': remote,
+      };
+    } catch (_) {
+      // Tablas antiguas sin updated_at siguen usando la estrategia last-write.
+      return null;
+    }
+  }
+
+  Future<void> _recordRemoteConflict({
+    required Map<String, dynamic> conflict,
+    required String empresaId,
+    required String userId,
+    required String syncRunId,
+  }) async {
+    try {
+      await _supabase.from('CONFLICTOS_SYNC_APPGT').insert({
+        'empresa_id': empresaId,
+        'user_id': userId,
+        'sincronizacion_id': syncRunId,
+        'tabla_destino': conflict['tabla_destino'],
+        'registro_id_local': conflict['registro_id_local'],
+        'payload_local': conflict['payload_local'],
+        'payload_remoto': conflict['payload_remoto'],
+        'base_updated_at': conflict['base_updated_at'],
+        'remote_updated_at': conflict['remote_updated_at'],
+      });
+    } catch (_) {
+      // El conflicto queda también en SQLite aunque falle su telemetría remota.
+    }
+  }
+
+  Future<void> _startRemoteSyncRun({
+    required String syncRunId,
+    required String empresaId,
+    required String userId,
+    required int pendingCount,
+  }) async {
+    try {
+      await _supabase.from('SINCRONIZACIONES_APPGT').insert({
+        'id': syncRunId,
+        'empresa_id': empresaId,
+        'user_id': userId,
+        'estado': 'EJECUTANDO',
+        'pendientes_iniciales': pendingCount,
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _finishRemoteSyncRun({
+    required String syncRunId,
+    required int synced,
+    required int conflicts,
+    required int errors,
+  }) async {
+    final state = errors > 0
+        ? (synced > 0 || conflicts > 0 ? 'PARCIAL' : 'ERROR')
+        : (conflicts > 0 ? 'PARCIAL' : 'COMPLETADA');
+    try {
+      await _supabase.from('SINCRONIZACIONES_APPGT').update({
+        'estado': state,
+        'sincronizados': synced,
+        'conflictos': conflicts,
+        'errores': errors,
+        'finished_at': DateTime.now().toUtc().toIso8601String(),
+      }).eq('id', syncRunId);
+    } catch (_) {}
   }
 
   Map<String, dynamic> _cleanPayloadForInsert(Map<String, dynamic> payload) {
@@ -2711,6 +2878,15 @@ class SyncService {
       throw Exception('Todos los tareos deben tener hora fin');
     }
     int synced = 0;
+    int conflicts = 0;
+    int errors = 0;
+    final syncRunId = _uuid.v4();
+    await _startRemoteSyncRun(
+      syncRunId: syncRunId,
+      empresaId: activeEmpresaId,
+      userId: activeUserId,
+      pendingCount: pending.length,
+    );
 
     final byTable = <String, List<Map<String, dynamic>>>{};
 
@@ -2718,19 +2894,39 @@ class SyncService {
       final row = pending[pendingIndex];
       if (pendingIndex > 0 && pendingIndex % 20 == 0) await _yieldToUi();
       final storedIdLocal = row['id_local'] as String;
-      final idLocal = _isPureUuid(storedIdLocal) ? storedIdLocal : _uuid.v4();
-      final table = row['tabla_destino'] as String;
-      final payload =
-          jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
-      payload['id_local'] = idLocal;
-      payload.putIfAbsent('empresa_id', () => activeEmpresaId);
-
+      await _local.markSyncing(storedIdLocal);
       try {
+        final idLocal = _isPureUuid(storedIdLocal) ? storedIdLocal : _uuid.v4();
+        final table = row['tabla_destino'] as String;
+        final payload =
+            jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
+        payload['id_local'] = idLocal;
+        payload.putIfAbsent('empresa_id', () => activeEmpresaId);
         final withHiddenIds =
             await _ensureHiddenIdsForSync(table: table, payload: payload);
         final cleanedPayload = _cleanPayloadForInsert(withHiddenIds);
         final knownPayload =
             await _filterPayloadToKnownFields(table, cleanedPayload);
+        final conflict = await _remoteConflictFor(
+          table: table,
+          payload: knownPayload,
+          queueRow: row,
+        );
+        if (conflict != null) {
+          await _local.markConflict(
+            storedIdLocal,
+            conflict,
+            remoteVersion: conflict['remote_updated_at']?.toString(),
+          );
+          await _recordRemoteConflict(
+            conflict: conflict,
+            empresaId: activeEmpresaId,
+            userId: activeUserId,
+            syncRunId: syncRunId,
+          );
+          conflicts++;
+          continue;
+        }
         final finalPayload =
             await _uploadEvidenceFiles(payload: knownPayload, queueRow: row);
         finalPayload['__stored_id_local__'] = storedIdLocal;
@@ -2739,6 +2935,7 @@ class SyncService {
             .add(finalPayload);
       } catch (e) {
         await _local.markError(storedIdLocal, friendlyError(e));
+        errors++;
       }
     }
 
@@ -2771,6 +2968,7 @@ class SyncService {
           }
           await _local.markSyncedBatch(syncedIds);
           await _local.upsertMatrixRowPayloads(table, cachePayloads);
+          await _markEvidenceLinked(syncedIds, activeEmpresaId);
           synced += syncedIds.length;
         } catch (_) {
           // Respaldo fino: si un lote falla por una fila defectuosa, no bloquea a las demás.
@@ -2782,15 +2980,23 @@ class SyncService {
               await _supabase.from(table).upsert(clean, onConflict: 'id_local');
               await _local.markSynced(storedIdLocal);
               await _local.upsertMatrixRowPayload(table, clean);
+              await _markEvidenceLinked([storedIdLocal], activeEmpresaId);
               synced++;
             } catch (e) {
               await _local.markError(storedIdLocal, friendlyError(e));
+              errors++;
             }
           }
         }
       }
     }
 
+    await _finishRemoteSyncRun(
+      syncRunId: syncRunId,
+      synced: synced,
+      conflicts: conflicts,
+      errors: errors,
+    );
     return synced;
   }
 }

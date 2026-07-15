@@ -1,8 +1,11 @@
+import 'dart:convert';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'package:appgt_offline_subtables/config/tenant_config.dart';
 import 'package:appgt_offline_subtables/core/services/local_db.dart';
+import 'package:appgt_offline_subtables/core/services/offline_record_state.dart';
 
 void main() {
   sqfliteFfiInit();
@@ -23,7 +26,24 @@ void main() {
         id_local text primary key,
         user_id text,
         empresa_id text,
-        estado text
+        modulo_id text,
+        formato_id text,
+        formato_tabla_id text,
+        tabla_destino text,
+        payload_json text,
+        estado text,
+        intentos integer default 0,
+        error_mensaje text,
+        created_at text,
+        synced_at text,
+        created_by text,
+        updated_at_local text,
+        base_updated_at text,
+        version_local integer default 1,
+        version_remota text,
+        conflict_json text,
+        last_attempt_at text,
+        evidence_json text
       )
     ''');
     local = LocalDb.forTesting(database);
@@ -96,5 +116,88 @@ void main() {
     );
 
     expect(rows.map((row) => row['id_local']), ['propio']);
+  });
+
+  test('la cola local versiona y conserva la base remota', () async {
+    await local.insertPending({
+      'id_local': 'registro-versionado',
+      'user_id': 'usuario-a',
+      'payload_json': jsonEncode({
+        'updated_at': '2026-07-15T10:00:00Z',
+        'valor': 1,
+      }),
+    });
+
+    var row = (await database.query(
+      'pending_records',
+      where: 'id_local = ?',
+      whereArgs: ['registro-versionado'],
+    ))
+        .single;
+    expect(row['estado'], OfflineRecordState.pending.storageValue);
+    expect(row['version_local'], 1);
+    expect(row['base_updated_at'], '2026-07-15T10:00:00Z');
+
+    await local.insertPending({
+      'id_local': 'registro-versionado',
+      'user_id': 'usuario-a',
+      'payload_json': jsonEncode({'valor': 2}),
+    });
+    row = (await database.query(
+      'pending_records',
+      where: 'id_local = ?',
+      whereArgs: ['registro-versionado'],
+    ))
+        .single;
+    expect(row['version_local'], 2);
+    expect(row['base_updated_at'], '2026-07-15T10:00:00Z');
+  });
+
+  test('los estados de reintento y conflicto quedan trazables', () async {
+    await local.insertPending({
+      'id_local': 'registro-conflicto',
+      'user_id': 'usuario-a',
+      'payload_json': '{}',
+    });
+
+    await local.markSyncing('registro-conflicto');
+    var row = (await database.query('pending_records')).single;
+    expect(row['estado'], OfflineRecordState.syncing.storageValue);
+
+    await local.markError('registro-conflicto', 'fallo temporal');
+    row = (await database.query('pending_records')).single;
+    expect(row['estado'], OfflineRecordState.error.storageValue);
+    expect(row['intentos'], 1);
+
+    await local.markConflict(
+      'registro-conflicto',
+      {'remote_updated_at': '2026-07-15T11:00:00Z'},
+      remoteVersion: '2026-07-15T11:00:00Z',
+    );
+    row = (await database.query('pending_records')).single;
+    expect(row['estado'], OfflineRecordState.conflict.storageValue);
+    expect(row['conflict_json'], contains('remote_updated_at'));
+
+    await local.retryConflict('registro-conflicto');
+    row = (await database.query('pending_records')).single;
+    expect(row['estado'], OfflineRecordState.pending.storageValue);
+    expect(row['conflict_json'], isNull);
+  });
+
+  test('la politica optimista detecta cambios remotos posteriores', () {
+    expect(
+      OfflineConflictPolicy.hasRemoteChange(
+        baseUpdatedAt: '2026-07-15T10:00:00Z',
+        remoteUpdatedAt: '2026-07-15T10:00:01Z',
+      ),
+      isTrue,
+    );
+    expect(
+      OfflineConflictPolicy.hasRemoteChange(
+        baseUpdatedAt: '2026-07-15T10:00:00Z',
+        remoteUpdatedAt: '2026-07-15T10:00:00Z',
+      ),
+      isFalse,
+    );
   });
 }
