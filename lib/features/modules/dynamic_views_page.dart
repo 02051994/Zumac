@@ -388,7 +388,11 @@ class _DynamicViewsPageState extends State<DynamicViewsPage> {
   }
 
   Future<List<Map<String, dynamic>>> _pendingLocalPayloadsForTable(String table) async {
-    final pending = await local.pendingRecords();
+    final session = LocalSession();
+    final pending = await local.pendingRecords(
+      userId: await session.cachedUserId(),
+      empresaId: await session.cachedEmpresaId(),
+    );
     final out = <Map<String, dynamic>>[];
     for (final record in pending) {
       if (!_sameTableName(record['tabla_destino'], table)) continue;

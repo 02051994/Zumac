@@ -5,6 +5,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../../config/tenant_config.dart';
 import 'field_definitions.dart';
 import 'local_db.dart';
 import 'local_session.dart';
@@ -729,6 +730,19 @@ class SyncService {
     String? since,
     bool allowFullFallback = true,
   }) async {
+    try {
+      final result = await _supabase.rpc(
+        'appgt_bootstrap_offline_data_v2',
+        params: {'p_since': since},
+      );
+      if (result is Map) {
+        return Map<String, dynamic>.from(result)
+          ..['__incremental__'] = since != null && since.trim().isNotEmpty;
+      }
+    } catch (_) {
+      // Compatibilidad temporal durante el despliegue de la migracion v2.
+    }
+
     if (since != null && since.trim().isNotEmpty) {
       try {
         final result = await _supabase.rpc(
@@ -825,6 +839,19 @@ class SyncService {
       throw Exception(
         'No se pudo actualizar datos sin credenciales. Falta habilitar en Supabase la función appgt_bootstrap_offline_data para anon/authenticated.',
       );
+    }
+
+    var activeEmpresaId = await LocalSession().cachedEmpresaId();
+    final empresaPayload = bootstrap['empresa'];
+    if (empresaPayload is Map) {
+      final remoteEmpresaId = empresaPayload['id']?.toString().trim() ?? '';
+      if (remoteEmpresaId.isNotEmpty) {
+        activeEmpresaId = remoteEmpresaId;
+        await LocalSession().saveActiveEmpresaId(remoteEmpresaId);
+      }
+    }
+    if (activeEmpresaId.isEmpty) {
+      activeEmpresaId = TenantConfig.defaultEmpresaId;
     }
 
     final incremental = bootstrap.remove('__incremental__') == true;
@@ -1087,6 +1114,7 @@ class SyncService {
       modules
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'nombre': e['nombre'],
                 'seccion': e['seccion']?.toString().trim() ?? '',
                 'orden': e['orden'] ?? 0,
@@ -1103,6 +1131,7 @@ class SyncService {
       formats
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'modulo_id': e['modulo_id'],
                 'nombre': e['nombre'],
                 'tabla_destino': e['tabla_destino'],
@@ -1122,6 +1151,7 @@ class SyncService {
       formatTables
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'formato_id': e['formato_id'],
                 'nombre': e['nombre'],
                 'tabla_destino': e['tabla_destino'],
@@ -1173,6 +1203,7 @@ class SyncService {
       permissions
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'user_id': e['user_id'],
                 'modulo': e['modulo'],
                 'formato': e['formato'],
@@ -1204,6 +1235,7 @@ class SyncService {
           .map((e) => {
                 'id': e['id']?.toString() ??
                     '${e['seccion']}_${e['modulo']}_${e['nombre_vista']}',
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'seccion': e['seccion']?.toString() ?? '',
                 'modulo': e['modulo']?.toString() ?? '',
                 'tipo_vista': e['tipo_vista']?.toString() ?? 'tabla',
@@ -1235,6 +1267,7 @@ class SyncService {
       profiles
           .map((e) => {
                 'id': e['id']?.toString() ?? '',
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])
                         ?.toString() ??
                     '',
@@ -1264,9 +1297,10 @@ class SyncService {
       sections
           .map((e) {
             final id = e['id']?.toString() ?? '';
-            return {
-              'id': id,
-              'nombre': e['nombre']?.toString() ?? id,
+        return {
+          'id': id,
+          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+          'nombre': e['nombre']?.toString() ?? id,
               'icono': e['icono']?.toString() ?? 'apps',
               'orden': e['orden'] ?? 0,
               'numero_decimales': e['numero_decimales'],
@@ -1290,9 +1324,10 @@ class SyncService {
                 ? e['seccion'].toString().trim()
                 : (e['seccion_id']?.toString().trim() ?? '');
             final userId = e['user_id']?.toString() ?? '';
-            return {
-              'id': e['id']?.toString() ?? '${userId}_$sectionId',
-              'user_id': userId,
+        return {
+          'id': e['id']?.toString() ?? '${userId}_$sectionId',
+          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+          'user_id': userId,
               'seccion_id': sectionId,
               'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
               'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
@@ -1311,6 +1346,7 @@ class SyncService {
       specialFormats
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'modulo_id': e['modulo_id'],
                 'formato_id': e['formato_id'],
                 'tipo_pantalla': e['tipo_pantalla'],
@@ -1331,6 +1367,7 @@ class SyncService {
       if (_isDeletedRow(e)) continue;
       fieldRows.add({
         'id': e['id']?.toString() ?? '${e['tabla_destino']}_${e['campo']}',
+        'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
         'tabla_destino': e['tabla_destino'],
         'campo': e['campo'],
         'etiqueta': e['etiqueta'] ?? e['campo'],
@@ -1594,7 +1631,7 @@ class SyncService {
       'sync_checkpoint_data_at': syncCheckpoint,
       'sync_checkpoint_permissions_at': syncCheckpoint,
       'sync_checkpoint_matrices_at': syncCheckpoint,
-      'sync_schema_version': '26',
+      'sync_schema_version': '27',
     };
     if (refreshFullConfig && fullConfigSnapshotReady) {
       checkpoints['config_full_refresh_at'] = syncCheckpoint;
@@ -1605,6 +1642,7 @@ class SyncService {
   Future<void> refreshLoginPermissionsOnly() async {
     final user = _supabase.auth.currentUser;
     if (user == null) return;
+    final activeEmpresaId = await LocalSession().cachedEmpresaId();
 
     final profileRows = await _supabase
         .from('PERFILES_DE_USUARIOS_APPGT')
@@ -1631,6 +1669,7 @@ class SyncService {
       profiles
           .map((e) => {
                 'id': e['id']?.toString() ?? '',
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'nombres': (e['nombres'] ?? e['Nombres'] ?? e['NOMBRES'])
                         ?.toString() ??
                     '',
@@ -1658,6 +1697,7 @@ class SyncService {
       permissions
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'user_id': e['user_id'],
                 'modulo': e['modulo'],
                 'formato': e['formato'],
@@ -1680,8 +1720,8 @@ class SyncService {
               })
           .where((e) => e['id'] != null)
           .toList(),
-      where: 'user_id = ?',
-      whereArgs: [user.id],
+      where: 'user_id = ? and empresa_id = ?',
+      whereArgs: [user.id, activeEmpresaId],
     );
 
     await _local.replaceRowsWhere(
@@ -1692,9 +1732,10 @@ class SyncService {
                 ? e['seccion'].toString().trim()
                 : (e['seccion_id']?.toString().trim() ?? '');
             final userId = e['user_id']?.toString() ?? '';
-            return {
-              'id': e['id']?.toString() ?? '${userId}_$sectionId',
-              'user_id': userId,
+        return {
+          'id': e['id']?.toString() ?? '${userId}_$sectionId',
+          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+          'user_id': userId,
               'seccion_id': sectionId,
               'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
               'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
@@ -1704,8 +1745,8 @@ class SyncService {
           })
           .where((e) => (e['seccion_id'] as String).isNotEmpty)
           .toList(),
-      where: 'user_id = ?',
-      whereArgs: [user.id],
+      where: 'user_id = ? and empresa_id = ?',
+      whereArgs: [user.id, activeEmpresaId],
     );
 
     final checkpoint = DateTime.now().toUtc().toIso8601String();
@@ -2601,7 +2642,15 @@ class SyncService {
 
     await _ensureOnlineAuthSession();
 
-    final pending = await _local.pendingRecords();
+    final activeUserId = _supabase.auth.currentUser?.id;
+    if (activeUserId == null || activeUserId.isEmpty) {
+      throw Exception('No hay un usuario autenticado para sincronizar.');
+    }
+    final activeEmpresaId = await LocalSession().cachedEmpresaId();
+    final pending = await _local.pendingRecords(
+      userId: activeUserId,
+      empresaId: activeEmpresaId,
+    );
     var tareosSinHoraFin = 0;
     for (var pendingIndex = 0; pendingIndex < pending.length; pendingIndex++) {
       final row = pending[pendingIndex];
@@ -2637,6 +2686,7 @@ class SyncService {
       final payload =
           jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
       payload['id_local'] = idLocal;
+      payload.putIfAbsent('empresa_id', () => activeEmpresaId);
 
       try {
         final withHiddenIds =

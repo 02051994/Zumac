@@ -4,6 +4,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../config/tenant_config.dart';
 import 'local_db.dart';
 
 class LocalSession {
@@ -15,6 +16,7 @@ class LocalSession {
   static const _passwordPlainKey = 'offline_password_local_reauth';
   static const _offlineUsersKey = 'offline_users_v2';
   static const _securePasswordKey = 'appgt_secure_reauth_password';
+  static const _empresaIdKey = 'offline_empresa_id';
 
   final FlutterSecureStorage _secureStorage = const FlutterSecureStorage();
 
@@ -220,6 +222,30 @@ class LocalSession {
   Future<String?> cachedUserId() async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString(_userIdKey);
+  }
+
+  Future<String> cachedEmpresaId() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString(_empresaIdKey) ?? TenantConfig.defaultEmpresaId;
+  }
+
+  Future<void> saveActiveEmpresaId(String empresaId) async {
+    final clean = empresaId.trim();
+    if (clean.isEmpty) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_empresaIdKey, clean);
+  }
+
+  Future<void> clearActiveSession() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_emailKey);
+    await prefs.remove(_loginKey);
+    await prefs.remove(_userIdKey);
+    await prefs.remove(_passwordHashKey);
+    await prefs.remove(_aliasesKey);
+    await prefs.remove(_empresaIdKey);
+    await prefs.remove(_passwordPlainKey);
+    await _secureStorage.delete(key: _securePasswordKey);
   }
 
   Future<String?> cachedEmail() async {

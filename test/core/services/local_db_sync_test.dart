@@ -1,6 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'package:appgt_offline_subtables/config/tenant_config.dart';
 import 'package:appgt_offline_subtables/core/services/local_db.dart';
 
 void main() {
@@ -15,6 +16,14 @@ void main() {
       create table sync_items(
         id text primary key,
         name text not null
+      )
+    ''');
+    await database.execute('''
+      create table pending_records(
+        id_local text primary key,
+        user_id text,
+        empresa_id text,
+        estado text
       )
     ''');
     local = LocalDb.forTesting(database);
@@ -60,5 +69,32 @@ void main() {
     expect(rows, [
       {'id': 'estable', 'name': 'Configuracion valida'},
     ]);
+  });
+
+  test('los pendientes se aislan por usuario y empresa', () async {
+    await local.insertPending({
+      'id_local': 'propio',
+      'user_id': 'usuario-a',
+      'estado': 'pendiente',
+    });
+    await database.insert('pending_records', {
+      'id_local': 'otro-usuario',
+      'user_id': 'usuario-b',
+      'empresa_id': TenantConfig.defaultEmpresaId,
+      'estado': 'pendiente',
+    });
+    await database.insert('pending_records', {
+      'id_local': 'otra-empresa',
+      'user_id': 'usuario-a',
+      'empresa_id': 'empresa-b',
+      'estado': 'pendiente',
+    });
+
+    final rows = await local.pendingRecords(
+      userId: 'usuario-a',
+      empresaId: TenantConfig.defaultEmpresaId,
+    );
+
+    expect(rows.map((row) => row['id_local']), ['propio']);
   });
 }

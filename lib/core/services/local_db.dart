@@ -4,6 +4,8 @@ import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
+import '../../config/tenant_config.dart';
+
 class LocalDb {
   static final LocalDb instance = LocalDb._();
   LocalDb._({Database? database}) : _db = database;
@@ -27,7 +29,7 @@ class LocalDb {
     final path = await _databasePath();
     _db = await openDatabase(
       path,
-      version: 26,
+      version: 27,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (database) async {
@@ -100,6 +102,39 @@ class LocalDb {
     if (await _tableExists(db, 'pending_records')) {
       await _ensureColumn(db, 'pending_records', 'created_by', 'text');
     }
+  }
+
+  Future<void> _upgradeTenantColumns(Database db) async {
+    const tables = <String>[
+      'local_modules',
+      'local_formats',
+      'local_format_tables',
+      'local_permissions',
+      'local_profile',
+      'local_form_fields',
+      'local_special_formats',
+      'local_sections',
+      'local_section_permissions',
+      'local_dynamic_views',
+      'local_catalog_values',
+      'local_matrix_rows',
+      'pending_records',
+    ];
+    for (final table in tables) {
+      if (await _tableExists(db, table)) {
+        await _ensureColumn(
+          db,
+          table,
+          'empresa_id',
+          "text not null default '${TenantConfig.defaultEmpresaId}'",
+        );
+      }
+    }
+    await _safeCreateIndex(
+      db,
+      'pending_records',
+      'create index if not exists idx_pending_user_empresa_estado on pending_records(user_id, empresa_id, estado)',
+    );
   }
 
   Future<bool> _tableExists(Database db, String table) async {
@@ -379,6 +414,7 @@ class LocalDb {
     await _createLocalSyncMeta(db);
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
+    await _upgradeTenantColumns(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -445,6 +481,7 @@ class LocalDb {
     await _createLocalDynamicViews(db);
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
+    await _upgradeTenantColumns(db);
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -577,6 +614,7 @@ class LocalDb {
         created_by text
       )
     ''');
+    await _upgradeTenantColumns(db);
   }
 
   Map<String, dynamic> _cleanForTable(
@@ -1208,7 +1246,9 @@ class LocalDb {
     final database = await db;
     // Guardado local debe ser mínimo: solo persistir la cola pendiente.
     // No depurar, no recargar matrices y no ejecutar trabajos secundarios aquí.
-    await database.insert('pending_records', row,
+    final scopedRow = Map<String, dynamic>.from(row);
+    scopedRow.putIfAbsent('empresa_id', () => TenantConfig.defaultEmpresaId);
+    await database.insert('pending_records', scopedRow,
         conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
@@ -1228,22 +1268,53 @@ class LocalDb {
     ''');
   }
 
-  Future<List<Map<String, dynamic>>> pendingRecords() async {
+  Future<List<Map<String, dynamic>>> pendingRecords({
+    String? userId,
+    String? empresaId,
+  }) async {
     final database = await db;
-    return database.query('pending_records',
-        where: 'estado = ?', whereArgs: ['pendiente']);
-  }
-
-  Future<List<Map<String, dynamic>>> allRecords({String? estado}) async {
-    final database = await db;
-    await _pruneLocalRecords(database);
-    if (estado == null) {
-      return database.query('pending_records', orderBy: 'created_at desc');
+    final where = <String>['estado = ?'];
+    final args = <Object?>['pendiente'];
+    if (userId != null && userId.trim().isNotEmpty) {
+      where.add('user_id = ?');
+      args.add(userId.trim());
+    }
+    if (empresaId != null && empresaId.trim().isNotEmpty) {
+      where.add('empresa_id = ?');
+      args.add(empresaId.trim());
     }
     return database.query(
       'pending_records',
-      where: 'estado = ?',
-      whereArgs: [estado],
+      where: where.join(' and '),
+      whereArgs: args,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> allRecords({
+    String? estado,
+    String? userId,
+    String? empresaId,
+  }) async {
+    final database = await db;
+    await _pruneLocalRecords(database);
+    final where = <String>[];
+    final args = <Object?>[];
+    if (estado != null) {
+      where.add('estado = ?');
+      args.add(estado);
+    }
+    if (userId != null && userId.trim().isNotEmpty) {
+      where.add('user_id = ?');
+      args.add(userId.trim());
+    }
+    if (empresaId != null && empresaId.trim().isNotEmpty) {
+      where.add('empresa_id = ?');
+      args.add(empresaId.trim());
+    }
+    return database.query(
+      'pending_records',
+      where: where.isEmpty ? null : where.join(' and '),
+      whereArgs: args.isEmpty ? null : args,
       orderBy: estado == 'sincronizado'
           ? 'coalesce(synced_at, created_at) desc'
           : 'created_at desc',

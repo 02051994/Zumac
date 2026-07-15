@@ -80,6 +80,10 @@ class _LoginPageState extends State<LoginPage> {
     });
     await Future<void>.delayed(const Duration(milliseconds: 48));
     try {
+      if (Supabase.instance.client.auth.currentUser == null) {
+        throw Exception(
+            'Por seguridad, los datos se actualizan despues de iniciar sesion. Ingresa con internet para actualizar tu empresa y permisos.');
+      }
       if (!await SyncService().hasInternet()) {
         throw Exception(
             'Se necesita conexión a internet para actualizar datos.');
@@ -305,7 +309,7 @@ class _LoginPageState extends State<LoginPage> {
                 loadingProgress = 0.70;
                 loadingMessage = 'Actualizando permisos...';
               });
-            await SyncService().refreshLoginPermissionsOnly();
+            await SyncService().downloadAllForOffline();
           } else {
             if (mounted)
               setState(() {

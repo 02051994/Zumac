@@ -351,6 +351,11 @@ class _ModulesPageState extends State<ModulesPage> {
     final rawSectionPerms = await local.getAll('local_section_permissions');
     final localSections = await local.getAll('local_sections', orderBy: 'orden');
     final rawProfileRows = await local.getAll('local_profile');
+    final activeEmpresaId = await LocalSession().cachedEmpresaId();
+    bool belongsToActiveEmpresa(Map<String, dynamic> row) {
+      final rowEmpresaId = row['empresa_id']?.toString().trim() ?? '';
+      return rowEmpresaId.isEmpty || rowEmpresaId == activeEmpresaId;
+    }
 
     // Seguridad visual/local: nunca renderizar el menú con permisos cacheados
     // de otro usuario. La BD local es un cache de trabajo, por eso al cambiar
@@ -363,15 +368,27 @@ class _ModulesPageState extends State<ModulesPage> {
     await Future<void>.delayed(const Duration(milliseconds: 1));
     final permissions = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawPermissions.where((e) => e['user_id']?.toString().trim() == activeUserId).toList();
+        : rawPermissions
+            .where((e) =>
+                belongsToActiveEmpresa(e) &&
+                e['user_id']?.toString().trim() == activeUserId)
+            .toList();
 
     final sectionPerms = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawSectionPerms.where((e) => e['user_id']?.toString().trim() == activeUserId).toList();
+        : rawSectionPerms
+            .where((e) =>
+                belongsToActiveEmpresa(e) &&
+                e['user_id']?.toString().trim() == activeUserId)
+            .toList();
 
     final profileRows = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawProfileRows.where((e) => e['id']?.toString().trim() == activeUserId).toList();
+        : rawProfileRows
+            .where((e) =>
+                belongsToActiveEmpresa(e) &&
+                e['id']?.toString().trim() == activeUserId)
+            .toList();
 
     final allowedModuleIds = permissions
         .where((e) => _asBool(e['can_view']))
@@ -391,8 +408,8 @@ class _ModulesPageState extends State<ModulesPage> {
       final placeholders = List.filled(allowedModuleIds.length, '?').join(',');
       moduleRows = await local.where(
         'local_modules',
-        'id in ($placeholders) and activo = 1',
-        allowedModuleIds,
+        'id in ($placeholders) and activo = 1 and empresa_id = ?',
+        [...allowedModuleIds, activeEmpresaId],
         orderBy: 'orden',
       );
     }
@@ -411,8 +428,8 @@ class _ModulesPageState extends State<ModulesPage> {
       }
       final candidates = await local.where(
         'local_formats',
-        'modulo_id = ? and activo = 1',
-        [moduleId],
+        'modulo_id = ? and activo = 1 and empresa_id = ?',
+        [moduleId, activeEmpresaId],
         orderBy: 'orden',
       );
       moduleFormats[moduleId] = candidates.where((format) {
@@ -431,6 +448,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
     await Future<void>.delayed(const Duration(milliseconds: 1));
     final visibleDynamicViews = remoteDynamicViews.where((view) {
+      if (!belongsToActiveEmpresa(view)) return false;
       if (!_asBool(view['activo'], fallback: true)) return false;
       final sectionId = _txt(view['seccion']);
       final sectionIsAllowed = allowedSectionIds.isEmpty ||
@@ -473,7 +491,9 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       modules = moduleRows;
-      sections = localSections.where((e) => e['activo'] == 1).toList();
+      sections = localSections
+          .where((e) => e['activo'] == 1 && belongsToActiveEmpresa(e))
+          .toList();
       formatsByModule = moduleFormats;
       dynamicViews = visibleDynamicViews;
       allowedSections = allowedSectionIds;
@@ -583,6 +603,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Future<void> logout() async {
     await Supabase.instance.client.auth.signOut();
+    await LocalSession().clearActiveSession();
     if (!mounted) return;
     Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginPage()));
   }

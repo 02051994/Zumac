@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../core/services/local_db.dart';
+import '../../core/services/local_session.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
 
@@ -53,7 +54,12 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
   }
 
   Future<void> _load() async {
-    final data = await local.allRecords(estado: filtro);
+    final session = LocalSession();
+    final data = await local.allRecords(
+      estado: filtro,
+      userId: await session.cachedUserId(),
+      empresaId: await session.cachedEmpresaId(),
+    );
     _masterDetailByFormat = await _loadMasterDetailMetas();
 
     final grouped = <String, Map<String, dynamic>>{};
@@ -559,7 +565,12 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
 
     final formatoId = row['formato_id']?.toString() ?? '';
     final tablaDestino = row['tabla_destino']?.toString() ?? '';
-    final allPending = await local.allRecords(estado: 'pendiente');
+    final session = LocalSession();
+    final allPending = await local.allRecords(
+      estado: 'pendiente',
+      userId: await session.cachedUserId(),
+      empresaId: await session.cachedEmpresaId(),
+    );
     final siblingPayloads = <Map<String, dynamic>>[];
 
     for (final candidate in allPending) {
