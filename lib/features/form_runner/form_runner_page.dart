@@ -3334,7 +3334,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       rows.add(
         LayoutBuilder(
           builder: (context, constraints) {
-            if (rowFields.length == 1) {
+            // La matriz decide qué campos comparten fila, pero el ancho real
+            // decide cuántas columnas caben. Así se conserva la configuración
+            // dinámica sin comprimir cuatro controles dentro de un teléfono.
+            const minimumFieldWidth = 220.0;
+            const spacing = 12.0;
+            final availableColumns = math.max(
+              1,
+              ((constraints.maxWidth + spacing) /
+                      (minimumFieldWidth + spacing))
+                  .floor(),
+            );
+            final columnCount = math.min(rowFields.length, availableColumns);
+
+            if (columnCount == 1) {
               return Column(
                 children: [
                   for (final field in rowFields) ...[
@@ -3345,13 +3358,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               );
             }
 
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            final fieldWidth =
+                (constraints.maxWidth - (spacing * (columnCount - 1))) /
+                    columnCount;
+            return Wrap(
+              spacing: spacing,
+              runSpacing: spacing,
               children: [
-                for (int i = 0; i < rowFields.length; i++) ...[
-                  Expanded(child: KeyedSubtree(key: ValueKey("field_${rowFields[i]['campo']}"), child: _styledFieldWidget(rowFields[i]))),
-                  if (i < rowFields.length - 1) const SizedBox(width: 12),
-                ],
+                for (final field in rowFields)
+                  SizedBox(
+                    width: fieldWidth,
+                    child: KeyedSubtree(
+                      key: ValueKey("field_${field['campo']}"),
+                      child: _styledFieldWidget(field),
+                    ),
+                  ),
               ],
             );
           },

@@ -23,6 +23,7 @@ import '../../core/services/formula_engine.dart';
 import '../../core/services/sync_service.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
+import 'widgets/mobile_records_list.dart';
 
 class _TableCellFormat {
   final Color? textColor;
@@ -116,6 +117,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Map<String, List<Map<String, dynamic>>> matrixRowsByTable = {};
   final Map<String, double> _columnWidths = {};
   final Map<String, String> _columnFilters = {};
+  final TextEditingController _mobileSearchController = TextEditingController();
   String? _sortColumn;
   bool _sortAscending = true;
 
@@ -152,6 +154,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _deleteSelectionVersion.dispose();
     _tableRenderVersion.dispose();
     _filterControlsVersion.dispose();
+    _mobileSearchController.dispose();
     super.dispose();
   }
 
@@ -3028,34 +3031,47 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // Antes aquí se llamaba a _load() al cerrar el diálogo; eso provocaba que,
     // al cancelar/retroceder/guardar local, la tabla volviera a consultar datos
     // y recargara firmas/fotos, congelando la UI en Windows.
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            return Dialog(
-              insetPadding: EdgeInsets.zero,
-              backgroundColor: Colors.transparent,
-              child: Center(
-                child: SizedBox(
-                  width: constraints.maxWidth * 0.50,
-                  height: constraints.maxHeight * 0.92,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
-                    child: Material(
-                      elevation: 10,
-                      color: Colors.white,
-                      child: page,
+    final compact = widget.mobileMode || MediaQuery.sizeOf(context).width < 760;
+    if (compact) {
+      // En móvil el formulario debe disponer de todo el ancho. Se conserva la
+      // misma página dinámica; solo cambia el contenedor de navegación.
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => page,
+        ),
+      );
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              final width = math.min(1180.0, constraints.maxWidth - 32.0);
+              return Dialog(
+                insetPadding: const EdgeInsets.all(16),
+                backgroundColor: Colors.transparent,
+                child: Center(
+                  child: SizedBox(
+                    width: width,
+                    height: constraints.maxHeight * 0.94,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(18),
+                      child: Material(
+                        elevation: 10,
+                        color: Colors.white,
+                        child: page,
+                      ),
                     ),
                   ),
                 ),
-              ),
-            );
-          },
-        );
-      },
-    );
+              );
+            },
+          );
+        },
+      );
+    }
 
     // No llamar _load() aquí. Mantener la tabla actual intacta.
     // Se conserva el aviso al contenedor padre para refrescar contadores/badges
@@ -5776,23 +5792,227 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   Widget _mobileBody() {
+    List<String> mobileColumns() {
+      final rawColumns = displayColumns.isNotEmpty
+          ? displayColumns
+          : _columnsFromRows(records.isNotEmpty ? records : filteredRecords);
+      return _matrixColumnsForTable(
+        tableName ?? widget.format['tabla_destino']?.toString() ?? '',
+        rawColumns,
+      );
+    }
+
+    List<Map<String, dynamic>> mobileRows(List<String> columns) {
+      final query = _norm(_mobileSearchController.text);
+      if (query.isEmpty) return filteredRecords;
+      return filteredRecords.where((row) {
+        return columns.any((column) {
+          final value = _displayCellValue(_valueByColumn(row, column));
+          return _norm(value).contains(query);
+        });
+      }).toList(growable: false);
+    }
+
+    Widget mobileCell(
+      BuildContext context,
+      Map<String, dynamic> row,
+      String column,
+    ) {
+      final value = _valueByColumn(row, column);
+      final text = _displayCellValue(value);
+      final format = _tableCellFormat(column, row);
+      if (_isMediaColumn(column) && _looksLikeUrl(text)) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: _mediaCell(column, text),
+        );
+      }
+      return Container(
+        padding: format.bgColor == null
+            ? EdgeInsets.zero
+            : const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        decoration: BoxDecoration(
+          color: format.bgColor,
+          border: format.borderColor == null
+              ? null
+              : Border.all(color: format.borderColor!),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          text.isEmpty ? '—' : text,
+          style: TextStyle(
+            color: format.textColor ?? const Color(0xFF17324D),
+            fontSize: 13,
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      body: Padding(
-        padding: const EdgeInsets.all(10),
-        child: loading
-            ? Center(child: Text(_loadingMessage))
-            : offline
-                ? _emptyMessage('Sin conexión a Internet')
-                : error != null
-                    ? Center(child: Text(error!, style: const TextStyle(color: Colors.black87)))
-                    : ValueListenableBuilder<int>(
-                        valueListenable: _tableRenderVersion,
-                        builder: (context, _, __) => RepaintBoundary(child: _recordsTable(filteredRecords)),
-                      ),
+      backgroundColor: const Color(0xFFF5F8FA),
+      body: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+          child: loading
+              ? Center(child: Text(_loadingMessage))
+              : offline
+                  ? _emptyMessage('Sin conexión a Internet')
+                  : error != null
+                      ? Center(child: Text(error!, style: const TextStyle(color: Colors.black87)))
+                      : ValueListenableBuilder<int>(
+                          valueListenable: _tableRenderVersion,
+                          builder: (context, _, __) {
+                            final columns = mobileColumns();
+                            final rows = mobileRows(columns);
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            '${widget.format['nombre'] ?? 'Registros'}',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF17324D),
+                                              fontSize: 19,
+                                              fontWeight: FontWeight.w800,
+                                            ),
+                                          ),
+                                          Text(
+                                            '${tableName ?? 'Tabla no configurada'} · ${rows.length} registro(s)',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              color: Color(0xFF60758A),
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      tooltip: 'Actualizar tabla',
+                                      onPressed: _load,
+                                      icon: const Icon(Icons.refresh, color: Color(0xFF176B87)),
+                                    ),
+                                    if (canDelete)
+                                      ValueListenableBuilder<int>(
+                                        valueListenable: _deleteSelectionVersion,
+                                        builder: (context, _, __) => IconButton(
+                                          tooltip: 'Eliminar seleccionados',
+                                          onPressed: _selectedDeleteRows.isEmpty
+                                              ? null
+                                              : _deleteSelectedRows,
+                                          icon: Badge(
+                                            isLabelVisible: _selectedDeleteRows.isNotEmpty,
+                                            label: Text('${_selectedDeleteRows.length}'),
+                                            child: const Icon(Icons.delete_outline),
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                                const SizedBox(height: 9),
+                                TextField(
+                                  controller: _mobileSearchController,
+                                  onChanged: (_) => _notifyTableRenderChanged(),
+                                  textInputAction: TextInputAction.search,
+                                  decoration: InputDecoration(
+                                    hintText: 'Buscar en esta tabla',
+                                    prefixIcon: const Icon(Icons.search),
+                                    suffixIcon: _mobileSearchController.text.isEmpty
+                                        ? null
+                                        : IconButton(
+                                            tooltip: 'Limpiar búsqueda',
+                                            onPressed: () {
+                                              _mobileSearchController.clear();
+                                              _notifyTableRenderChanged();
+                                            },
+                                            icon: const Icon(Icons.close),
+                                          ),
+                                    filled: true,
+                                    fillColor: Colors.white,
+                                    isDense: true,
+                                    border: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(color: Color(0xFFDCE6EC)),
+                                    ),
+                                    enabledBorder: OutlineInputBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      borderSide: const BorderSide(color: Color(0xFFDCE6EC)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(height: 10),
+                                Expanded(
+                                  child: columns.isEmpty
+                                      ? _emptyMessage('No hay columnas visibles')
+                                      : ValueListenableBuilder<int>(
+                                          valueListenable: _deleteSelectionVersion,
+                                          builder: (context, _, __) => MobileRecordsList(
+                                            records: rows,
+                                            columns: columns,
+                                            rowNumberOffset: _currentPage * _pageSize,
+                                            labelFor: _tableHeaderLabel,
+                                            textFor: (row, column) => _displayCellValue(
+                                              _valueByColumn(row, column),
+                                            ),
+                                            cellBuilder: mobileCell,
+                                            onEdit: canUpdate ? _editRemoteRecord : null,
+                                            selectionEnabled: canDelete,
+                                            isSelected: (row, index) => _selectedDeleteRowKeys
+                                                .contains(_remoteRowHighlightKey(row, index)),
+                                            onSelected: (row, index, selected) =>
+                                                _toggleDeleteSelection(row, index, selected),
+                                          ),
+                                        ),
+                                ),
+                                _mobilePaginationControls(rows.length),
+                              ],
+                            );
+                          },
+                        ),
+        ),
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: _newRecord,
+        tooltip: 'Nuevo registro',
         child: const Icon(Icons.add),
+      ),
+    );
+  }
+
+  Widget _mobilePaginationControls(int shownRows) {
+    return Container(
+      padding: const EdgeInsets.only(top: 4, bottom: 6),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Página ${_currentPage + 1} · $shownRows registro(s)',
+              style: const TextStyle(color: Color(0xFF60758A), fontSize: 12),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Página anterior',
+            onPressed: loading || _currentPage == 0
+                ? null
+                : () => _goToPage(_currentPage - 1),
+            icon: const Icon(Icons.chevron_left),
+          ),
+          IconButton(
+            tooltip: 'Página siguiente',
+            onPressed: loading || !_hasNextPage
+                ? null
+                : () => _goToPage(_currentPage + 1),
+            icon: const Icon(Icons.chevron_right),
+          ),
+        ],
       ),
     );
   }
