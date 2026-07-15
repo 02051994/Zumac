@@ -17,6 +17,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
+import '../../core/services/dynamic_rules_repository.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/formula_engine.dart';
 import '../modules/modules_page.dart';
@@ -628,7 +629,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           .whereType<String>(),
     ];
 
-    final rawRows = await _formFieldsForCandidateTablesFast(candidateTables);
+    final legacyRows = await _formFieldsForCandidateTablesFast(candidateTables);
+    final rawRows = await DynamicRulesRepository().applyToFields(
+      legacyRows,
+      empresaId: await LocalSession().cachedEmpresaId(),
+    );
     final rows = rawRows.where(_fieldBelongsToCurrentCapture).toList();
 
     // CRÍTICO: id_campo_dropdown puede apuntar a un campo de OTRA tabla mediante

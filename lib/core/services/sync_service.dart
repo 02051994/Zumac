@@ -893,6 +893,11 @@ class SyncService {
     final etapasFenologicas =
         _rowsFromBootstrap(bootstrap, 'etapas_fenologicas');
     final conteoEstadios = _rowsFromBootstrap(bootstrap, 'conteo_estadios');
+    final rubros = _rowsFromBootstrap(bootstrap, 'rubros');
+    final dropdownRules = _rowsFromBootstrap(bootstrap, 'dropdowns');
+    final validationRules = _rowsFromBootstrap(bootstrap, 'validations');
+    final conditionRules = _rowsFromBootstrap(bootstrap, 'conditions');
+    final formulaRules = _rowsFromBootstrap(bootstrap, 'formulas');
     var dynamicViews = _rowsFromBootstrap(bootstrap, 'dynamic_views');
     bool bootstrapSnapshot(String key) =>
         !incremental && bootstrap[key] is List;
@@ -927,6 +932,11 @@ class SyncService {
       'MATRIZ_SECCIONES_APPGT',
       'MATRIZ_VISTAS_DINAMICAS_APPGT',
       'MATRIZ_FORMATOS_ESPECIALES_APPGT',
+      'RUBROS_APPGT',
+      'MATRIZ_DROPDOWNS_APPGT',
+      'MATRIZ_VALIDACIONES_APPGT',
+      'MATRIZ_CONDICIONES_APPGT',
+      'MATRIZ_FORMULAS_APPGT',
     };
     final lastConfigFullRefresh =
         await _local.getMetaValue('config_full_refresh_at');
@@ -1059,6 +1069,11 @@ class SyncService {
     dynamicSourceRows['SN-MATRIZ_CONCEPTOS_ESTADIOS_PLAGAS'] = plagasConceptos;
     dynamicSourceRows['SN-MATRIZ_ETAPAS_FENOLOGICAS'] = etapasFenologicas;
     dynamicSourceRows['LOTES_VARIEDADES_GT'] = lotesVariedades;
+    dynamicSourceRows['RUBROS_APPGT'] = rubros;
+    dynamicSourceRows['MATRIZ_DROPDOWNS_APPGT'] = dropdownRules;
+    dynamicSourceRows['MATRIZ_VALIDACIONES_APPGT'] = validationRules;
+    dynamicSourceRows['MATRIZ_CONDICIONES_APPGT'] = conditionRules;
+    dynamicSourceRows['MATRIZ_FORMULAS_APPGT'] = formulaRules;
     final flowRulesForCache = flowRules.isNotEmpty
         ? flowRules
         : ((!incremental ||
@@ -1302,6 +1317,10 @@ class SyncService {
           'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
           'nombre': e['nombre']?.toString() ?? id,
               'icono': e['icono']?.toString() ?? 'apps',
+              'rubro_id': e['rubro_id']?.toString(),
+              'tipo_contenido':
+                  e['tipo_contenido']?.toString() ?? 'GENERICO',
+              'ruta_flutter': e['ruta_flutter']?.toString(),
               'orden': e['orden'] ?? 0,
               'numero_decimales': e['numero_decimales'],
               'grid_fila': e['grid_fila'],
@@ -1631,7 +1650,7 @@ class SyncService {
       'sync_checkpoint_data_at': syncCheckpoint,
       'sync_checkpoint_permissions_at': syncCheckpoint,
       'sync_checkpoint_matrices_at': syncCheckpoint,
-      'sync_schema_version': '27',
+      'sync_schema_version': '28',
     };
     if (refreshFullConfig && fullConfigSnapshotReady) {
       checkpoints['config_full_refresh_at'] = syncCheckpoint;
@@ -1884,6 +1903,20 @@ class SyncService {
         List<Map<String, dynamic>>.from(etapasFenologicas);
     dynamicSourceRows['LOTES_VARIEDADES_GT'] =
         List<Map<String, dynamic>>.from(lotesVariedades);
+    for (final matrixTable in const <String>[
+      'RUBROS_APPGT',
+      'MATRIZ_DROPDOWNS_APPGT',
+      'MATRIZ_VALIDACIONES_APPGT',
+      'MATRIZ_CONDICIONES_APPGT',
+      'MATRIZ_FORMULAS_APPGT',
+    ]) {
+      try {
+        dynamicSourceRows[matrixTable] =
+            await _selectAllRowsPaged(matrixTable);
+      } catch (_) {
+        // Compatibilidad temporal con proyectos que aun no aplicaron la matriz.
+      }
+    }
     if (flowRulesForCache.isNotEmpty) {
       dynamicSourceRows['MATRIZ_ESTADOS_FLUJO_APPGT'] = flowRulesForCache;
     }
@@ -2070,6 +2103,10 @@ class SyncService {
               'id': id,
               'nombre': e['nombre']?.toString() ?? id,
               'icono': e['icono']?.toString() ?? 'apps',
+              'rubro_id': e['rubro_id']?.toString(),
+              'tipo_contenido':
+                  e['tipo_contenido']?.toString() ?? 'GENERICO',
+              'ruta_flutter': e['ruta_flutter']?.toString(),
               'orden': e['orden'] ?? 0,
               'numero_decimales': e['numero_decimales'],
               'grid_fila': e['grid_fila'],

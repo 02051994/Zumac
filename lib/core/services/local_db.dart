@@ -29,7 +29,7 @@ class LocalDb {
     final path = await _databasePath();
     _db = await openDatabase(
       path,
-      version: 27,
+      version: 28,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (database) async {
@@ -135,6 +135,18 @@ class LocalDb {
       'pending_records',
       'create index if not exists idx_pending_user_empresa_estado on pending_records(user_id, empresa_id, estado)',
     );
+  }
+
+  Future<void> _upgradeNavigationMetadata(Database db) async {
+    if (!await _tableExists(db, 'local_sections')) return;
+    await _ensureColumn(db, 'local_sections', 'rubro_id', 'text');
+    await _ensureColumn(
+      db,
+      'local_sections',
+      'tipo_contenido',
+      "text not null default 'GENERICO'",
+    );
+    await _ensureColumn(db, 'local_sections', 'ruta_flutter', 'text');
   }
 
   Future<bool> _tableExists(Database db, String table) async {
@@ -415,6 +427,7 @@ class LocalDb {
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
+    await _upgradeNavigationMetadata(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -482,6 +495,7 @@ class LocalDb {
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
+    await _upgradeNavigationMetadata(db);
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -615,6 +629,7 @@ class LocalDb {
       )
     ''');
     await _upgradeTenantColumns(db);
+    await _upgradeNavigationMetadata(db);
   }
 
   Map<String, dynamic> _cleanForTable(
@@ -1149,6 +1164,40 @@ class LocalDb {
       [table],
     );
     return (result.first['total'] as int?) ?? 0;
+  }
+
+  Future<List<Map<String, dynamic>>> matrixPayloads(
+    String sourceTable, {
+    String? empresaId,
+  }) async {
+    final table = sourceTable.trim();
+    if (table.isEmpty) return const <Map<String, dynamic>>[];
+    final database = await db;
+    final rows = await database.query(
+      'local_matrix_rows',
+      columns: ['payload_json'],
+      where: 'source_table = ?',
+      whereArgs: [table],
+    );
+    final decoded = <Map<String, dynamic>>[];
+    for (final row in rows) {
+      try {
+        final payload = Map<String, dynamic>.from(
+          jsonDecode(row['payload_json']?.toString() ?? '{}') as Map,
+        );
+        final payloadEmpresa = payload['empresa_id']?.toString().trim() ?? '';
+        if (empresaId != null &&
+            empresaId.trim().isNotEmpty &&
+            payloadEmpresa.isNotEmpty &&
+            payloadEmpresa != empresaId.trim()) {
+          continue;
+        }
+        decoded.add(payload);
+      } catch (_) {
+        // Una fila de cache corrupta no debe impedir abrir el formulario.
+      }
+    }
+    return decoded;
   }
 
   Future<Map<String, dynamic>?> getTableCacheInfo(String sourceTable) async {

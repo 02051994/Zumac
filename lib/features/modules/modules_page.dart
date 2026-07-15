@@ -55,6 +55,7 @@ class _ModulesPageState extends State<ModulesPage> {
   List<Map<String, dynamic>> dynamicViews = [];
   Map<String, dynamic>? desktopSelectedDynamicView;
   Map<String, dynamic>? mobileSelectedSpecial;
+  String? _expandedSectionId;
 
   String? _desktopContentCacheKey;
   Widget? _desktopContentCache;
@@ -125,6 +126,38 @@ class _ModulesPageState extends State<ModulesPage> {
   String _id(dynamic value) => _txt(value).toLowerCase();
 
   bool _sameId(dynamic a, dynamic b) => _id(a) == _id(b);
+
+  String _sectionKind(Map<String, dynamic> section) {
+    final configured = _txt(section['tipo_contenido']).toUpperCase();
+    if (configured.isNotEmpty) return configured;
+    switch (_id(section['id'])) {
+      case 'reportes':
+        return 'REPORTES';
+      case 'registros_pendientes':
+        return 'VISTAS_DINAMICAS';
+      case 'registros_locales':
+        return 'REGISTROS_LOCALES';
+      case 'inicio_gt':
+        return 'INICIO';
+      default:
+        return _sectionHasFormatModules(_txt(section['id']))
+            ? 'FORMATOS'
+            : 'GENERICO';
+    }
+  }
+
+  bool _sectionUsesDynamicViews(Map<String, dynamic> section) =>
+      _sectionKind(section) == 'VISTAS_DINAMICAS' ||
+      _sectionHasDynamicViews(_txt(section['id']));
+
+  void _onSectionExpansionChanged(String sectionId, bool expanded) {
+    final next = expanded ? sectionId : (_expandedSectionId == sectionId ? null : _expandedSectionId);
+    if (next == _expandedSectionId) return;
+    setState(() {
+      _expandedSectionId = next;
+      _clearDesktopSidebarCache();
+    });
+  }
 
   List<Map<String, dynamic>> _modulesForSection(String sectionId) {
     return modules.where((m) {
@@ -265,11 +298,6 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   bool _sectionHasDynamicViews(String sectionId) => _dynamicViewsForSection(sectionId).isNotEmpty;
-
-  bool _shouldRenderDynamicSection(String sectionId) {
-    final id = _id(sectionId);
-    return _sectionHasDynamicViews(sectionId) || id == 'registros_pendientes' || id == 'inicio_gt';
-  }
 
   List<Map<String, dynamic>> _reportViewsForModule(Map<String, dynamic> module) {
     final moduleId = _txt(module['id']);
@@ -767,6 +795,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   VoidCallback _sectionTap(Map<String, dynamic> section) {
     final id = section['id']?.toString() ?? '';
+    final kind = _sectionKind(section);
     final desktopLayout = isWideDesktopLayout(context);
 
     if (desktopLayout) {
@@ -774,13 +803,13 @@ class _ModulesPageState extends State<ModulesPage> {
     }
 
     if (id == 'modulos') return () => Navigator.pop(context);
-    if (id == 'registros_locales') {
+    if (kind == 'REGISTROS_LOCALES') {
       return () => Navigator.push(context, MaterialPageRoute(builder: (_) => const LocalRecordsPage())).then((_) => loadLocal());
     }
-    if (id == 'reportes') {
+    if (kind == 'REPORTES') {
       return () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsPage()));
     }
-    if (_shouldRenderDynamicSection(id)) {
+    if (_sectionUsesDynamicViews(section)) {
       return () => Navigator.push(context, MaterialPageRoute(builder: (_) => DynamicViewsPage(section: section, onPendingChanged: loadLocal))).then((_) => loadLocal());
     }
     return () => Navigator.push(context, MaterialPageRoute(builder: (_) => GenericSectionPage(section: section))).then((_) => loadLocal());
@@ -808,7 +837,7 @@ class _ModulesPageState extends State<ModulesPage> {
             _iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()),
             _sectionTitle(section),
             _sectionTap(section),
-            badge: section['id'] == 'registros_locales' && pending > 0 ? '$pending' : null,
+            badge: _sectionKind(section) == 'REGISTROS_LOCALES' && pending > 0 ? '$pending' : null,
           ),
       ],
     );
@@ -977,13 +1006,14 @@ class _ModulesPageState extends State<ModulesPage> {
     if (section != null) {
       final id = section['id']?.toString() ?? '';
       final title = _sectionTitle(section);
-      if (id == 'registros_locales') {
+      final kind = _sectionKind(section);
+      if (kind == 'REGISTROS_LOCALES') {
         return _desktopPanelShell(title: title, child: LocalRecordsPage(embedded: true, onChanged: loadLocal));
       }
-      if (id == 'reportes') {
+      if (kind == 'REPORTES') {
         return _desktopPanelShell(title: title, child: const ReportsPage(embedded: true));
       }
-      if (_shouldRenderDynamicSection(id)) {
+      if (_sectionUsesDynamicViews(section)) {
         return _desktopPanelShell(
           title: title,
           child: DynamicViewsPage(
@@ -1055,6 +1085,7 @@ class _ModulesPageState extends State<ModulesPage> {
       desktopSelectedReportModule?['id']?.toString() ?? '',
       desktopSelectedReportView?['id']?.toString() ?? '',
       desktopSelectedDynamicView?['id']?.toString() ?? '',
+      _expandedSectionId ?? '',
       modules.length.toString(),
       sections.length.toString(),
       formatsByModule.values.fold<int>(0, (a, b) => a + b.length).toString(),
@@ -1127,7 +1158,10 @@ class _ModulesPageState extends State<ModulesPage> {
                           Theme(
                             data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                             child: ExpansionTile(
-                              initiallyExpanded: true,
+                              key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+                              initiallyExpanded: _expandedSectionId == _txt(section['id']),
+                              onExpansionChanged: (expanded) =>
+                                  _onSectionExpansionChanged(_txt(section['id']), expanded),
                               leading: Icon(_iconForSection(_txt(section['id']), section['icono']?.toString()), color: Colors.white),
                               iconColor: Colors.white,
                               collapsedIconColor: Colors.white70,
@@ -1165,10 +1199,14 @@ class _ModulesPageState extends State<ModulesPage> {
                             ),
                           ),
                         for (final section in visibleSections.where((s) => !_sectionHasFormatModules(_txt(s['id']))))
-                          if (section['id']?.toString() == 'reportes')
+                          if (_sectionKind(section) == 'REPORTES')
                             Theme(
                               data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                               child: ExpansionTile(
+                                key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+                                initiallyExpanded: _expandedSectionId == _txt(section['id']),
+                                onExpansionChanged: (expanded) =>
+                                    _onSectionExpansionChanged(_txt(section['id']), expanded),
                                 leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()), color: Colors.white70),
                                 iconColor: Colors.white,
                                 collapsedIconColor: Colors.white70,
@@ -1212,10 +1250,14 @@ class _ModulesPageState extends State<ModulesPage> {
                                 }).toList(),
                               ),
                             )
-                          else if (_sameId(section['id'], 'registros_pendientes') || _sectionHasDynamicViews(section['id']?.toString() ?? ''))
+                          else if (_sectionUsesDynamicViews(section))
                             Theme(
                               data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
                               child: ExpansionTile(
+                                key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+                                initiallyExpanded: _expandedSectionId == _txt(section['id']),
+                                onExpansionChanged: (expanded) =>
+                                    _onSectionExpansionChanged(_txt(section['id']), expanded),
                                 leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()), color: Colors.white70),
                                 iconColor: Colors.white,
                                 collapsedIconColor: Colors.white70,
@@ -1244,7 +1286,7 @@ class _ModulesPageState extends State<ModulesPage> {
                             ListTile(
                               leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()), color: Colors.white70),
                               title: Text(_sectionTitle(section), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                              trailing: section['id'] == 'registros_locales' && pending > 0
+                              trailing: _sectionKind(section) == 'REGISTROS_LOCALES' && pending > 0
                                   ? CircleAvatar(radius: 10, child: Text('$pending', style: const TextStyle(fontSize: 10)))
                                   : null,
                               onTap: _sectionTap(section),
@@ -1444,9 +1486,10 @@ class _ModulesPageState extends State<ModulesPage> {
     final section = desktopSelectedSection;
     if (section != null) {
       final id = section['id']?.toString() ?? '';
-      if (id == 'registros_locales') return LocalRecordsPage(embedded: true, onChanged: loadLocal);
-      if (id == 'reportes') return const ReportsPage(embedded: true, showRail: false);
-      if (_shouldRenderDynamicSection(id)) return DynamicViewsPage(section: section, view: desktopSelectedDynamicView, embedded: true, onPendingChanged: loadLocal);
+      final kind = _sectionKind(section);
+      if (kind == 'REGISTROS_LOCALES') return LocalRecordsPage(embedded: true, onChanged: loadLocal);
+      if (kind == 'REPORTES') return const ReportsPage(embedded: true, showRail: false);
+      if (_sectionUsesDynamicViews(section)) return DynamicViewsPage(section: section, view: desktopSelectedDynamicView, embedded: true, onPendingChanged: loadLocal);
       if (!_sectionHasFormatModules(id)) return GenericSectionPage(section: section, embedded: true);
     }
 
@@ -1474,7 +1517,10 @@ class _ModulesPageState extends State<ModulesPage> {
         for (final section in visibleSections)
           if (_sectionHasFormatModules(_txt(section['id'])))
             ExpansionTile(
-              initiallyExpanded: true,
+              key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+              initiallyExpanded: _expandedSectionId == _txt(section['id']),
+              onExpansionChanged: (expanded) =>
+                  _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection(_txt(section['id']), section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: _modulesForSection(_txt(section['id'])).map((module) {
@@ -1512,8 +1558,12 @@ class _ModulesPageState extends State<ModulesPage> {
                 );
               }).toList(),
             )
-          else if (section['id']?.toString() == 'reportes')
+          else if (_sectionKind(section) == 'REPORTES')
             ExpansionTile(
+              key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+              initiallyExpanded: _expandedSectionId == _txt(section['id']),
+              onExpansionChanged: (expanded) =>
+                  _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection('reportes', section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: reportModules.map((module) {
@@ -1546,8 +1596,12 @@ class _ModulesPageState extends State<ModulesPage> {
                 );
               }).toList(),
             )
-          else if (_sameId(section['id'], 'registros_pendientes') || _sectionHasDynamicViews(section['id']?.toString() ?? ''))
+          else if (_sectionUsesDynamicViews(section))
             ExpansionTile(
+              key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
+              initiallyExpanded: _expandedSectionId == _txt(section['id']),
+              onExpansionChanged: (expanded) =>
+                  _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: () {
@@ -1580,7 +1634,7 @@ class _ModulesPageState extends State<ModulesPage> {
             ListTile(
               leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w600)),
-              trailing: section['id'] == 'registros_locales' && pending > 0
+              trailing: _sectionKind(section) == 'REGISTROS_LOCALES' && pending > 0
                   ? CircleAvatar(radius: 10, child: Text('$pending', style: const TextStyle(fontSize: 10)))
                   : null,
               onTap: () => _selectMobileSection(section),
