@@ -561,7 +561,9 @@ class _ModulesPageState extends State<ModulesPage> {
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Se necesita conexión a internet para actualizar datos.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(sync.friendlyError(e))),
+      );
     } finally {
       if (mounted) {
         setState(() {

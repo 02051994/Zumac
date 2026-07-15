@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/services/local_db.dart';
+import '../../core/services/login_error_message.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../config/app_version.dart';
@@ -40,35 +41,36 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   String _friendlyError(Object error) {
-    final raw = error.toString();
-    final msg = raw.toLowerCase();
-    if (msg.contains('invalid login') ||
-        msg.contains('invalid credentials') ||
-        msg.contains('password')) {
-      return 'Usuario o contraseña incorrectos.';
+    return friendlyLoginError(error);
+  }
+
+  Future<void> _authenticateForDataUpdate() async {
+    final client = Supabase.instance.client;
+    if (client.auth.currentUser != null &&
+        client.auth.currentSession != null) {
+      return;
     }
-    if (msg.contains('over_email_send_rate_limit') ||
-        msg.contains('email rate limit') ||
-        msg.contains('429')) {
-      return 'Supabase bloqueó temporalmente el envío de correos por muchos intentos. Espera unos minutos y vuelve a probar.';
+
+    final loginIdentifier = userCtrl.text.trim();
+    final password = passCtrl.text.trim();
+    if (loginIdentifier.isEmpty || password.isEmpty) {
+      throw Exception(
+        'Para actualizar datos escribe tu DNI o correo y tu contraseña. El botón Ingresar también descarga la configuración automáticamente.',
+      );
     }
-    if (msg.contains('network') ||
-        msg.contains('socketexception') ||
-        msg.contains('internet')) {
-      return 'Se necesita conexión a internet para actualizar datos.';
+
+    if (mounted) {
+      setState(() {
+        updateMessage = 'Iniciando sesión segura...';
+        loadingMessage = 'Iniciando sesión segura...';
+        loadingProgress = 0.12;
+      });
     }
-    if (msg.contains('no existe un usuario activo')) {
-      return raw.replaceFirst('Exception: ', '');
+    final email = await _resolveAuthEmail(loginIdentifier);
+    await client.auth.signInWithPassword(email: email, password: password);
+    if (client.auth.currentUser == null || client.auth.currentSession == null) {
+      throw Exception('No se pudo iniciar la sesión para actualizar datos.');
     }
-    if (msg.contains('not authorized') ||
-        msg.contains('unauthorized') ||
-        msg.contains('permission denied') ||
-        msg.contains('jwt')) {
-      return 'No autorizado. Revisa que el usuario esté activo y tenga permisos asignados.';
-    }
-    return raw.replaceFirst('Exception: ', '').trim().isEmpty
-        ? 'No se pudo completar la operación.'
-        : raw.replaceFirst('Exception: ', '').trim();
   }
 
   Future<void> updateUsersAndPermissions() async {
@@ -80,17 +82,10 @@ class _LoginPageState extends State<LoginPage> {
     });
     await Future<void>.delayed(const Duration(milliseconds: 48));
     try {
-      if (Supabase.instance.client.auth.currentUser == null) {
-        throw Exception(
-            'Por seguridad, los datos se actualizan despues de iniciar sesion. Ingresa con internet para actualizar tu empresa y permisos.');
-      }
-      if (!await SyncService().hasInternet()) {
-        throw Exception(
-            'Se necesita conexión a internet para actualizar datos.');
-      }
+      await _authenticateForDataUpdate();
 
-      // Este botón NO debe pedir usuario ni contraseña.
-      // Descarga el paquete completo necesario para operar offline:
+      // Descarga el paquete completo usando una sesión autenticada; el
+      // bootstrap empresarial nunca se expone a usuarios anónimos.
       // usuarios/perfiles, permisos, secciones, módulos, formatos, matrices y catálogos.
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
@@ -301,7 +296,13 @@ class _LoginPageState extends State<LoginPage> {
               loadingMessage = 'Verificando datos locales...';
             });
           final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
-          if (hasCache) {
+          if (updatedDataThisSession) {
+            if (mounted)
+              setState(() {
+                loadingProgress = 0.82;
+                loadingMessage = 'Usando datos recién actualizados...';
+              });
+          } else if (hasCache) {
             // Si el usuario acaba de presionar Actualizar datos en esta misma pantalla,
             // no repetimos una segunda descarga al presionar Ingresar. Mantiene el login rápido.
             if (mounted)
