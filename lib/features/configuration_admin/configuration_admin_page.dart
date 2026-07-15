@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'configuration_admin_repository.dart';
 import 'configuration_entity_wizard_page.dart';
+import 'configuration_preview_page.dart';
 import 'format_structure_wizard_page.dart';
 
 class ConfigurationAdminPage extends StatefulWidget {
@@ -20,6 +21,8 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   String? error;
   Map<String, dynamic> contextData = {};
   List<Map<String, dynamic>> drafts = [];
+  List<Map<String, dynamic>> publishedConfigurations = [];
+  String publishedSearch = '';
 
   bool get canManage => contextData['puede_gestionar'] == true;
   bool get canPublish => contextData['puede_publicar'] == true;
@@ -40,10 +43,14 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
       final loadedDrafts = loadedContext['puede_gestionar'] == true
           ? await repository.listDrafts()
           : <Map<String, dynamic>>[];
+      final loadedPublished = loadedContext['puede_gestionar'] == true
+          ? await repository.listPublishedNavigation()
+          : <Map<String, dynamic>>[];
       if (!mounted) return;
       setState(() {
         contextData = loadedContext;
         drafts = loadedDrafts;
+        publishedConfigurations = loadedPublished;
         loading = false;
       });
     } catch (exception) {
@@ -52,6 +59,26 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         error = 'No se pudo abrir el constructor: $exception';
         loading = false;
       });
+    }
+  }
+
+  Future<void> _openPreview(Map<String, dynamic> template) async {
+    final draft = await Navigator.of(context).push<Map<String, dynamic>>(
+      MaterialPageRoute(
+        builder: (_) => ConfigurationPreviewPage(
+          template: template,
+          canCreateVersion: canManage,
+          repository: repository,
+        ),
+      ),
+    );
+    if (draft != null && mounted) {
+      await _openWizard(
+        draft['entidad_tipo']?.toString() ?? '',
+        draft: draft,
+      );
+    } else {
+      await _load();
     }
   }
 
@@ -207,6 +234,8 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                               ],
                               const SizedBox(height: 18),
                               _entityActions(),
+                              const SizedBox(height: 24),
+                              _publishedPanel(),
                               const SizedBox(height: 24),
                               _draftsHeader(),
                               const SizedBox(height: 10),
@@ -367,6 +396,99 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     final summary = contextData['resumen_plantillas'];
     if (summary is! Map) return 0;
     return int.tryParse('${summary[type] ?? 0}') ?? 0;
+  }
+
+  Widget _publishedPanel() {
+    final normalizedSearch = publishedSearch.trim().toLowerCase();
+    final filtered = publishedConfigurations.where((row) {
+      if (normalizedSearch.isEmpty) return true;
+      return (row['nombre']?.toString().toLowerCase() ?? '')
+              .contains(normalizedSearch) ||
+          (row['codigo']?.toString().toLowerCase() ?? '')
+              .contains(normalizedSearch) ||
+          (row['entidad_tipo']?.toString().toLowerCase() ?? '')
+              .contains(normalizedSearch);
+    }).toList();
+    final visible = filtered.take(40).toList();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'Configuración publicada',
+                style: TextStyle(
+                  color: Color(0xFF17324D),
+                  fontSize: 19,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            Text('${publishedConfigurations.length} elemento(s)'),
+          ],
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search),
+            labelText: 'Buscar rubro, sección, módulo o formato',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (value) => setState(() => publishedSearch = value),
+        ),
+        const SizedBox(height: 10),
+        if (visible.isEmpty)
+          const Card(
+            elevation: 0,
+            child: ListTile(
+              leading: Icon(Icons.search_off_outlined),
+              title: Text('No se encontraron configuraciones.'),
+            ),
+          )
+        else
+          Card(
+            elevation: 0,
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              children: [
+                for (var index = 0; index < visible.length; index++) ...[
+                  ListTile(
+                    leading: CircleAvatar(
+                      child: Icon(
+                        _entityIcon(
+                          visible[index]['entidad_tipo']?.toString() ?? '',
+                        ),
+                        size: 20,
+                      ),
+                    ),
+                    title: Text(
+                      visible[index]['nombre']?.toString() ?? 'Sin nombre',
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: Text(
+                      '${visible[index]['entidad_tipo'] ?? ''} · ${visible[index]['codigo'] ?? ''} · v${visible[index]['version'] ?? 1}',
+                    ),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: actionRunning
+                        ? null
+                        : () => _openPreview(visible[index]),
+                  ),
+                  if (index < visible.length - 1) const Divider(height: 1),
+                ],
+              ],
+            ),
+          ),
+        if (filtered.length > visible.length)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Se muestran 40 de ${filtered.length}. Escriba un nombre o código para filtrar.',
+              style: const TextStyle(color: Color(0xFF60758A)),
+            ),
+          ),
+      ],
+    );
   }
 
   Widget _entityCard({

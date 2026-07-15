@@ -45,6 +45,7 @@ class _ConfigurationEntityWizardPageState
   String selectedIcon = 'apps';
   String selectedContentType = 'FORMATOS';
   String? draftId;
+  String? publishedTargetId;
   int? lockVersion;
   Map<String, dynamic>? validation;
   List<Map<String, dynamic>> templates = [];
@@ -55,6 +56,7 @@ class _ConfigurationEntityWizardPageState
   bool get isModule => spec.type == 'MODULO';
   bool get canPublish => widget.contextData['puede_publicar'] == true;
   bool get isValid => validation?['valido'] == true;
+  bool get editingPublished => publishedTargetId != null;
 
   List<Map<String, dynamic>> get rubros {
     final raw = widget.contextData['rubros'];
@@ -91,6 +93,9 @@ class _ConfigurationEntityWizardPageState
         ? Map<String, dynamic>.from(draft['definicion'] as Map)
         : <String, dynamic>{};
     draftId = draft['id']?.toString();
+    publishedTargetId = definition['_modo_edicion'] == 'NUEVA_VERSION'
+        ? definition['_entidad_objetivo_id']?.toString()
+        : null;
     lockVersion = int.tryParse('${draft['lock_version'] ?? ''}');
     selectedTemplateId = draft['plantilla_origen_id']?.toString();
     nameController.text = draft['nombre']?.toString() ?? '';
@@ -189,6 +194,12 @@ class _ConfigurationEntityWizardPageState
           orderController.text.trim(),
       'activo': active,
     };
+    if (editingPublished) {
+      payload.addAll({
+        '_modo_edicion': 'NUEVA_VERSION',
+        '_entidad_objetivo_id': publishedTargetId,
+      });
+    }
     if (isRubro) {
       // El código del rubro se convierte en su identificador técnico.
     } else if (isSection) {
@@ -250,7 +261,9 @@ class _ConfigurationEntityWizardPageState
         validation = result;
         saving = false;
         currentStep = 4;
-        lockVersion = (lockVersion ?? 1) + 1;
+        // La validación incrementa el bloqueo en el servidor. La siguiente
+        // edición vuelve a guardar sin una versión obsoleta.
+        lockVersion = null;
       });
     } catch (exception) {
       if (!mounted) return;
@@ -321,7 +334,11 @@ class _ConfigurationEntityWizardPageState
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FA),
       appBar: AppBar(
-        title: Text('Nueva ${spec.singularName}'),
+        title: Text(
+          editingPublished
+              ? 'Nueva versión de ${spec.singularName}'
+              : 'Nueva ${spec.singularName}',
+        ),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
@@ -519,13 +536,16 @@ class _ConfigurationEntityWizardPageState
                   : 'COSECHA',
           suffix: IconButton(
             tooltip: 'Generar desde el nombre',
-            onPressed: () {
-              codeController.text =
-                  normalizeConfigurationCode(nameController.text);
-              setState(() {});
-            },
+            onPressed: editingPublished
+                ? null
+                : () {
+                    codeController.text =
+                        normalizeConfigurationCode(nameController.text);
+                    setState(() {});
+                  },
             icon: const Icon(Icons.auto_fix_high),
           ),
+          readOnly: editingPublished,
         ),
         const SizedBox(height: 14),
         _questionField(
@@ -804,6 +824,7 @@ class _ConfigurationEntityWizardPageState
     TextInputType? keyboardType,
     int minLines = 1,
     int maxLines = 1,
+    bool readOnly = false,
   }) {
     final question = _question(questionId);
     return _questionCard(
@@ -813,6 +834,7 @@ class _ConfigurationEntityWizardPageState
         keyboardType: keyboardType,
         minLines: minLines,
         maxLines: maxLines,
+        readOnly: readOnly,
         decoration: InputDecoration(
           labelText: question.required ? '${question.label} *' : question.label,
           hintText: hint,

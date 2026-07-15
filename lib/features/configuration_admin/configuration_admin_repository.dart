@@ -121,6 +121,57 @@ class ConfigurationAdminRepository {
     return _map(value);
   }
 
+  Future<List<Map<String, dynamic>>> listPublishedNavigation() async {
+    final results = await Future.wait(
+      const ['RUBRO', 'SECCION', 'MODULO', 'FORMATO'].map(
+        (type) => listTemplates(entityType: type, limit: 200),
+      ),
+    );
+    final items = <Map<String, dynamic>>[];
+    for (final result in results) {
+      items.addAll(_list(result['items']));
+    }
+    return items;
+  }
+
+  Future<Map<String, dynamic>> createDraftFromPublished(
+    String templateId,
+  ) async {
+    final value = await _client.rpc(
+      'appgt_crear_borrador_desde_publicado',
+      params: {'p_plantilla_id': templateId},
+    );
+    return _map(value);
+  }
+
+  Future<Map<String, dynamic>> previewConfiguration({
+    required String entityType,
+    required String entityId,
+  }) async {
+    final value = await _client.rpc(
+      'appgt_previsualizar_configuracion',
+      params: {
+        'p_entidad_tipo': entityType,
+        'p_entidad_id': entityId,
+      },
+    );
+    return _map(value);
+  }
+
+  Future<Map<String, dynamic>> configurationHistory({
+    required String entityType,
+    required String entityId,
+  }) async {
+    final value = await _client.rpc(
+      'appgt_historial_configuracion',
+      params: {
+        'p_entidad_tipo': entityType,
+        'p_entidad_id': entityId,
+      },
+    );
+    return _map(value);
+  }
+
   Map<String, dynamic> _map(dynamic value) {
     if (value is Map<String, dynamic>) return value;
     if (value is Map) return Map<String, dynamic>.from(value);

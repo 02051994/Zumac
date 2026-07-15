@@ -207,13 +207,25 @@ Map<String, dynamic> formatStructureFromTemplate(
       final fieldOrigin = fieldRow['entidad_origen_id']?.toString();
       final matrices = matrixRows
           .where((row) => row['padre_origen_id']?.toString() == fieldOrigin)
-          .map((row) => <String, dynamic>{
-                ...map(row['definicion']),
-                'codigo':
-                    'COPIA_M${tableIndex + 1}_${fieldIndex + 1}_${row['codigo']}',
-                'nombre': row['nombre']?.toString() ?? 'Matriz',
-              })
-          .toList();
+          .map((row) {
+        final definition = map(row['definicion']);
+        final rawClass =
+            definition['clase_matriz']?.toString().toUpperCase() ?? '';
+        final matrixClass = const {
+              'DROPDOWNS': 'DROPDOWN',
+              'VALIDACIONES': 'VALIDACION',
+              'CONDICIONES': 'CONDICION',
+              'FORMULAS': 'FORMULA',
+            }[rawClass] ??
+            rawClass;
+        return <String, dynamic>{
+          ...definition,
+          'codigo':
+              'COPIA_M${tableIndex + 1}_${fieldIndex + 1}_${row['codigo']}',
+          'nombre': row['nombre']?.toString() ?? 'Matriz',
+          'clase_matriz': matrixClass,
+        };
+      }).toList();
       fields.add({
         ...fieldDefinition,
         'codigo': 'COPIA_F${tableIndex + 1}_${fieldIndex + 1}',

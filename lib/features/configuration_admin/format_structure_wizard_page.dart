@@ -46,6 +46,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
   String? selectedModuleId;
   String? selectedRubroId;
   String? draftId;
+  String? publishedTargetId;
   int? lockVersion;
   String? error;
   Map<String, dynamic>? validation;
@@ -55,6 +56,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
 
   bool get canPublish => widget.contextData['puede_publicar'] == true;
   bool get isValid => validation?['valido'] == true;
+  bool get editingPublished => publishedTargetId != null;
 
   @override
   void initState() {
@@ -77,6 +79,9 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     if (draft == null) return;
     final definition = _map(draft['definicion']);
     draftId = draft['id']?.toString();
+    publishedTargetId = definition['_modo_edicion'] == 'NUEVA_VERSION'
+        ? definition['_entidad_objetivo_id']?.toString()
+        : null;
     lockVersion = int.tryParse('${draft['lock_version'] ?? ''}');
     selectedTemplateId = draft['plantilla_origen_id']?.toString();
     selectedRubroId =
@@ -218,6 +223,12 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
       },
       'tablas': tables,
     };
+    if (editingPublished) {
+      raw.addAll({
+        '_modo_edicion': 'NUEVA_VERSION',
+        '_entidad_objetivo_id': publishedTargetId,
+      });
+    }
     return rekeyClonedFormatChildren(raw);
   }
 
@@ -259,6 +270,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
         saving = false;
         currentStep = 4;
         tables = _maps(payload['tablas']);
+        lockVersion = null;
       });
     } catch (exception) {
       if (!mounted) return;
@@ -334,7 +346,13 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FA),
-      appBar: AppBar(title: const Text('Asistente de formato dinámico')),
+      appBar: AppBar(
+        title: Text(
+          editingPublished
+              ? 'Nueva versión del formato'
+              : 'Asistente de formato dinámico',
+        ),
+      ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : LayoutBuilder(
@@ -437,6 +455,18 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
   }
 
   Widget _originStep() {
+    if (editingPublished) {
+      return _question(
+        'Está creando una nueva versión publicada',
+        'Puede cambiar el nombre, ubicación, capacidades, tablas, campos y reglas. El código técnico se conserva para mantener la sincronización y los datos existentes.',
+        const ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(Icons.history_toggle_off_outlined),
+          title: Text('La versión actual seguirá disponible en el historial.'),
+          subtitle: Text('Nada cambia para los usuarios hasta que publique.'),
+        ),
+      );
+    }
     return _question(
       '¿Desea crear desde cero o copiar una plantilla?',
       'La copia conserva tablas, campos y reglas, pero usa nuevos identificadores para no modificar la plantilla original.',
@@ -555,13 +585,16 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
           hint: 'INSPECCION_CULTIVO',
           suffix: IconButton(
             tooltip: 'Generar desde el nombre',
-            onPressed: () => setState(() {
-              codeController.text =
-                  normalizeConfigurationCode(nameController.text);
-              validation = null;
-            }),
+            onPressed: editingPublished
+                ? null
+                : () => setState(() {
+                      codeController.text =
+                          normalizeConfigurationCode(nameController.text);
+                      validation = null;
+                    }),
             icon: const Icon(Icons.auto_fix_high),
           ),
+          readOnly: editingPublished,
         ),
         const SizedBox(height: 14),
         _textQuestion(
@@ -1417,6 +1450,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     TextInputType? keyboardType,
     int minLines = 1,
     int maxLines = 1,
+    bool readOnly = false,
   }) {
     return _question(
       title,
@@ -1426,6 +1460,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
         keyboardType: keyboardType,
         minLines: minLines,
         maxLines: maxLines,
+        readOnly: readOnly,
         onChanged: (_) => validation = null,
         decoration: InputDecoration(
           labelText: label,

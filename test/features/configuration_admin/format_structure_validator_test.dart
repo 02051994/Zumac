@@ -121,4 +121,50 @@ void main() {
     expect(table['tabla_destino'], 'COPIA_TABLA_ORIGINAL');
     expect((field['matrices'] as List), hasLength(1));
   });
+
+  test('normaliza clases plurales de matrices heredadas', () {
+    final structure = formatStructureFromTemplate({
+      'formato': {
+        'nombre': 'Original',
+        'definicion': {'modulo_id': 'MODULO_A'},
+      },
+      'tablas': [
+        {
+          'entidad_origen_id': 'TABLA_A',
+          'nombre': 'Tabla A',
+          'definicion': {'tabla_destino': 'TABLA_A'},
+        }
+      ],
+      'campos': [
+        {
+          'entidad_origen_id': 'CAMPO_A',
+          'padre_origen_id': 'TABLA_A',
+          'nombre': 'Campo A',
+          'definicion': {
+            'tabla_destino': 'TABLA_A',
+            'campo': 'VALOR',
+            'etiqueta': 'Valor',
+            'tipo_ui': 'formula',
+            'formula_funcion': '1+1',
+          },
+        }
+      ],
+      'matrices': [
+        {
+          'codigo': 'FORMULA_A',
+          'padre_origen_id': 'CAMPO_A',
+          'nombre': 'Fórmula A',
+          'definicion': {
+            'clase_matriz': 'FORMULAS',
+            'expresion': '1+1',
+          },
+        }
+      ],
+    });
+
+    final table = (structure['tablas'] as List).first as Map;
+    final field = (table['campos'] as List).first as Map;
+    final matrix = (field['matrices'] as List).first as Map;
+    expect(matrix['clase_matriz'], 'FORMULA');
+  });
 }
