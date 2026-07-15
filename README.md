@@ -1,36 +1,49 @@
-# APPGT Offline First - Formatos con tablas internas
+# ZUMAC Offline First
 
-## Qué incluye
-- Login con Supabase Auth.
-- Descarga local de módulos, formatos, tablas internas de formato, permisos y perfil.
-- Menú de módulos permitidos.
-- Menú de formatos permitidos.
-- Si el formato tiene varias tablas internas, muestra lista desplegable.
-- Guardado local en SQLite como pendiente.
-- Sincronización de pendientes contra la tabla_destino de Supabase.
+Aplicación Flutter con Supabase y SQLite para navegación, formularios y tablas
+dinámicas. Incluye trabajo online/offline, sincronización incremental,
+multiempresa, reglas declarativas y constructor visual versionado.
 
-## Configurar Supabase
-Editar:
+## Funciones principales
 
-lib/config/supabase_config.dart
+- Login online/offline y actualización autenticada de datos.
+- Navegación rubro → sección → módulo → formato.
+- Formularios dinámicos con dropdowns, fórmulas, condiciones y validaciones.
+- Tablas móviles responsive con búsqueda, paginación, edición y eliminación.
+- Cola local SQLite, reintentos y conflictos trazables.
+- Constructor ADMIN/GESTOR para rubros, secciones, módulos, formatos, tablas,
+  campos y matrices.
+- Plantillas inmutables, borradores, vista previa, versiones y auditoría.
+- Publicación atómica desde RPC seguros; Flutter no ejecuta SQL administrativo.
 
-Colocar:
-- supabaseUrl: URL base del proyecto, sin /rest/v1
-- supabaseAnonKey: Publishable key, nunca Secret key
+## Configuración
 
-## Tablas esperadas en Supabase
-- MATRIZ_MODULOS_APPGT
-- MATRIZ_FORMATOS_APPGT
-- MATRIZ_FORMATO_TABLAS_APPGT
-- PERMISOS_DE_USUARIOS_APPGT
-- PERFILES_DE_USUARIOS_APPGT
+Definir la URL y la clave publicable (nunca `service_role`) en:
 
-## Importante
-Este zip trae lib/ y pubspec.yaml. Si falta android/, ejecutar:
+`lib/config/supabase_config.dart`
 
-flutter create .
+## Verificación y compilación
+
+```text
+flutter clean
 flutter pub get
-flutter run
+flutter test
+flutter build apk --release
+```
 
-## Flujo
-Login online -> descarga matrices -> trabaja offline -> guarda local -> sincroniza con internet.
+APK esperado:
+
+`build/app/outputs/flutter-apk/app-release.apk`
+
+## Uso del constructor
+
+1. Ingresar con un usuario `ADMIN` o `GESTOR`.
+2. Abrir **Constructor visual** desde la navegación administrativa.
+3. Crear desde cero, copiar una plantilla o abrir una configuración publicada y
+   elegir **Nueva versión**.
+4. Responder el asistente y guardar/validar.
+5. Un usuario `ADMIN` confirma la publicación.
+6. Los dispositivos ejecutan **Actualizar datos** para descargar el cambio.
+
+La documentación técnica y las garantías de despliegue están en
+`docs/ARCHITECTURE_IMPLEMENTATION_REPORT.md`.
