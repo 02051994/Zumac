@@ -155,9 +155,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final currentId = selectedInternalTableId;
     final selectedStillExists = currentId != null && cleanRows.any((row) => row['id']?.toString() == currentId);
     final requestedInitialId = widget.initialFormatTableId?.trim();
-    final requestedInitialExists = requestedInitialId != null &&
-        requestedInitialId.isNotEmpty &&
-        cleanRows.any((row) => row['id']?.toString() == requestedInitialId);
+    final requestedInitialExists =
+        requestedInitialId != null && requestedInitialId.isNotEmpty && cleanRows.any((row) => row['id']?.toString() == requestedInitialId);
 
     await Future.wait(preloadFutures);
 
@@ -181,7 +180,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     await loadFieldsForCurrentTable();
   }
 
-
   Future<void> _loadLotesVariedades({bool updateState = true}) async {
     final rows = _cachedLotesVariedades ?? await local.getAll('local_lotes_variedades', orderBy: 'turno');
     _cachedLotesVariedades = rows;
@@ -192,9 +190,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       lotesVariedades = rows;
     }
   }
-
-
-
 
   Future<void> _loadFieldDefinitionsIndex({bool updateState = true}) async {
     final byId = await _fieldDefsByIdCached();
@@ -207,10 +202,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   Future<void> _loadMatrixRows({bool updateState = true, Set<String>? onlyTables}) async {
-    final wantedRaw = (onlyTables ?? const <String>{})
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toSet();
+    final wantedRaw = (onlyTables ?? const <String>{}).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     final wantedNorm = wantedRaw.map(_normalizarNombreCampo).where((e) => e.isNotEmpty).toSet();
 
     // Si no se especifican tablas, conserva el comportamiento anterior.
@@ -303,7 +295,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       catalogValues = grouped;
     }
   }
-
 
   bool _fieldsNeedMatrixRows(List<Map<String, dynamic>> rows) {
     for (final f in rows) {
@@ -446,7 +437,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return out;
   }
 
-
   String _fieldKey(String table, String campo) => '${_normalizarNombreCampo(table)}_${_normalizarNombreCampo(campo)}';
 
   static const Map<String, String> _dropdownCatalogByField = {
@@ -558,7 +548,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
-
   Future<List<Map<String, dynamic>>> _formFieldsForCandidateTablesFast(List<String> candidateTables) async {
     // Leer desde SQLite primero. La matriz puede haber sido reemplazada por
     // Actualizar datos mientras el proceso sigue vivo; usar el cache estático aquí
@@ -622,11 +611,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final candidateTables = <String>[
       table,
-      if (_cleanNullableText(widget.format['tabla_destino']) != null)
-        _cleanNullableText(widget.format['tabla_destino'])!,
-      ...internalTables
-          .map((e) => _cleanNullableText(e['tabla_destino']))
-          .whereType<String>(),
+      if (_cleanNullableText(widget.format['tabla_destino']) != null) _cleanNullableText(widget.format['tabla_destino'])!,
+      ...internalTables.map((e) => _cleanNullableText(e['tabla_destino'])).whereType<String>(),
     ];
 
     final legacyRows = await _formFieldsForCandidateTablesFast(candidateTables);
@@ -711,8 +697,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
-
-
   Map<String, dynamic>? _firstInternalTableWhere(bool Function(Map<String, dynamic>) test) {
     for (final row in internalTables) {
       if (test(row)) return row;
@@ -773,11 +757,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   List<String> _copyFieldsFromParent(Map<String, dynamic>? detailRow) {
     final raw = detailRow?['copiar_campos_desde_padre']?.toString() ?? '';
-    return raw
-        .split(RegExp(r'[,;|]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    return raw.split(RegExp(r'[,;|]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
   }
 
   int? _intFromValue(dynamic value) {
@@ -916,8 +896,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
-
-
   bool _asBool(dynamic value, {bool defaultValue = false}) {
     if (value == null) return defaultValue;
     if (value is bool) return value;
@@ -926,7 +904,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (s.isEmpty || s == 'null') return defaultValue;
     return s == 'true' || s == '1' || s == 'si' || s == 'sí' || s == 'yes';
   }
-
 
   String _txt(dynamic value) => value?.toString().trim() ?? '';
 
@@ -1038,7 +1015,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   bool _conditionalFormatApplies(Map<String, dynamic> field) {
-    final raw = _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
+    final raw =
+        _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
     if (_isNullLike(raw)) return false;
     var condition = raw.toString().trim();
     if (condition.isEmpty || condition.toUpperCase() == 'NULL') return false;
@@ -1075,14 +1053,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final orIndex = _indexOfTopLevelLogical(expr, ['||', ' OR ', ' O ']);
     if (orIndex != null) {
-      return _evalConditionalFormatCondition(expr.substring(0, orIndex.start)) ||
-          _evalConditionalFormatCondition(expr.substring(orIndex.end));
+      return _evalConditionalFormatCondition(expr.substring(0, orIndex.start)) || _evalConditionalFormatCondition(expr.substring(orIndex.end));
     }
 
     final andIndex = _indexOfTopLevelLogical(expr, ['&&', ' AND ', ' Y ']);
     if (andIndex != null) {
-      return _evalConditionalFormatCondition(expr.substring(0, andIndex.start)) &&
-          _evalConditionalFormatCondition(expr.substring(andIndex.end));
+      return _evalConditionalFormatCondition(expr.substring(0, andIndex.start)) && _evalConditionalFormatCondition(expr.substring(andIndex.end));
     }
 
     if (expr.startsWith('!')) return !_evalConditionalFormatCondition(expr.substring(1));
@@ -1125,7 +1101,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   bool _hasConditionalFormatConfig(Map<String, dynamic> field) {
-    final condition = _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
+    final condition =
+        _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
     if (_isNullLike(condition)) return false;
     return condition.toString().trim().isNotEmpty;
   }
@@ -1150,9 +1127,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final themedChild = Theme(
       data: baseTheme.copyWith(
-        textTheme: textColor == null
-            ? baseTheme.textTheme
-            : baseTheme.textTheme.apply(bodyColor: textColor, displayColor: textColor),
+        textTheme: textColor == null ? baseTheme.textTheme : baseTheme.textTheme.apply(bodyColor: textColor, displayColor: textColor),
         inputDecorationTheme: baseTheme.inputDecorationTheme.copyWith(
           filled: bgColor != null ? true : baseTheme.inputDecorationTheme.filled,
           fillColor: bgColor ?? baseTheme.inputDecorationTheme.fillColor,
@@ -1642,7 +1617,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     );
   }
 
-
   bool _hasNumeroDecimales(Map<String, dynamic> field) {
     final raw = field['numero_decimales'];
     if (raw == null) return false;
@@ -1670,8 +1644,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   bool _isNumberField(Map<String, dynamic> field) {
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
-    return tipo == 'number' || tipo == 'numeric' || tipo == 'decimal' || tipo == 'double' || tipo == 'integer' ||
-        uiType == 'number' || uiType == 'numeric' || uiType == 'decimal' || uiType == 'double' || uiType == 'integer';
+    return tipo == 'number' ||
+        tipo == 'numeric' ||
+        tipo == 'decimal' ||
+        tipo == 'double' ||
+        tipo == 'integer' ||
+        uiType == 'number' ||
+        uiType == 'numeric' ||
+        uiType == 'decimal' ||
+        uiType == 'double' ||
+        uiType == 'integer';
   }
 
   bool _allowsDecimal(Map<String, dynamic> field) {
@@ -1711,9 +1693,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       formatters.add(TextInputFormatter.withFunction((oldValue, newValue) {
         final text = newValue.text;
         if (text.isEmpty || text == '-') return newValue;
-        final pattern = decimal
-            ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$')
-            : RegExp(r'^-?\d*$');
+        final pattern = decimal ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$') : RegExp(r'^-?\d*$');
         return pattern.hasMatch(text) ? newValue : oldValue;
       }));
     }
@@ -1811,9 +1791,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     // Lista exacta de valores permitidos: 0|1|2 o IN(0;1;2)
-    final inText = ruleOriginal.toUpperCase().startsWith('IN(') && ruleOriginal.endsWith(')')
-        ? ruleOriginal.substring(3, ruleOriginal.length - 1)
-        : ruleOriginal;
+    final inText =
+        ruleOriginal.toUpperCase().startsWith('IN(') && ruleOriginal.endsWith(')') ? ruleOriginal.substring(3, ruleOriginal.length - 1) : ruleOriginal;
     if (inText.contains('|') || ruleOriginal.toUpperCase().startsWith('IN(')) {
       final allowed = inText.split(RegExp(r'[|;]')).map(parseNum).whereType<double>().toList();
       if (allowed.isNotEmpty && !allowed.contains(value)) {
@@ -1855,7 +1834,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
     if (tipo == 'date' || uiType == 'date') return raw;
     if (tipo == 'datetime' || tipo == 'timestamp' || uiType == 'datetime' || uiType == 'timestamp') return raw;
-    if (tipo == 'percent' || uiType == 'percent' || tipo == 'number' || uiType == 'number' || tipo == 'integer' || uiType == 'integer' || tipo == 'numeric' || uiType == 'numeric') {
+    if (tipo == 'percent' ||
+        uiType == 'percent' ||
+        tipo == 'number' ||
+        uiType == 'number' ||
+        tipo == 'integer' ||
+        uiType == 'integer' ||
+        tipo == 'numeric' ||
+        uiType == 'numeric') {
       return _formatNumberText(raw, field);
     }
     return raw;
@@ -2065,9 +2051,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final name = _normalizeFormulaFunctionName(call.name);
       if (name == 'IF' || name == 'SI') {
         if (call.args.length < 3) return '';
-        return _evalFormulaCondition(call.args[0])
-            ? _evalLocalFormula(call.args[1])
-            : _evalLocalFormula(call.args[2]);
+        return _evalFormulaCondition(call.args[0]) ? _evalLocalFormula(call.args[1]) : _evalLocalFormula(call.args[2]);
       }
       if (name == 'ES_VACIO' || name == 'VACIO') {
         if (call.args.isEmpty) return true;
@@ -2172,25 +2156,37 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final rightNum = _tryFormulaDouble(right);
       if (leftNum != null && rightNum != null) {
         switch (op) {
-          case '>': return leftNum > rightNum;
-          case '<': return leftNum < rightNum;
-          case '>=': return leftNum >= rightNum;
-          case '<=': return leftNum <= rightNum;
+          case '>':
+            return leftNum > rightNum;
+          case '<':
+            return leftNum < rightNum;
+          case '>=':
+            return leftNum >= rightNum;
+          case '<=':
+            return leftNum <= rightNum;
           case '==':
-          case '=': return leftNum == rightNum;
-          case '!=': return leftNum != rightNum;
+          case '=':
+            return leftNum == rightNum;
+          case '!=':
+            return leftNum != rightNum;
         }
       }
       final a = _normalizarNombreCampo(left?.toString() ?? '');
       final b = _normalizarNombreCampo(right?.toString() ?? '');
       switch (op) {
         case '==':
-        case '=': return a == b;
-        case '!=': return a != b;
-        case '>': return a.compareTo(b) > 0;
-        case '<': return a.compareTo(b) < 0;
-        case '>=': return a.compareTo(b) >= 0;
-        case '<=': return a.compareTo(b) <= 0;
+        case '=':
+          return a == b;
+        case '!=':
+          return a != b;
+        case '>':
+          return a.compareTo(b) > 0;
+        case '<':
+          return a.compareTo(b) < 0;
+        case '>=':
+          return a.compareTo(b) >= 0;
+        case '<=':
+          return a.compareTo(b) <= 0;
       }
     }
     final value = _evalLocalFormula(condition);
@@ -2379,47 +2375,88 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   String _normalizeFormulaFunctionName(String raw) {
     final s = _normalizarNombreCampo(raw).replaceAll('_', '');
     switch (s) {
-      case 'SI': return 'SI';
-      case 'IF': return 'IF';
-      case 'ESVACIO': return 'ES_VACIO';
-      case 'ES_VACIO': return 'ES_VACIO';
-      case 'VACIO': return 'VACIO';
-      case 'NOESVACIO': return 'NO_ES_VACIO';
-      case 'NO_ES_VACIO': return 'NO_ES_VACIO';
-      case 'NOVACIO': return 'NOVACIO';
-      case 'CONTIENE': return 'CONTIENE';
-      case 'CONTAINS': return 'CONTAINS';
-      case 'NUMERO': return 'NUMERO';
-      case 'VALOR': return 'VALOR';
-      case 'REDONDEAR': return 'REDONDEAR';
-      case 'ABSOLUTO': return 'ABSOLUTO';
-      case 'ENTERO': return 'ENTERO';
-      case 'BUSCAR': return 'BUSCAR';
-      case 'RESTA': return 'RESTA';
-      case 'RESTATIEMPO': return 'RESTA_TIEMPOS';
-      case 'RESTATIEMPOS': return 'RESTA_TIEMPOS';
-      case 'RESTA_TIEMPO': return 'RESTA_TIEMPOS';
-      case 'RESTA_TIEMPOS': return 'RESTA_TIEMPOS';
-      case 'FECHASTRANSCURRIDAS': return 'FECHAS_TRANSCURRIDAS';
-      case 'DIAS_TRANSCURRIDOS': return 'FECHAS_TRANSCURRIDAS';
-      case 'DIASTRANSCURRIDOS': return 'FECHAS_TRANSCURRIDAS';
-      case 'SUMARDIAS': return 'SUMAR_DIAS';
-      case 'SUMAR_DIAS': return 'SUMAR_DIAS';
-      case 'HORAACTUAL': return 'HORA_ACTUAL';
-      case 'HORA_ACTUAL': return 'HORA_ACTUAL';
-      case 'AHORAHORA': return 'AHORA_HORA';
-      case 'AHORA_HORA': return 'AHORA_HORA';
-      case 'FECHAACTUAL': return 'FECHA_ACTUAL';
-      case 'FECHA_ACTUAL': return 'FECHA_ACTUAL';
-      case 'FECHAHORAACTUAL': return 'FECHA_HORA_ACTUAL';
-      case 'FECHAHORA_ACTUAL': return 'FECHA_HORA_ACTUAL';
-      case 'FECHA_HORA_ACTUAL': return 'FECHA_HORA_ACTUAL';
-      case 'CONCAT': return 'CONCAT';
-      case 'CONCATENAR': return 'CONCATENAR';
-      case 'CONTATENAR': return 'CONCATENAR';
-      case 'EXTRAER': return 'EXTRAER';
-      case 'MID': return 'EXTRAER';
-      default: return s;
+      case 'SI':
+        return 'SI';
+      case 'IF':
+        return 'IF';
+      case 'ESVACIO':
+        return 'ES_VACIO';
+      case 'ES_VACIO':
+        return 'ES_VACIO';
+      case 'VACIO':
+        return 'VACIO';
+      case 'NOESVACIO':
+        return 'NO_ES_VACIO';
+      case 'NO_ES_VACIO':
+        return 'NO_ES_VACIO';
+      case 'NOVACIO':
+        return 'NOVACIO';
+      case 'CONTIENE':
+        return 'CONTIENE';
+      case 'CONTAINS':
+        return 'CONTAINS';
+      case 'NUMERO':
+        return 'NUMERO';
+      case 'VALOR':
+        return 'VALOR';
+      case 'REDONDEAR':
+        return 'REDONDEAR';
+      case 'ABSOLUTO':
+        return 'ABSOLUTO';
+      case 'ENTERO':
+        return 'ENTERO';
+      case 'BUSCAR':
+        return 'BUSCAR';
+      case 'RESTA':
+        return 'RESTA';
+      case 'RESTATIEMPO':
+        return 'RESTA_TIEMPOS';
+      case 'RESTATIEMPOS':
+        return 'RESTA_TIEMPOS';
+      case 'RESTA_TIEMPO':
+        return 'RESTA_TIEMPOS';
+      case 'RESTA_TIEMPOS':
+        return 'RESTA_TIEMPOS';
+      case 'FECHASTRANSCURRIDAS':
+        return 'FECHAS_TRANSCURRIDAS';
+      case 'DIAS_TRANSCURRIDOS':
+        return 'FECHAS_TRANSCURRIDAS';
+      case 'DIASTRANSCURRIDOS':
+        return 'FECHAS_TRANSCURRIDAS';
+      case 'SUMARDIAS':
+        return 'SUMAR_DIAS';
+      case 'SUMAR_DIAS':
+        return 'SUMAR_DIAS';
+      case 'HORAACTUAL':
+        return 'HORA_ACTUAL';
+      case 'HORA_ACTUAL':
+        return 'HORA_ACTUAL';
+      case 'AHORAHORA':
+        return 'AHORA_HORA';
+      case 'AHORA_HORA':
+        return 'AHORA_HORA';
+      case 'FECHAACTUAL':
+        return 'FECHA_ACTUAL';
+      case 'FECHA_ACTUAL':
+        return 'FECHA_ACTUAL';
+      case 'FECHAHORAACTUAL':
+        return 'FECHA_HORA_ACTUAL';
+      case 'FECHAHORA_ACTUAL':
+        return 'FECHA_HORA_ACTUAL';
+      case 'FECHA_HORA_ACTUAL':
+        return 'FECHA_HORA_ACTUAL';
+      case 'CONCAT':
+        return 'CONCAT';
+      case 'CONCATENAR':
+        return 'CONCATENAR';
+      case 'CONTATENAR':
+        return 'CONCATENAR';
+      case 'EXTRAER':
+        return 'EXTRAER';
+      case 'MID':
+        return 'EXTRAER';
+      default:
+        return s;
     }
   }
 
@@ -2678,8 +2715,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     // IMPORTANTE: tipo_ui=formula NO significa que el resultado sea numérico.
     // El tipo real manda. Ejemplo: tipo=time + tipo_ui=formula + HORA_ACTUAL()
     // debe guardar HH:mm, no 0.
-    final shouldParseAsNumber =
-        tipo == 'number' ||
+    final shouldParseAsNumber = tipo == 'number' ||
         tipo == 'numeric' ||
         tipo == 'decimal' ||
         tipo == 'integer' ||
@@ -2703,7 +2739,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
     return raw;
   }
-
 
   bool _valuePresentForCampo(Map<String, dynamic> payload, String campo) {
     final value = payload[campo];
@@ -2741,7 +2776,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return 'COMPLETO';
   }
 
-
   bool get _isPersonalPlanillaForm => (tableDestino ?? '').trim().toUpperCase() == 'GH-REGISTRO_PERSONAL_PLANILLA';
 
   String _payloadText(Map<String, dynamic> payload, List<String> keys) {
@@ -2764,7 +2798,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final fotoData = _payloadText(payload, ['FOTO']);
     Uint8List? fotoBytes;
     if (fotoData.startsWith('data:image/') && fotoData.contains(',')) {
-      try { fotoBytes = base64Decode(fotoData.substring(fotoData.indexOf(',') + 1)); } catch (_) {}
+      try {
+        fotoBytes = base64Decode(fotoData.substring(fotoData.indexOf(',') + 1));
+      } catch (_) {}
     }
     final pdf = pw.Document();
     pdf.addPage(pw.Page(
@@ -2779,8 +2815,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
               pw.Text('ZUMAC', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-              pw.Container(width: 74, height: 82, decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey500)), child: fotoBytes != null ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover) : pw.Center(child: pw.Text('SIN FOTO', style: const pw.TextStyle(fontSize: 8)))),
-              pw.Text(nombre.isEmpty ? 'SIN NOMBRE' : nombre, textAlign: pw.TextAlign.center, maxLines: 2, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              pw.Container(
+                  width: 74,
+                  height: 82,
+                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey500)),
+                  child: fotoBytes != null
+                      ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover)
+                      : pw.Center(child: pw.Text('SIN FOTO', style: const pw.TextStyle(fontSize: 8)))),
+              pw.Text(nombre.isEmpty ? 'SIN NOMBRE' : nombre,
+                  textAlign: pw.TextAlign.center, maxLines: 2, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
               pw.Text('DNI: $dni', style: const pw.TextStyle(fontSize: 8)),
               if (puesto.isNotEmpty) pw.Text(puesto, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
               if (area.isNotEmpty) pw.Text(area, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
@@ -2934,18 +2977,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     setState(() => savingLocal = true);
     try {
       await local.insertPending({
-      'id_local': idLocal,
-      'user_id': userId,
-      'modulo_id': widget.moduleId,
-      'formato_id': widget.format['id'],
-      'formato_tabla_id': selectedInternalTableId,
-      'tabla_destino': table,
-      'payload_json': jsonEncode(payload),
-      'estado': 'pendiente',
-      'intentos': 0,
-      'created_at': DateTime.now().toIso8601String(),
-    });
-
+        'id_local': idLocal,
+        'user_id': userId,
+        'modulo_id': widget.moduleId,
+        'formato_id': widget.format['id'],
+        'formato_tabla_id': selectedInternalTableId,
+        'tabla_destino': table,
+        'payload_json': jsonEncode(payload),
+        'estado': 'pendiente',
+        'intentos': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => savingLocal = false);
@@ -3024,18 +3066,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     setState(() => signatureValues[campo] = bytes);
   }
 
-
   bool _isMultiSelectField(Map<String, dynamic> field) {
     return _uiType(field) == 'multiselect';
   }
 
   Set<String> _parseMultiSelectText(String raw) {
     if (raw.trim().isEmpty) return <String>{};
-    return raw
-        .split(RegExp(r'[|,;]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toSet();
+    return raw.split(RegExp(r'[|,;]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
   }
 
   void _syncMultiSelectController(String campo) {
@@ -3043,7 +3080,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     controllers.putIfAbsent(campo, () => TextEditingController());
     controllers[campo]!.text = values.join('|');
   }
-
 
   Future<String?> _showSearchableDropdownPicker({
     required String title,
@@ -3069,16 +3105,35 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           void applyFilter(String query, void Function(void Function()) setLocalState) {
             final q = query.trim().toLowerCase();
             setLocalState(() {
-              filtered = q.isEmpty
-                  ? List<String>.from(uniqueOptions)
-                  : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
+              filtered = q.isEmpty ? List<String>.from(uniqueOptions) : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
             });
           }
 
           return AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-            title: Text(title, style: const TextStyle(color: Color(0xFF0D5F78), fontWeight: FontWeight.w800)),
+            title: Row(
+              children: [
+                const CircleAvatar(
+                  backgroundColor: Color(0xFFE2F1F4),
+                  foregroundColor: Color(0xFF0D5F78),
+                  child: Icon(Icons.list_alt_outlined),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Color(0xFF0D5F78),
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
             content: SizedBox(
               width: 420,
               child: StatefulBuilder(
@@ -3110,11 +3165,29 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                               itemBuilder: (context, index) {
                                 final option = filtered[index];
                                 final selected = option == currentValue;
-                                return ListTile(
-                                  dense: true,
-                                  title: Text(option),
-                                  trailing: selected ? const Icon(Icons.check) : null,
-                                  onTap: () => Navigator.pop(dialogContext, option),
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 5),
+                                  child: ListTile(
+                                    dense: true,
+                                    tileColor: selected ? const Color(0xFFDDF1F4) : Colors.white,
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(12),
+                                      side: BorderSide(
+                                        color: selected ? const Color(0xFF176B87) : const Color(0xFFD6E4E8),
+                                      ),
+                                    ),
+                                    leading: Icon(
+                                      selected ? Icons.check_circle : Icons.circle_outlined,
+                                      color: const Color(0xFF176B87),
+                                    ),
+                                    title: Text(
+                                      option,
+                                      style: TextStyle(
+                                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                      ),
+                                    ),
+                                    onTap: () => Navigator.pop(dialogContext, option),
+                                  ),
                                 );
                               },
                             ),
@@ -3166,14 +3239,25 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
           border: const OutlineInputBorder(),
-          suffixIcon: Icon(editable ? Icons.search : Icons.lock_outline),
+          prefixIcon: const Icon(Icons.list_alt_outlined),
+          suffixIcon: Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
           helperText: options.isEmpty ? 'Sin opciones configuradas o descargadas.' : null,
         ),
-        child: Text(
-          hasValidValue ? current : 'Seleccione o busque...',
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: hasValidValue ? null : Colors.grey[600]),
+        child: Row(
+          children: [
+            if (hasValidValue) ...[
+              const Icon(Icons.check_circle, size: 17, color: Color(0xFF17806D)),
+              const SizedBox(width: 7),
+            ],
+            Expanded(
+              child: Text(
+                hasValidValue ? current : 'Seleccione o busque...',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(color: hasValidValue ? null : Colors.grey[600]),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -3200,7 +3284,28 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final result = await showDialog<Set<String>>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text(requerido ? '$etiqueta *' : etiqueta),
+          backgroundColor: const Color(0xFFF4F8F7),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          title: Row(
+            children: [
+              const CircleAvatar(
+                backgroundColor: Color(0xFFE2F1F4),
+                foregroundColor: Color(0xFF0D5F78),
+                child: Icon(Icons.checklist_rounded),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  requerido ? '$etiqueta *' : etiqueta,
+                  style: const TextStyle(
+                    color: Color(0xFF0D5F78),
+                    fontSize: 18,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ],
+          ),
           content: SizedBox(
             width: 420,
             child: ConstrainedBox(
@@ -3212,21 +3317,36 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                   itemBuilder: (context, index) {
                     final option = options[index];
                     final checked = temp.contains(option);
-                    return CheckboxListTile(
-                      activeColor: const Color(0xFF0D5F78),
-                      value: checked,
-                      title: Text(option),
-                      dense: true,
-                      controlAffinity: ListTileControlAffinity.leading,
-                      onChanged: (value) {
-                        setDialogState(() {
-                          if (value == true) {
-                            temp.add(option);
-                          } else {
-                            temp.remove(option);
-                          }
-                        });
-                      },
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: CheckboxListTile(
+                        activeColor: const Color(0xFF0D5F78),
+                        tileColor: checked ? const Color(0xFFDDF1F4) : Colors.white,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          side: BorderSide(
+                            color: checked ? const Color(0xFF176B87) : const Color(0xFFD6E4E8),
+                          ),
+                        ),
+                        value: checked,
+                        title: Text(
+                          option,
+                          style: TextStyle(
+                            fontWeight: checked ? FontWeight.w700 : FontWeight.w500,
+                          ),
+                        ),
+                        dense: true,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: (value) {
+                          setDialogState(() {
+                            if (value == true) {
+                              temp.add(option);
+                            } else {
+                              temp.remove(option);
+                            }
+                          });
+                        },
+                      ),
                     );
                   },
                 ),
@@ -3251,7 +3371,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       });
     }
 
-    final selectedText = selected.isEmpty ? '' : (selected.toList()..sort()).join(', ');
+    final orderedSelected = selected.toList()..sort();
 
     return InkWell(
       onTap: openPicker,
@@ -3260,14 +3380,31 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           labelText: requerido ? '$etiqueta *' : etiqueta,
           border: const OutlineInputBorder(),
           helperText: helperText ?? (options.isEmpty ? 'No hay valores disponibles.' : 'Toca para seleccionar uno o varios valores'),
-          suffixIcon: Icon(editable ? Icons.arrow_drop_down : Icons.lock_outline),
+          prefixIcon: const Icon(Icons.checklist_rounded),
+          suffixIcon: Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
         ),
-        child: Text(
-          selectedText.isEmpty ? 'Seleccionar...' : selectedText,
-          maxLines: 2,
-          overflow: TextOverflow.ellipsis,
-          style: TextStyle(color: selectedText.isEmpty ? Colors.grey[600] : null),
-        ),
+        child: orderedSelected.isEmpty
+            ? Text('Seleccionar...', style: TextStyle(color: Colors.grey[600]))
+            : Wrap(
+                spacing: 6,
+                runSpacing: 5,
+                children: orderedSelected
+                    .map(
+                      (value) => Chip(
+                        visualDensity: VisualDensity.compact,
+                        backgroundColor: const Color(0xFFDDF1F4),
+                        side: const BorderSide(color: Color(0xFF86B9C5)),
+                        label: Text(
+                          value,
+                          style: const TextStyle(
+                            color: Color(0xFF0D5F78),
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    )
+                    .toList(),
+              ),
       ),
     );
   }
@@ -3288,12 +3425,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
     final campo = field['campo']?.toString() ?? '';
-    return _isVisible(field) &&
-        !_isAutoFilledDetailField(campo) &&
-        tipo != 'hidden_id' &&
-        tipo != 'hidden' &&
-        uiType != 'hidden_id' &&
-        uiType != 'hidden';
+    return _isVisible(field) && !_isAutoFilledDetailField(campo) && tipo != 'hidden_id' && tipo != 'hidden' && uiType != 'hidden_id' && uiType != 'hidden';
   }
 
   int _fieldOrderNumber(Map<String, dynamic> field) {
@@ -3341,9 +3473,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             const spacing = 12.0;
             final availableColumns = math.max(
               1,
-              ((constraints.maxWidth + spacing) /
-                      (minimumFieldWidth + spacing))
-                  .floor(),
+              ((constraints.maxWidth + spacing) / (minimumFieldWidth + spacing)).floor(),
             );
             final columnCount = math.min(rowFields.length, availableColumns);
 
@@ -3358,9 +3488,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               );
             }
 
-            final fieldWidth =
-                (constraints.maxWidth - (spacing * (columnCount - 1))) /
-                    columnCount;
+            final fieldWidth = (constraints.maxWidth - (spacing * (columnCount - 1))) / columnCount;
             return Wrap(
               spacing: spacing,
               runSpacing: spacing,
@@ -3384,14 +3512,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return rows;
   }
 
-
   bool _isScannerUi(String uiType) {
     final t = uiType.trim().toLowerCase();
-    return t == 'qr_scan' ||
-        t == 'barcode_scan' ||
-        t == 'dni_scan' ||
-        t == 'scanner' ||
-        t == 'scan';
+    return t == 'qr_scan' || t == 'barcode_scan' || t == 'dni_scan' || t == 'scanner' || t == 'scan';
   }
 
   String _onlyDigits(String value) => value.replaceAll(RegExp(r'[^0-9]'), '');
@@ -3405,7 +3528,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       try {
         final decoded = jsonDecode(value);
         if (decoded is Map) {
-          for (final key in ['dni', 'DNI', 'documento', 'DOCUMENTO', 'codigo', 'CODIGO', 'codigo_personal', 'CODIGO_PERSONAL', 'qr_personal', 'QR_PERSONAL', 'id_local']) {
+          for (final key in [
+            'dni',
+            'DNI',
+            'documento',
+            'DOCUMENTO',
+            'codigo',
+            'CODIGO',
+            'codigo_personal',
+            'CODIGO_PERSONAL',
+            'qr_personal',
+            'QR_PERSONAL',
+            'id_local'
+          ]) {
             final v = decoded[key]?.toString().trim() ?? '';
             if (v.isNotEmpty) return v;
           }
@@ -3929,13 +4064,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       decoration: InputDecoration(
         labelText: requerido ? '$etiqueta *' : etiqueta,
         border: const OutlineInputBorder(),
-        suffixIcon: (tipo == 'date' || uiType == 'date') ? const Icon(Icons.calendar_month) : ((tipo == 'time' || uiType == 'time') ? const Icon(Icons.schedule) : null),
+        suffixIcon: (tipo == 'date' || uiType == 'date')
+            ? const Icon(Icons.calendar_month)
+            : ((tipo == 'time' || uiType == 'time') ? const Icon(Icons.schedule) : null),
         errorText: _rangeErrorForField(field, controllers[campo]?.text.trim() ?? ''),
       ),
       onChanged: (_) {
         _scheduleRecalculationIfNeeded();
         // El formato_condicional_campo debe reaccionar mientras se escribe.
-        if (fields.any((f) => !_isNullLike(_fieldMetaValue(f, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional'])))) {
+        if (fields.any((f) => !_isNullLike(
+            _fieldMetaValue(f, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional'])))) {
           setState(() {});
         }
       },
@@ -3984,8 +4122,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F8F7),
       appBar: AppBar(
-        backgroundColor: const Color(0xFFF4F8F7),
+        toolbarHeight: 52,
+        backgroundColor: Colors.transparent,
+        foregroundColor: Colors.white,
         elevation: 0,
+        titleSpacing: 2,
+        flexibleSpace: const DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              colors: [Color(0xFF0F5265), Color(0xFF17809A)],
+            ),
+          ),
+        ),
         leading: widget.onBack != null
             ? IconButton(
                 tooltip: 'Volver',
@@ -3993,7 +4141,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 onPressed: widget.onBack,
               )
             : null,
-        title: Text('$formatName'),
+        title: Text(
+          '$formatName',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
         actions: [
           if (_photoLimitFromMatrix() > 0)
             IconButton(
@@ -4007,7 +4160,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         ],
       ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
         children: [
           if (useWizard) ...[
             Card(
@@ -4093,18 +4246,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             ),
             const SizedBox(width: 12),
           ],
-          FloatingActionButton(
+          FloatingActionButton.extended(
             heroTag: 'save_${tableDestino ?? ''}',
             onPressed: saveLocal,
             tooltip: 'Guardar localmente',
-            child: const Icon(Icons.save),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Guardar'),
           ),
         ],
       ),
     );
   }
 }
-
 
 class _LocalFormulaCall {
   final String name;
@@ -4227,7 +4380,6 @@ class _StrictMathParser {
     while (_pos < input.length && input[_pos].trim().isEmpty) _pos++;
   }
 }
-
 
 class _ExpressionParser {
   final String input;
@@ -4446,7 +4598,6 @@ class _LogicalIndex {
   final int end;
   const _LogicalIndex(this.start, this.end);
 }
-
 
 class _AppGtScannerPage extends StatefulWidget {
   const _AppGtScannerPage();

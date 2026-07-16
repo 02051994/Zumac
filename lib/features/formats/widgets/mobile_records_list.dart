@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 typedef MobileRecordTextBuilder = String Function(
@@ -11,12 +13,11 @@ typedef MobileRecordCellBuilder = Widget Function(
   String column,
 );
 
-/// Presentación compacta de una tabla dinámica para pantallas móviles.
+/// Tabla horizontal ligera para registros dinámicos en pantallas móviles.
 ///
-/// La lista no interpreta reglas ni modifica datos. Recibe las columnas y los
-/// valores ya resueltos por el motor dinámico para que dropdowns, fórmulas,
-/// matrices y formatos condicionales sigan teniendo una única fuente de verdad.
-class MobileRecordsList extends StatelessWidget {
+/// Este widget solo presenta columnas y valores ya resueltos por el motor del
+/// formato. No interpreta matrices ni modifica dropdowns, fórmulas o reglas.
+class MobileRecordsList extends StatefulWidget {
   final List<Map<String, dynamic>> records;
   final List<String> columns;
   final String Function(String column) labelFor;
@@ -44,8 +45,26 @@ class MobileRecordsList extends StatelessWidget {
   });
 
   @override
+  State<MobileRecordsList> createState() => _MobileRecordsListState();
+}
+
+class _MobileRecordsListState extends State<MobileRecordsList> {
+  static const double _numberWidth = 58;
+  static const double _selectionWidth = 48;
+  static const double _editWidth = 58;
+  static const double _columnWidth = 168;
+
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (records.isEmpty) {
+    if (widget.records.isEmpty) {
       return const Center(
         child: Text(
           'No hay registros para mostrar',
@@ -59,214 +78,232 @@ class MobileRecordsList extends StatelessWidget {
       );
     }
 
-    return ListView.separated(
-      key: const Key('mobile-records-list'),
-      padding: const EdgeInsets.only(bottom: 92),
-      itemCount: records.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 10),
-      itemBuilder: (context, index) {
-        final record = records[index];
-        return _MobileRecordCard(
-          record: record,
-          columns: columns,
-          labelFor: labelFor,
-          textFor: textFor,
-          cellBuilder: cellBuilder,
-          recordNumber: rowNumberOffset + index + 1,
-          onEdit: onEdit == null ? null : () => onEdit!(record),
-          selectionEnabled: selectionEnabled,
-          selected: isSelected?.call(record, index) ?? false,
-          onSelected: onSelected == null
-              ? null
-              : (selected) => onSelected!(record, index, selected),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final actionWidth = (widget.selectionEnabled ? _selectionWidth : 0) +
+            (widget.onEdit != null ? _editWidth : 0);
+        final contentWidth =
+            _numberWidth + (widget.columns.length * _columnWidth) + actionWidth;
+        final tableWidth = math.max(constraints.maxWidth, contentWidth);
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              key: const Key('mobile-table-hint'),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE8F3F5),
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.swipe_left_alt,
+                      size: 18, color: Color(0xFF176B87)),
+                  SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Desliza horizontalmente para ver todas las columnas.',
+                      style: TextStyle(
+                        color: Color(0xFF315B68),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 7),
+            Expanded(
+              child: Scrollbar(
+                controller: _horizontalController,
+                thumbVisibility: true,
+                notificationPredicate: (notification) =>
+                    notification.metrics.axis == Axis.horizontal,
+                child: SingleChildScrollView(
+                  key: const Key('mobile-records-list'),
+                  controller: _horizontalController,
+                  scrollDirection: Axis.horizontal,
+                  child: SizedBox(
+                    width: tableWidth,
+                    child: Column(
+                      children: [
+                        _headerRow(),
+                        Expanded(
+                          child: ListView.builder(
+                            padding: const EdgeInsets.only(bottom: 84),
+                            itemCount: widget.records.length,
+                            itemBuilder: (context, index) =>
+                                _recordRow(context, index),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         );
       },
     );
   }
-}
 
-class _MobileRecordCard extends StatefulWidget {
-  static const int collapsedFieldCount = 4;
-
-  final Map<String, dynamic> record;
-  final List<String> columns;
-  final String Function(String column) labelFor;
-  final MobileRecordTextBuilder textFor;
-  final MobileRecordCellBuilder cellBuilder;
-  final int recordNumber;
-  final VoidCallback? onEdit;
-  final bool selectionEnabled;
-  final bool selected;
-  final ValueChanged<bool>? onSelected;
-
-  const _MobileRecordCard({
-    required this.record,
-    required this.columns,
-    required this.labelFor,
-    required this.textFor,
-    required this.cellBuilder,
-    required this.recordNumber,
-    required this.onEdit,
-    required this.selectionEnabled,
-    required this.selected,
-    required this.onSelected,
-  });
-
-  @override
-  State<_MobileRecordCard> createState() => _MobileRecordCardState();
-}
-
-class _MobileRecordCardState extends State<_MobileRecordCard> {
-  bool expanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final visibleColumns = expanded
-        ? widget.columns
-        : widget.columns.take(_MobileRecordCard.collapsedFieldCount).toList();
-    final remaining = widget.columns.length - visibleColumns.length;
-    final firstValue = _firstMeaningfulValue();
-
-    return Card(
-      key: ValueKey('mobile-record-${widget.recordNumber}'),
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
-        side: const BorderSide(color: Color(0xFFDCE6EC)),
+  Widget _headerRow() {
+    return Container(
+      key: const Key('mobile-table-header'),
+      constraints: const BoxConstraints(minHeight: 48),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF0F5265), Color(0xFF176B87)],
+        ),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Container(
-            color: const Color(0xFFF3F8FA),
-            padding: const EdgeInsets.fromLTRB(12, 6, 6, 6),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 17,
-                  backgroundColor: const Color(0xFF176B87),
-                  foregroundColor: Colors.white,
-                  child: Text(
-                    '${widget.recordNumber}',
-                    style: const TextStyle(
-                        fontSize: 11, fontWeight: FontWeight.w700),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Registro ${widget.recordNumber}',
-                        style: const TextStyle(
-                          color: Color(0xFF17324D),
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      if (firstValue.isNotEmpty)
-                        Text(
-                          firstValue,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                              color: Color(0xFF60758A), fontSize: 12),
-                        ),
-                    ],
-                  ),
-                ),
-                if (widget.onEdit != null)
-                  IconButton(
-                    key: ValueKey('edit-record-${widget.recordNumber}'),
-                    tooltip: 'Editar registro',
-                    onPressed: widget.onEdit,
-                    icon: const Icon(Icons.edit_outlined,
-                        color: Color(0xFF176B87)),
-                  ),
-                if (widget.selectionEnabled)
-                  Checkbox(
-                    value: widget.selected,
-                    onChanged: widget.onSelected == null
-                        ? null
-                        : (value) => widget.onSelected!(value ?? false),
-                  ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
-            child: Column(
-              children: [
-                for (var index = 0; index < visibleColumns.length; index++) ...[
-                  _fieldRow(context, visibleColumns[index]),
-                  if (index < visibleColumns.length - 1)
-                    const Divider(height: 15, color: Color(0xFFEDF2F5)),
-                ],
-              ],
-            ),
-          ),
-          if (remaining > 0 ||
-              expanded &&
-                  widget.columns.length > _MobileRecordCard.collapsedFieldCount)
-            InkWell(
-              key: ValueKey('expand-record-${widget.recordNumber}'),
-              onTap: () => setState(() => expanded = !expanded),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(14, 5, 14, 11),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Icon(
-                      expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 19,
-                      color: const Color(0xFF176B87),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      expanded ? 'Ver menos' : 'Ver $remaining campos más',
-                      style: const TextStyle(
-                        color: Color(0xFF176B87),
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+          _headerCell('N°', _numberWidth, alignment: Alignment.center),
+          if (widget.selectionEnabled)
+            _headerCell('Elegir', _selectionWidth, alignment: Alignment.center),
+          for (final column in widget.columns)
+            _headerCell(widget.labelFor(column), _columnWidth),
+          if (widget.onEdit != null)
+            _headerCell('Editar', _editWidth, alignment: Alignment.center),
         ],
       ),
     );
   }
 
-  String _firstMeaningfulValue() {
-    for (final column in widget.columns) {
-      final value = widget.textFor(widget.record, column).trim();
-      if (value.isNotEmpty && value.toUpperCase() != 'NULL') return value;
-    }
-    return '';
+  Widget _headerCell(
+    String label,
+    double width, {
+    Alignment alignment = Alignment.centerLeft,
+  }) {
+    return Container(
+      width: width,
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 7),
+      decoration: const BoxDecoration(
+        border: Border(right: BorderSide(color: Color(0x33FFFFFF))),
+      ),
+      child: Text(
+        label,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          color: Colors.white,
+          fontSize: 11.5,
+          fontWeight: FontWeight.w800,
+        ),
+      ),
+    );
   }
 
-  Widget _fieldRow(BuildContext context, String column) {
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 112,
-          child: Text(
-            widget.labelFor(column),
-            style: const TextStyle(
-              color: Color(0xFF60758A),
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
+  Widget _recordRow(BuildContext context, int index) {
+    final record = widget.records[index];
+    final number = widget.rowNumberOffset + index + 1;
+    final selected = widget.isSelected?.call(record, index) ?? false;
+
+    return Container(
+      key: ValueKey('mobile-record-$number'),
+      constraints: const BoxConstraints(minHeight: 56),
+      color: selected
+          ? const Color(0xFFDDF1F4)
+          : index.isEven
+              ? Colors.white
+              : const Color(0xFFF7FAFB),
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _dataCell(
+              SizedBox(
+                width: 30,
+                height: 30,
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF176B87),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Center(
+                    child: Text(
+                      '$number',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              _numberWidth,
+              alignment: Alignment.center,
             ),
-          ),
+            if (widget.selectionEnabled)
+              _dataCell(
+                Checkbox(
+                  value: selected,
+                  activeColor: const Color(0xFF0D5F78),
+                  onChanged: widget.onSelected == null
+                      ? null
+                      : (value) => widget.onSelected!(
+                            record,
+                            index,
+                            value ?? false,
+                          ),
+                ),
+                _selectionWidth,
+                alignment: Alignment.center,
+              ),
+            for (final column in widget.columns)
+              _dataCell(
+                widget.cellBuilder(context, record, column),
+                _columnWidth,
+              ),
+            if (widget.onEdit != null)
+              _dataCell(
+                IconButton(
+                  key: ValueKey('edit-record-$number'),
+                  tooltip: 'Editar registro',
+                  onPressed: () => widget.onEdit!(record),
+                  icon: const Icon(
+                    Icons.edit_outlined,
+                    color: Color(0xFF176B87),
+                  ),
+                ),
+                _editWidth,
+                alignment: Alignment.center,
+              ),
+          ],
         ),
-        const SizedBox(width: 10),
-        Expanded(child: widget.cellBuilder(context, widget.record, column)),
-      ],
+      ),
+    );
+  }
+
+  Widget _dataCell(
+    Widget child,
+    double width, {
+    Alignment alignment = Alignment.centerLeft,
+  }) {
+    return Container(
+      width: width,
+      alignment: alignment,
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 8),
+      decoration: const BoxDecoration(
+        border: Border(
+          right: BorderSide(color: Color(0xFFE3EBEE)),
+          bottom: BorderSide(color: Color(0xFFDCE6EC)),
+        ),
+      ),
+      child: DefaultTextStyle.merge(
+        style: const TextStyle(
+          color: Color(0xFF17324D),
+          fontSize: 12.5,
+        ),
+        child: child,
+      ),
     );
   }
 }

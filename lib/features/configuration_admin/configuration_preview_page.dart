@@ -68,12 +68,41 @@ class _ConfigurationPreviewPageState extends State<ConfigurationPreviewPage> {
     }
   }
 
-  Future<void> _createVersion() async {
+  Future<void> _createVersion({bool deactivate = false}) async {
     final templateId = widget.template['id']?.toString();
     if (templateId == null || creatingVersion) return;
+    if (deactivate) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Preparar desactivación'),
+          content: const Text(
+            'Se creará una nueva versión con “Activo” desmarcado. Los datos existentes no se borrarán y el cambio solo llegará a la app después de validar, publicar y actualizar datos.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton.icon(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              icon: const Icon(Icons.visibility_off_outlined),
+              label: const Text('Continuar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
     setState(() => creatingVersion = true);
     try {
       final draft = await repository.createDraftFromPublished(templateId);
+      if (deactivate) {
+        final definition = _map(draft['definicion']);
+        definition['activo'] = false;
+        draft['definicion'] = definition;
+        draft['_requested_action'] = 'DEACTIVATE';
+      }
       if (!mounted) return;
       Navigator.pop(context, draft);
     } catch (exception) {
@@ -106,17 +135,47 @@ class _ConfigurationPreviewPageState extends State<ConfigurationPreviewPage> {
           title: Text(widget.template['nombre']?.toString() ?? 'Vista previa'),
           actions: [
             if (widget.canCreateVersion)
-              TextButton.icon(
-                onPressed: loading || creatingVersion ? null : _createVersion,
-                icon: creatingVersion
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.edit_note_outlined),
-                label: const Text('Nueva versión'),
-              ),
+              if (creatingVersion)
+                const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              else
+                PopupMenuButton<String>(
+                  enabled: !loading,
+                  tooltip: 'Acciones de configuración',
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (action) {
+                    if (action == 'edit') _createVersion();
+                    if (action == 'deactivate') {
+                      _createVersion(deactivate: true);
+                    }
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'edit',
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.edit_note_outlined),
+                        title: Text('Editar configuración'),
+                        subtitle: Text('Crea una nueva versión segura'),
+                      ),
+                    ),
+                    PopupMenuItem(
+                      value: 'deactivate',
+                      child: ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        leading: Icon(Icons.visibility_off_outlined),
+                        title: Text('Desactivar en la app'),
+                        subtitle: Text('Conserva todos los datos'),
+                      ),
+                    ),
+                  ],
+                ),
           ],
           bottom: const TabBar(
             tabs: [
@@ -181,6 +240,30 @@ class _ConfigurationPreviewPageState extends State<ConfigurationPreviewPage> {
           ),
         ),
         const SizedBox(height: 14),
+        if (widget.canCreateVersion) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F3F5),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFC8E0E6)),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 20, color: Color(0xFF176B87)),
+                SizedBox(width: 9),
+                Expanded(
+                  child: Text(
+                    'Usa el menú ⋮ para editar o desactivar. Se prepara una nueva versión y nada cambia hasta publicarla.',
+                    style: TextStyle(color: Color(0xFF315B68)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
         _metadataCard(definition),
         const SizedBox(height: 14),
         const Text(

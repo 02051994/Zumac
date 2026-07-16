@@ -94,6 +94,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     formatType = definition['tipo_formato']?.toString() ?? 'SIMPLE';
     active = definition['activo'] != false;
     tableVisible = definition['tabla_visible_app'] != false;
+    if (draft['_requested_action'] == 'DEACTIVATE') currentStep = 4;
     final capabilities = _map(definition['capacidades']);
     offline = capabilities['offline'] != false;
     workflow = capabilities['workflow'] == true;

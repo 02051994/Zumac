@@ -4,6 +4,7 @@ import 'configuration_admin_repository.dart';
 import 'configuration_entity_wizard_page.dart';
 import 'configuration_preview_page.dart';
 import 'format_structure_wizard_page.dart';
+import '../users/users_page.dart';
 
 class ConfigurationAdminPage extends StatefulWidget {
   const ConfigurationAdminPage({super.key});
@@ -105,6 +106,12 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     );
     if (published == true) publicationPendingSync = true;
     await _load();
+  }
+
+  Future<void> _openUsersAndPermissions() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(builder: (_) => const UsersPage()),
+    );
   }
 
   Future<void> _validateDraft(Map<String, dynamic> draft) async {
@@ -227,14 +234,16 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                           child: ListView(
                             padding: const EdgeInsets.all(16),
                             children: [
-                              _header(),
+                              _constructorGuide(),
                               if (publicationPendingSync) ...[
                                 const SizedBox(height: 14),
                                 _syncNotice(),
                               ],
-                              const SizedBox(height: 18),
+                              const SizedBox(height: 14),
                               _entityActions(),
-                              const SizedBox(height: 24),
+                              const SizedBox(height: 18),
+                              _managementPanel(),
+                              const SizedBox(height: 22),
                               _publishedPanel(),
                               const SizedBox(height: 24),
                               _draftsHeader(),
@@ -256,63 +265,49 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     );
   }
 
-  Widget _header() {
-    final role = contextData['rol']?.toString() ?? '';
-    final summary = contextData['resumen_plantillas'] is Map
-        ? Map<String, dynamic>.from(
-            contextData['resumen_plantillas'] as Map,
-          )
-        : <String, dynamic>{};
-    final totalTemplates = summary.values.fold<int>(
-      0,
-      (total, value) => total + (int.tryParse('$value') ?? 0),
-    );
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Color(0xFF0F5265), Color(0xFF176B87)],
-        ),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Row(
-        children: [
-          const CircleAvatar(
-            radius: 28,
-            backgroundColor: Colors.white24,
-            child: Icon(Icons.account_tree_outlined,
-                color: Colors.white, size: 30),
+  Widget _constructorGuide() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          '¿Qué deseas configurar?',
+          style: TextStyle(
+            color: Color(0xFF17324D),
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Diseñe sin modificar código',
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'La plataforma se organiza de lo general a lo específico:',
+          style: TextStyle(color: Color(0xFF60758A), fontSize: 13),
+        ),
+        const SizedBox(height: 10),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: const Color(0xFFE8F3F5),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: const Color(0xFFC8E0E6)),
+          ),
+          child: const Row(
+            children: [
+              Icon(Icons.account_tree_outlined, color: Color(0xFF176B87)),
+              SizedBox(width: 9),
+              Expanded(
+                child: Text(
+                  'Rubro  →  Sección  →  Módulo  →  Formato',
+                  maxLines: 2,
                   style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
+                    color: Color(0xFF315B68),
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '$totalTemplates plantillas disponibles · Rol $role',
-                  style: const TextStyle(color: Colors.white70),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-          Chip(
-            avatar: Icon(
-              canPublish ? Icons.verified_user_outlined : Icons.edit_outlined,
-              size: 18,
-            ),
-            label: Text(canPublish ? 'Puede publicar' : 'Prepara borradores'),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -352,36 +347,39 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
           children: [
             _entityCard(
               width: cardWidth,
-              icon: Icons.business_center_outlined,
+              step: 1,
               title: 'Rubro',
-              description: 'Organiza una línea de negocio completa.',
+              description:
+                  'Área principal del negocio. Ej.: Agricultura o Transporte.',
               count: _templateCount('RUBRO'),
               enabled: true,
               onTap: () => _openWizard('RUBRO'),
             ),
             _entityCard(
               width: cardWidth,
-              icon: Icons.view_sidebar_outlined,
+              step: 2,
               title: 'Sección',
-              description: 'Agrupa módulos dentro de un rubro.',
+              description:
+                  'Grupo visible en el menú. Ej.: Operaciones o Calidad.',
               count: _templateCount('SECCION'),
               enabled: true,
               onTap: () => _openWizard('SECCION'),
             ),
             _entityCard(
               width: cardWidth,
-              icon: Icons.grid_view_outlined,
+              step: 3,
               title: 'Módulo',
-              description: 'Agrupa formatos dentro de una sección.',
+              description: 'Agrupa procesos o formularios relacionados.',
               count: _templateCount('MODULO'),
               enabled: true,
               onTap: () => _openWizard('MODULO'),
             ),
             _entityCard(
               width: cardWidth,
-              icon: Icons.assignment_outlined,
-              title: 'Formato, tabla y campos',
-              description: 'Asistente encadenado para captura dinámica.',
+              step: 4,
+              title: 'Formato',
+              description:
+                  'Crea el formulario, su tabla, campos, listas y reglas.',
               count: _templateCount('FORMATO'),
               enabled: true,
               onTap: () => _openWizard('FORMATO'),
@@ -417,7 +415,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
           children: [
             const Expanded(
               child: Text(
-                'Configuración publicada',
+                'Editar u ocultar existentes',
                 style: TextStyle(
                   color: Color(0xFF17324D),
                   fontSize: 19,
@@ -427,6 +425,11 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
             ),
             Text('${publishedConfigurations.length} elemento(s)'),
           ],
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          'Toca un elemento para ver su estructura, historial, editarlo o desactivarlo sin borrar sus datos.',
+          style: TextStyle(color: Color(0xFF60758A), fontSize: 12.5),
         ),
         const SizedBox(height: 10),
         TextField(
@@ -493,7 +496,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
 
   Widget _entityCard({
     required double width,
-    required IconData icon,
+    required int step,
     required String title,
     required String description,
     required int count,
@@ -520,9 +523,12 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                   backgroundColor: enabled
                       ? const Color(0xFFE5F2F5)
                       : const Color(0xFFF0F1F2),
-                  child: Icon(
-                    icon,
-                    color: enabled ? const Color(0xFF176B87) : Colors.grey,
+                  child: Text(
+                    '$step',
+                    style: TextStyle(
+                      color: enabled ? const Color(0xFF176B87) : Colors.grey,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -547,7 +553,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                       const SizedBox(height: 6),
                       Text(
                         enabled
-                            ? '$count plantilla(s)'
+                            ? '$count existente(s) · reutilizables'
                             : 'Disponible en la siguiente etapa',
                         style: TextStyle(
                           color:
@@ -559,14 +565,79 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                     ],
                   ),
                 ),
-                Icon(enabled
-                    ? Icons.add_circle_outline
-                    : Icons.lock_clock_outlined),
+                const SizedBox(width: 6),
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      enabled
+                          ? Icons.arrow_forward_rounded
+                          : Icons.lock_clock_outlined,
+                      color: enabled ? const Color(0xFF176B87) : Colors.grey,
+                    ),
+                    if (enabled)
+                      const Text(
+                        'Crear',
+                        style: TextStyle(
+                          color: Color(0xFF176B87),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                  ],
+                ),
               ],
             ),
           ),
         ),
       ),
+    );
+  }
+
+  Widget _managementPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Text(
+          'Administración',
+          style: TextStyle(
+            color: Color(0xFF17324D),
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Card(
+          margin: EdgeInsets.zero,
+          elevation: 0,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+            side: const BorderSide(color: Color(0xFFDCE6EC)),
+          ),
+          child: ListTile(
+            enabled: canPublish,
+            onTap: canPublish ? _openUsersAndPermissions : null,
+            leading: const CircleAvatar(
+              backgroundColor: Color(0xFFE5F2F5),
+              foregroundColor: Color(0xFF176B87),
+              child: Icon(Icons.manage_accounts_outlined),
+            ),
+            title: const Text(
+              'Usuarios, roles y permisos',
+              style: TextStyle(
+                color: Color(0xFF17324D),
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            subtitle: const Text(
+              'Define quién puede ver, crear, editar o eliminar registros. Solo ADMIN.',
+            ),
+            trailing: Icon(
+              canPublish ? Icons.chevron_right : Icons.lock_outline,
+            ),
+          ),
+        ),
+      ],
     );
   }
 

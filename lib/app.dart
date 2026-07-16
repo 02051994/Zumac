@@ -63,17 +63,35 @@ class _AppGTState extends State<AppGT> {
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF0D5F78),
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
           isDense: true,
           filled: true,
-          fillColor: Colors.white,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+          fillColor: const Color(0xFFFCFEFE),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF6F7A70))),
-          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF0D5F78), width: 2)),
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFF6FA6B4), width: 1.2),
+          ),
+          focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: Color(0xFF0D5F78), width: 2)),
+          disabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: const BorderSide(color: Color(0xFFC9D9DE)),
+          ),
+          labelStyle: const TextStyle(color: Color(0xFF496977)),
+          floatingLabelStyle: const TextStyle(
+            color: Color(0xFF0D5F78),
+            fontWeight: FontWeight.w700,
+          ),
+          prefixIconColor: const Color(0xFF176B87),
+          suffixIconColor: const Color(0xFF176B87),
         ),
       ),
       home: _showStartupSplash

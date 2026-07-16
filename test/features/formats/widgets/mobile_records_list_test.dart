@@ -29,20 +29,17 @@ void main() {
     );
   }
 
-  testWidgets('muestra cuatro campos y permite expandir los restantes',
+  testWidgets('muestra encabezados y todos los valores en una tabla horizontal',
       (tester) async {
     await tester.pumpWidget(subject());
 
-    expect(find.text('REG-001'), findsNWidgets(2));
+    expect(find.byKey(const Key('mobile-table-header')), findsOneWidget);
+    expect(find.text('CODIGO'), findsOneWidget);
+    expect(find.text('PRODUCTO'), findsOneWidget);
+    expect(find.text('REG-001'), findsOneWidget);
     expect(find.text('Palta'), findsOneWidget);
-    expect(find.text('Activo'), findsNothing);
-    expect(find.text('Ver 1 campos más'), findsOneWidget);
-
-    await tester.tap(find.text('Ver 1 campos más'));
-    await tester.pumpAndSettle();
-
     expect(find.text('Activo'), findsOneWidget);
-    expect(find.text('Ver menos'), findsOneWidget);
+    expect(find.byKey(const Key('mobile-table-hint')), findsOneWidget);
   });
 
   testWidgets('expone la acción de edición sin alterar los valores',
@@ -50,7 +47,10 @@ void main() {
     var edits = 0;
     await tester.pumpWidget(subject(onEdit: () => edits++));
 
-    await tester.tap(find.byIcon(Icons.edit_outlined));
+    final editButton = find.byKey(const Key('edit-record-1'));
+    await tester.ensureVisible(editButton);
+    await tester.pumpAndSettle();
+    await tester.tap(editButton);
     await tester.pump();
 
     expect(edits, 1);

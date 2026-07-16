@@ -86,6 +86,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool offline = false;
   bool canExport = false;
   bool canImport = false;
+  bool canInsert = false;
   bool canUpdate = false;
   bool canDelete = false;
   final Set<String> _selectedDeleteRowKeys = <String>{};
@@ -128,7 +129,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool _hasNextPage = false;
   int? _knownTotalRows;
   bool _silentTableRefreshRunning = false;
-
 
   String? yearFilter;
   String? weekFilter;
@@ -176,7 +176,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-
   void _syncFixedVerticalScroll() {
     if (_syncingVerticalTableScroll) return;
     if (!_verticalTableController.hasClients || !_fixedVerticalTableController.hasClients) return;
@@ -206,7 +205,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (s.isEmpty || s.toUpperCase() == 'NULL') return null;
     return s;
   }
-
 
   bool _boolValue(dynamic value) {
     if (value == true) return true;
@@ -261,7 +259,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return false;
   }
 
-
   Future<bool> _canCurrentUserDelete(String formatId) async {
     final rows = await local.where(
       'local_permissions',
@@ -286,7 +283,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return false;
   }
 
-
   Future<Map<String, bool>> _currentUserPermissionsForFormat(String formatId) async {
     final rows = await local.where(
       'local_permissions',
@@ -295,17 +291,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
     var export = false;
     var import = false;
+    var insert = false;
     var update = false;
     var delete = false;
     for (final row in rows) {
       export = export || _boolValue(row['can_export']) || row['can_export'] == 1;
       import = import || _boolValue(row['can_import']) || row['can_import'] == 1;
+      insert = insert || _boolValue(row['can_insert']) || row['can_insert'] == 1;
       update = update || _boolValue(row['can_update']) || row['can_update'] == 1;
       delete = delete || _boolValue(row['can_delete']) || row['can_delete'] == 1;
     }
     return {
       'export': export,
       'import': import,
+      'insert': insert,
       'update': update,
       'delete': delete,
     };
@@ -602,7 +601,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return _DesktopRecordsResult(columns: _columnsFromRows(rows), rows: rows, totalRows: total);
   }
 
-  Future<_DesktopRecordsResult> _fetchDirectDesktopRecordsPaged(String table, {
+  Future<_DesktopRecordsResult> _fetchDirectDesktopRecordsPaged(
+    String table, {
     int page = 0,
     int pageSize = _pageSize,
     bool fetchAll = false,
@@ -777,9 +777,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return _fetchLocalMatrixRecords(cleanTable);
   }
 
-
-
-
   void _invalidateFilteredCache() {
     _filteredCache = null;
     _filteredCacheKey = null;
@@ -829,8 +826,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final wanted = _norm(_unwrapCacheReference(identifier));
     if (wanted.isEmpty) return null;
     for (final field in fields) {
-      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']]
-          .any((value) => _norm(value?.toString() ?? '') == wanted);
+      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']].any((value) => _norm(value?.toString() ?? '') == wanted);
       if (matches) return field;
     }
     return null;
@@ -970,16 +966,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final filteredAll = _filterAndSortRows(data.rows);
         totalRowsForView = filteredAll.length;
         final startIndex = _currentPage * _pageSize;
-        final pageRows = startIndex >= filteredAll.length
-            ? <Map<String, dynamic>>[]
-            : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
+        final pageRows = startIndex >= filteredAll.length ? <Map<String, dynamic>>[] : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
         hasNextPageForView = pageRows.length > _pageSize;
         loadedRows = pageRows.take(_pageSize).toList();
       } else {
         loadedRows = data.rows.take(_pageSize).toList();
         totalRowsForView = data.totalRows;
-        hasNextPageForView = data.rows.length > _pageSize ||
-            (data.totalRows != null && ((_currentPage + 1) * _pageSize) < data.totalRows!);
+        hasNextPageForView = data.rows.length > _pageSize || (data.totalRows != null && ((_currentPage + 1) * _pageSize) < data.totalRows!);
       }
 
       setState(() {
@@ -1031,6 +1024,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final permissions = await _currentUserPermissionsForFormat(formatId);
       final exportAllowed = permissions['export'] ?? false;
       final importAllowed = permissions['import'] ?? false;
+      final insertAllowed = permissions['insert'] ?? false;
       final updateAllowed = permissions['update'] ?? false;
       final deleteAllowed = permissions['delete'] ?? false;
       _setLoadingMessage('Leyendo configuración del formato...');
@@ -1047,16 +1041,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         [formatId],
       );
       if (special.isEmpty && (widget.format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
-        special = [<String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}];
+        special = [
+          <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}
+        ];
       }
 
       final validInternalTables = internalTables.where((e) => _clean(e['tabla_destino']) != null).toList();
       final selectedStillExists = selectedTableName != null && validInternalTables.any((e) => _clean(e['tabla_destino']) == selectedTableName);
-      final resolvedTable = selectedStillExists
-          ? selectedTableName
-          : (validInternalTables.isNotEmpty
-              ? _clean(validInternalTables.first['tabla_destino'])
-              : _clean(widget.format['tabla_destino']));
+      final resolvedTable = selectedStillExists ? selectedTableName : (validInternalTables.isNotEmpty ? _clean(validInternalTables.first['tabla_destino']) : _clean(widget.format['tabla_destino']));
       internalTableRows = validInternalTables;
       selectedTableName = resolvedTable;
 
@@ -1069,6 +1061,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           loading = false;
           canExport = exportAllowed;
           canImport = importAllowed;
+          canInsert = insertAllowed;
           canUpdate = updateAllowed;
           canDelete = deleteAllowed;
           error = 'Este formato no tiene tabla destino configurada.';
@@ -1092,6 +1085,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           offline = true;
           canExport = exportAllowed;
           canImport = importAllowed;
+          canInsert = insertAllowed;
           canUpdate = updateAllowed;
           canDelete = deleteAllowed;
         });
@@ -1131,9 +1125,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final filteredAll = _filterAndSortRows(data.rows);
         totalRowsForView = filteredAll.length;
         final startIndex = _currentPage * _pageSize;
-        final pageRows = startIndex >= filteredAll.length
-            ? <Map<String, dynamic>>[]
-            : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
+        final pageRows = startIndex >= filteredAll.length ? <Map<String, dynamic>>[] : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
         hasNextPageForView = pageRows.length > _pageSize;
         loadedRows = pageRows.take(_pageSize).toList();
         initialRows = loadedRows.length;
@@ -1157,6 +1149,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         offline = false;
         canExport = exportAllowed;
         canImport = importAllowed;
+        canInsert = insertAllowed;
         canUpdate = updateAllowed;
         canDelete = deleteAllowed;
         _selectedDeleteRowKeys.clear();
@@ -1244,7 +1237,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final out = values.toList()..sort();
     return out;
   }
-
 
   List<Map<String, dynamic>> _filterAndSortRows(List<Map<String, dynamic>> sourceRows) {
     final filtered = sourceRows.where((row) {
@@ -1551,8 +1543,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return (maxLen * 8.5 + 36).clamp(110.0, 420.0);
   }
 
-
-
   String _safeFileName(String value) {
     final clean = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9_\-]+'), '_').replaceAll(RegExp(r'_+'), '_');
     return clean.isEmpty ? 'exportacion' : clean;
@@ -1721,7 +1711,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-
   Future<void> _printRecords() async {
     var rows = filteredRecords;
     var printColumns = displayColumns;
@@ -1802,7 +1791,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-
   bool _fieldVisibleInWindowsTable(Map<String, dynamic> field) {
     final campo = field['campo']?.toString().trim() ?? '';
     final tipoUi = field['tipo_ui']?.toString().trim().toLowerCase() ?? '';
@@ -1839,10 +1827,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<List<String>> _templateColumns() async {
     final fields = await _templateFieldRows();
     if (fields.isNotEmpty) {
-      return fields
-          .map((f) => f['campo']?.toString().trim() ?? '')
-          .where((campo) => campo.isNotEmpty && campo.toUpperCase() != 'NULL')
-          .toList();
+      return fields.map((f) => f['campo']?.toString().trim() ?? '').where((campo) => campo.isNotEmpty && campo.toUpperCase() != 'NULL').toList();
     }
     final fallbackColumns = displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
     return _visibleWindowsColumns(fallbackColumns).map(_tableHeaderLabel).toList();
@@ -1892,9 +1877,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final numeric = RegExp(r'&#(x?[0-9A-Fa-f]+);');
     value = value.replaceAllMapped(numeric, (m) {
       final raw = m.group(1) ?? '';
-      final code = raw.toLowerCase().startsWith('x')
-          ? int.tryParse(raw.substring(1), radix: 16)
-          : int.tryParse(raw);
+      final code = raw.toLowerCase().startsWith('x') ? int.tryParse(raw.substring(1), radix: 16) : int.tryParse(raw);
       if (code == null) return m.group(0) ?? '';
       try {
         return String.fromCharCode(code);
@@ -1902,13 +1885,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         return '';
       }
     });
-    return value
-        .replaceAll('&nbsp;', ' ')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'");
+    return value.replaceAll('&nbsp;', ' ').replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&apos;', "'");
   }
 
   String _cleanImportText(String text) {
@@ -1942,20 +1919,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   String _cleanImportHeader(String value) {
     var h = _stripHtml(value);
     h = _cleanImportText(h);
-    h = h
-        .replaceAll('\u00A0', ' ')
-        .replaceAll(RegExp(r'[\u200B-\u200D\u2060]'), '')
-        .trim();
+    h = h.replaceAll('\u00A0', ' ').replaceAll(RegExp(r'[\u200B-\u200D\u2060]'), '').trim();
     // Cuando algún conversor deja restos visibles del BOM al inicio.
     h = h.replaceFirst(RegExp(r'^(ï»¿|»¿|¿)+'), '').trim();
     return h;
   }
 
   String _headerKey(String value) {
-    return _norm(_cleanImportHeader(value))
-        .replaceAll(RegExp(r'[^A-Z0-9ÑÁÉÍÓÚÜ]+'), '_')
-        .replaceAll(RegExp(r'_+'), '_')
-        .replaceAll(RegExp(r'^_|_$'), '');
+    return _norm(_cleanImportHeader(value)).replaceAll(RegExp(r'[^A-Z0-9ÑÁÉÍÓÚÜ]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
   }
 
   String? _resolveImportColumn(String rawHeader, Map<String, String> columnByKey) {
@@ -2005,7 +1976,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
   }
 
-
   String _generateImportCode(String? prefix) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     final rnd = math.Random.secure();
@@ -2014,8 +1984,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final suffix = List.generate(16, (_) => chars[rnd.nextInt(chars.length)]).join();
     return '$safePrefix$suffix';
   }
-
-
 
   Future<List<Map<String, dynamic>>> _importFieldRows() async {
     final table = tableName ?? widget.format['tabla_destino']?.toString();
@@ -2224,9 +2192,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _stripHtml(String value) {
-    final withoutTags = value
-        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
-        .replaceAll(RegExp(r'<[^>]+>'), '');
+    final withoutTags = value.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n').replaceAll(RegExp(r'<[^>]+>'), '');
     return _decodeHtmlEntities(withoutTags).trim();
   }
 
@@ -2351,11 +2317,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         // Se acepta también etiqueta antigua para compatibilidad, pero se guarda por campo real.
         for (final c in validColumns) _headerKey(c): c,
         for (final f in importFields)
-          if ((f['campo']?.toString().trim() ?? '').isNotEmpty)
-            _headerKey(f['campo'].toString()): f['campo'].toString(),
+          if ((f['campo']?.toString().trim() ?? '').isNotEmpty) _headerKey(f['campo'].toString()): f['campo'].toString(),
         for (final f in importFields)
-          if ((f['etiqueta']?.toString().trim() ?? '').isNotEmpty && (f['campo']?.toString().trim() ?? '').isNotEmpty)
-            _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
+          if ((f['etiqueta']?.toString().trim() ?? '').isNotEmpty && (f['campo']?.toString().trim() ?? '').isNotEmpty) _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
       };
       final detected = _detectImportHeaderRow(grid, columnByKey);
       if (detected == null) {
@@ -2524,7 +2488,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-
   bool get _isPersonalPlanillaTable {
     final t = (tableName ?? widget.format['tabla_destino']?.toString() ?? '').trim().toUpperCase();
     return t == 'GH-REGISTRO_PERSONAL_PLANILLA';
@@ -2544,11 +2507,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Future<List<Map<String, dynamic>>> _fetchPersonalRowsForPhotocheck() async {
     try {
-      final res = await supabase
-          .from('GH-REGISTRO_PERSONAL_PLANILLA')
-          .select()
-          .or('eliminado.is.null,eliminado.eq.false')
-          .order('DNI', ascending: true);
+      final res = await supabase.from('GH-REGISTRO_PERSONAL_PLANILLA').select().or('eliminado.is.null,eliminado.eq.false').order('DNI', ascending: true);
       final rows = (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
       if (rows.isNotEmpty) return rows;
     } catch (_) {
@@ -2563,17 +2522,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     try {
       dynamic res;
       try {
-        res = await supabase
-            .from('GT-DISEÑO_PHOTOCHEK')
-            .select()
-            .or('eliminado.is.null,eliminado.eq.false')
-            .order('DISEÑO', ascending: true);
+        res = await supabase.from('GT-DISEÑO_PHOTOCHEK').select().or('eliminado.is.null,eliminado.eq.false').order('DISEÑO', ascending: true);
       } catch (_) {
-        res = await supabase
-            .from('MATRIZ-PHOTOCHEK')
-            .select()
-            .or('eliminado.is.null,eliminado.eq.false')
-            .order('DISEÑO', ascending: true);
+        res = await supabase.from('MATRIZ-PHOTOCHEK').select().or('eliminado.is.null,eliminado.eq.false').order('DISEÑO', ascending: true);
       }
       final rows = (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
       if (rows.isNotEmpty) return rows;
@@ -2585,11 +2536,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   List<String> _photocheckDesignFields(Map<String, dynamic> design) {
     final raw = _rowText(design, ['CAMPOS', 'Campos', 'campos']);
-    final fields = raw
-        .split(RegExp(r'[,;|]'))
-        .map((e) => e.trim())
-        .where((e) => e.isNotEmpty)
-        .toList();
+    final fields = raw.split(RegExp(r'[,;|]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
     return fields.isEmpty ? <String>['Logo', 'FOTO', 'Apellidos y Nombres', 'Dni', 'QR', 'Puesto'] : fields;
   }
 
@@ -2873,11 +2820,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) {
           final q = query.toUpperCase();
-          final filtered = all.where((r) {
-            final dni = _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']);
-            final nombre = _rowText(r, ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
-            return q.isEmpty || '$dni $nombre'.toUpperCase().contains(q);
-          }).take(100).toList();
+          final filtered = all
+              .where((r) {
+                final dni = _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']);
+                final nombre = _rowText(r, ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
+                return q.isEmpty || '$dni $nombre'.toUpperCase().contains(q);
+              })
+              .take(100)
+              .toList();
           return AlertDialog(
             title: const Text('Generar Photocheck'),
             content: SizedBox(
@@ -2886,7 +2836,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               child: Column(children: [
                 TextField(decoration: const InputDecoration(labelText: 'Buscar por DNI o nombres', border: OutlineInputBorder()), onChanged: (v) => setDialogState(() => query = v)),
                 const SizedBox(height: 10),
-                Expanded(child: ListView.builder(
+                Expanded(
+                    child: ListView.builder(
                   itemCount: filtered.length,
                   itemBuilder: (_, i) {
                     final r = filtered[i];
@@ -2897,12 +2848,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       dense: true,
                       leading: Icon(isSel ? Icons.check_circle : Icons.person_outline, color: isSel ? const Color(0xFF147A6E) : null),
                       title: Text('$dni - $nombre'),
-                      onTap: () => setDialogState(() { if (dni.isNotEmpty) selected[dni] = r; }),
+                      onTap: () => setDialogState(() {
+                        if (dni.isNotEmpty) selected[dni] = r;
+                      }),
                     );
                   },
                 )),
                 Align(alignment: Alignment.centerLeft, child: Text('Seleccionados: ${selected.length}')),
-                SizedBox(height: 70, child: ListView(scrollDirection: Axis.horizontal, children: selected.keys.map((dni) => Padding(padding: const EdgeInsets.only(right: 6), child: Chip(label: Text(dni), onDeleted: () => setDialogState(() => selected.remove(dni))))).toList())),
+                SizedBox(
+                    height: 70,
+                    child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: selected.keys.map((dni) => Padding(padding: const EdgeInsets.only(right: 6), child: Chip(label: Text(dni), onDeleted: () => setDialogState(() => selected.remove(dni))))).toList())),
               ]),
             ),
             actions: [
@@ -2950,7 +2907,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
     if (dnis.isEmpty) return;
     final all = await _fetchPersonalRowsForPhotocheck();
-    final byDni = {for (final r in all) _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']): r};
+    final byDni = {
+      for (final r in all) _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']): r
+    };
     final workers = <Map<String, dynamic>>[];
     final missing = <String>[];
     for (final dni in dnis) {
@@ -3180,10 +3139,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ),
     );
   }
+
   void _scheduleRenderRows(int totalRows) {
     // Desactivado: con paginación de 200 filas, repintar por bloques hacía lenta la UI.
   }
-
 
   bool _isMediaColumn(String column) {
     final n = _norm(column);
@@ -3395,7 +3354,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-
   dynamic _fieldMetaValueAny(Map<String, dynamic> field, List<String> names) {
     for (final name in names) {
       if (field.containsKey(name)) return field[name];
@@ -3597,8 +3555,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-
-
   bool _isHiddenWindowsColumn(String column) {
     final n = _norm(column);
     const hidden = {
@@ -3733,10 +3689,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final key in row.keys) {
       final n = _norm(key);
       final value = row[key];
-      if ((n == 'ID' || n.endsWith('_ID')) &&
-          value != null &&
-          value.toString().trim().isNotEmpty &&
-          value.toString().trim().toUpperCase() != 'NULL') {
+      if ((n == 'ID' || n.endsWith('_ID')) && value != null && value.toString().trim().isNotEmpty && value.toString().trim().toUpperCase() != 'NULL') {
         return key;
       }
     }
@@ -3760,8 +3713,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     };
     return !_isHiddenWindowsColumn(column) && !blocked.contains(n);
   }
-
-
 
   String _editRawFieldValue(Map<String, dynamic> field, List<String> candidates) {
     final value = _value(field, candidates);
@@ -3825,12 +3776,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return number.toStringAsFixed(_editNumeroDecimales(field));
   }
 
-
   bool _editIsNumberField(Map<String, dynamic> field) {
     final tipo = _editTipo(field);
     final ui = _editUiType(field);
-    return tipo == 'number' || tipo == 'numeric' || tipo == 'decimal' || tipo == 'double' || tipo == 'integer' || tipo == 'int' ||
-        ui == 'number' || ui == 'numeric' || ui == 'decimal' || ui == 'double' || ui == 'integer' || ui == 'int';
+    return tipo == 'number' || tipo == 'numeric' || tipo == 'decimal' || tipo == 'double' || tipo == 'integer' || tipo == 'int' || ui == 'number' || ui == 'numeric' || ui == 'decimal' || ui == 'double' || ui == 'integer' || ui == 'int';
   }
 
   bool _editAllowsDecimal(Map<String, dynamic> field) {
@@ -3858,9 +3807,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       formatters.add(TextInputFormatter.withFunction((oldValue, newValue) {
         final text = newValue.text.trim();
         if (text.isEmpty || text == '-') return newValue;
-        final pattern = decimal
-            ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$')
-            : RegExp(r'^-?\d*$');
+        final pattern = decimal ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$') : RegExp(r'^-?\d*$');
         return pattern.hasMatch(text) ? newValue : oldValue;
       }));
     }
@@ -3933,8 +3880,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     Map<String, dynamic>? fallback;
     for (final field in allLocalFormFields) {
-      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']]
-          .any((value) => _norm(value?.toString() ?? '') == wanted);
+      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']].any((value) => _norm(value?.toString() ?? '') == wanted);
       if (!matches) continue;
       final fieldTable = _norm(field['tabla_destino']?.toString() ?? '');
       if (currentTable.isNotEmpty && fieldTable == currentTable) return field;
@@ -4113,7 +4059,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-
   Future<String?> _editShowSearchableDropdownPicker({
     required BuildContext dialogContext,
     required String title,
@@ -4139,9 +4084,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           void applyFilter(String query, void Function(void Function()) setLocalState) {
             final q = query.trim().toLowerCase();
             setLocalState(() {
-              filtered = q.isEmpty
-                  ? List<String>.from(uniqueOptions)
-                  : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
+              filtered = q.isEmpty ? List<String>.from(uniqueOptions) : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
             });
           }
 
@@ -4263,16 +4206,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     Set<String> parseMultiSelect(String raw) {
       if (raw.trim().isEmpty) return <String>{};
-      return raw
-          .split(RegExp(r'[|,;]'))
-          .map((e) => e.trim())
-          .where((e) => e.isNotEmpty)
-          .toSet();
+      return raw.split(RegExp(r'[|,;]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
     }
 
     if (ui == 'multiselect') {
-      final options = _editLiteralDropdownOptions(field) ??
-          _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
+      final options = _editLiteralDropdownOptions(field) ?? _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
       final selected = parseMultiSelect(controller.text);
       final selectedText = selected.isEmpty ? 'Seleccionar...' : (selected.toList()..sort()).join(', ');
 
@@ -4347,8 +4285,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     if (ui == 'dropdown' || _editHasDropdownSource(field)) {
-      final options = _editLiteralDropdownOptions(field) ??
-          _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
+      final options = _editLiteralDropdownOptions(field) ?? _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
       if (options.isNotEmpty) {
         return _editSearchableDropdownField(
           dialogContext: dialogContext,
@@ -4429,9 +4366,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return TextField(
       controller: controller,
       readOnly: !editable || ui == 'formula' || ui == 'lookup',
-      keyboardType: _editIsNumberField(field)
-          ? TextInputType.numberWithOptions(decimal: _editAllowsDecimal(field), signed: true)
-          : TextInputType.text,
+      keyboardType: _editIsNumberField(field) ? TextInputType.numberWithOptions(decimal: _editAllowsDecimal(field), signed: true) : TextInputType.text,
       inputFormatters: _editInputFormattersForField(field),
       minLines: _isMediaColumn(campo) ? 1 : 1,
       maxLines: _isMediaColumn(campo) ? 3 : 1,
@@ -4446,9 +4381,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   int? _editGridNumber(Map<String, dynamic> field, String key) {
-    final raw = key == 'grid_fila'
-        ? _value(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid'])
-        : _value(field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
+    final raw = key == 'grid_fila' ? _value(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid']) : _value(field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
     if (raw == null) return null;
     final text = raw.toString().trim();
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
@@ -4754,7 +4687,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-
   void _notifyDeleteSelectionChanged() {
     _deleteSelectionVersion.value++;
   }
@@ -4870,14 +4802,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             width: 420,
             height: 460,
             child: ListView(
-              children: columns.map((column) => CheckboxListTile(
-                dense: true,
-                value: temp.contains(column),
-                title: Text(column),
-                onChanged: (v) => setLocalState(() {
-                  if (v == true) temp.add(column); else temp.remove(column);
-                }),
-              )).toList(),
+              children: columns
+                  .map((column) => CheckboxListTile(
+                        dense: true,
+                        value: temp.contains(column),
+                        title: Text(column),
+                        onChanged: (v) => setLocalState(() {
+                          if (v == true)
+                            temp.add(column);
+                          else
+                            temp.remove(column);
+                        }),
+                      ))
+                  .toList(),
             ),
           ),
           actions: [
@@ -4981,8 +4918,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                         style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5),
                       ),
                     ),
-                    if (sorted)
-                      Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 14, color: Colors.white),
+                    if (sorted) Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 14, color: Colors.white),
                   ],
                 ),
               ),
@@ -5325,16 +5261,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final total = _knownTotalRows;
     final rangeStart = shownRows == 0 ? 0 : (_currentPage * _pageSize) + 1;
     final rangeEnd = shownRows == 0 ? 0 : (_currentPage * _pageSize) + shownRows;
-    final rowsLabel = total != null && total > 0
-        ? 'Mostrando $rangeStart-$rangeEnd de $total filas'
-        : 'Mostrando $shownRows filas';
+    final rowsLabel = total != null && total > 0 ? 'Mostrando $rangeStart-$rangeEnd de $total filas' : 'Mostrando $shownRows filas';
     return Row(
       children: [
         Expanded(
           child: Text(
-            tableName == null
-                ? 'Tabla no configurada'
-                : 'Tabla: $tableName · $rowsLabel',
+            tableName == null ? 'Tabla no configurada' : 'Tabla: $tableName · $rowsLabel',
             style: const TextStyle(color: Color(0xFF60758A), fontSize: 12),
           ),
         ),
@@ -5359,8 +5291,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ],
     );
   }
-
-
 
   String _cleanHeaderValue(dynamic value) {
     final text = value?.toString().trim() ?? '';
@@ -5560,192 +5490,195 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             builder: (context, _, __) => Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-              Expanded(
-                child: Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      height: 34,
-                      child: OutlinedButton.icon(
-                        onPressed: _hasAnyActiveFilters ? _clearAllFilters : null,
-                        icon: const Icon(Icons.filter_alt_off, size: 16),
-                        label: const Text('Limpiar filtros'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFF147A6E),
-                          backgroundColor: const Color(0xFFF2FAF8),
-                          side: const BorderSide(color: Color(0xFFB7DDD6)),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                Expanded(
+                  child: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      SizedBox(
+                        height: 34,
+                        child: OutlinedButton.icon(
+                          onPressed: _hasAnyActiveFilters ? _clearAllFilters : null,
+                          icon: const Icon(Icons.filter_alt_off, size: 16),
+                          label: const Text('Limpiar filtros'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: const Color(0xFF147A6E),
+                            backgroundColor: const Color(0xFFF2FAF8),
+                            side: const BorderSide(color: Color(0xFFB7DDD6)),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                          ),
                         ),
                       ),
-                    ),
-                    const SizedBox(width: 8),
-                    if (hasDate) ...[
-                      _dateRangeFilter(
-                        label: 'FECHA INICIO',
-                        value: startDateFilter,
-                        onTap: () => _pickRangeDate(isStart: true),
-                        onClear: () => _applyTopFilter(() => startDateFilter = null),
-                        width: 145,
-                      ),
-                      _dateRangeFilter(
-                        label: 'FECHA FIN',
-                        value: endDateFilter,
-                        onTap: () => _pickRangeDate(isStart: false),
-                        onClear: () => _applyTopFilter(() => endDateFilter = null),
-                        width: 135,
-                      ),
-                      _dropdownFilter(
-                        label: 'AÑO',
-                        value: yearFilter,
-                        values: _uniqueYears(),
-                        onChanged: (v) => _applyTopFilter(() => yearFilter = v),
-                        width: 86,
-                      ),
-                      _dropdownFilter(
-                        label: 'SEMANA',
-                        value: weekFilter,
-                        values: _uniqueWeeks(),
-                        onChanged: (v) => _applyTopFilter(() => weekFilter = v),
-                        width: 105,
-                      ),
-                      _dropdownFilter(
-                        label: 'MES',
-                        value: monthFilter,
-                        values: _uniqueMonths(),
-                        onChanged: (v) => _applyTopFilter(() => monthFilter = v),
-                        width: 92,
-                      ),
+                      const SizedBox(width: 8),
+                      if (hasDate) ...[
+                        _dateRangeFilter(
+                          label: 'FECHA INICIO',
+                          value: startDateFilter,
+                          onTap: () => _pickRangeDate(isStart: true),
+                          onClear: () => _applyTopFilter(() => startDateFilter = null),
+                          width: 145,
+                        ),
+                        _dateRangeFilter(
+                          label: 'FECHA FIN',
+                          value: endDateFilter,
+                          onTap: () => _pickRangeDate(isStart: false),
+                          onClear: () => _applyTopFilter(() => endDateFilter = null),
+                          width: 135,
+                        ),
+                        _dropdownFilter(
+                          label: 'AÑO',
+                          value: yearFilter,
+                          values: _uniqueYears(),
+                          onChanged: (v) => _applyTopFilter(() => yearFilter = v),
+                          width: 86,
+                        ),
+                        _dropdownFilter(
+                          label: 'SEMANA',
+                          value: weekFilter,
+                          values: _uniqueWeeks(),
+                          onChanged: (v) => _applyTopFilter(() => weekFilter = v),
+                          width: 105,
+                        ),
+                        _dropdownFilter(
+                          label: 'MES',
+                          value: monthFilter,
+                          values: _uniqueMonths(),
+                          onChanged: (v) => _applyTopFilter(() => monthFilter = v),
+                          width: 92,
+                        ),
+                      ],
+                      if (hasVariety)
+                        _dropdownFilter(
+                          label: 'VARIEDAD',
+                          value: varietyFilter,
+                          values: _unique(['VARIEDAD', 'VARIEDADES']),
+                          onChanged: (v) => _applyTopFilter(() => varietyFilter = v),
+                          width: 140,
+                        ),
+                      if (hasLote)
+                        _dropdownFilter(
+                          label: 'LOTE',
+                          value: loteFilter,
+                          values: _unique(['LOTE', 'LOTES']),
+                          onChanged: (v) => _applyTopFilter(() => loteFilter = v),
+                          width: 120,
+                        ),
+                      if (hasTurno)
+                        _dropdownFilter(
+                          label: 'TURNO',
+                          value: turnoFilter,
+                          values: _unique(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']),
+                          onChanged: (v) => _applyTopFilter(() => turnoFilter = v),
+                          width: 130,
+                        ),
                     ],
-                    if (hasVariety)
-                      _dropdownFilter(
-                        label: 'VARIEDAD',
-                        value: varietyFilter,
-                        values: _unique(['VARIEDAD', 'VARIEDADES']),
-                        onChanged: (v) => _applyTopFilter(() => varietyFilter = v),
-                        width: 140,
-                      ),
-                    if (hasLote)
-                      _dropdownFilter(
-                        label: 'LOTE',
-                        value: loteFilter,
-                        values: _unique(['LOTE', 'LOTES']),
-                        onChanged: (v) => _applyTopFilter(() => loteFilter = v),
-                        width: 120,
-                      ),
-                    if (hasTurno)
-                      _dropdownFilter(
-                        label: 'TURNO',
-                        value: turnoFilter,
-                        values: _unique(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']),
-                        onChanged: (v) => _applyTopFilter(() => turnoFilter = v),
-                        width: 130,
-                      ),
-                  ],
+                  ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              if (internalTableRows.length > 1) ...[
-                SizedBox(
-                  width: 260,
-                  height: 44,
-                  child: DropdownButtonFormField<String>(
-                    value: selectedTableName,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Tabla del formato',
-                      border: OutlineInputBorder(),
-                      isDense: true,
+                const SizedBox(width: 12),
+                if (internalTableRows.length > 1) ...[
+                  SizedBox(
+                    width: 260,
+                    height: 44,
+                    child: DropdownButtonFormField<String>(
+                      value: selectedTableName,
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Tabla del formato',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                      items: internalTableRows.map((row) {
+                        final table = _clean(row['tabla_destino']) ?? '';
+                        final label = _clean(row['nombre_tabla']) ?? _clean(row['nombre']) ?? table;
+                        return DropdownMenuItem<String>(value: table, child: Text(label, overflow: TextOverflow.ellipsis));
+                      }).toList(),
+                      onChanged: loading
+                          ? null
+                          : (value) async {
+                              if (value == null || value == selectedTableName) return;
+                              setState(() {
+                                selectedTableName = value;
+                                _currentPage = 0;
+                                _pinnedColumns.clear();
+                                _columnFilters.clear();
+                                _sortColumn = null;
+                                _invalidateFilteredCache();
+                              });
+                              await _load();
+                            },
                     ),
-                    items: internalTableRows.map((row) {
-                      final table = _clean(row['tabla_destino']) ?? '';
-                      final label = _clean(row['nombre_tabla']) ?? _clean(row['nombre']) ?? table;
-                      return DropdownMenuItem<String>(value: table, child: Text(label, overflow: TextOverflow.ellipsis));
-                    }).toList(),
-                    onChanged: loading ? null : (value) async {
-                      if (value == null || value == selectedTableName) return;
-                      setState(() {
-                        selectedTableName = value;
-                        _currentPage = 0;
-                        _pinnedColumns.clear();
-                        _columnFilters.clear();
-                        _sortColumn = null;
-                        _invalidateFilteredCache();
-                      });
-                      await _load();
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                SizedBox(
+                  width: 44,
+                  height: 44,
+                  child: OutlinedButton(
+                    onPressed: displayColumns.isEmpty ? null : () => _showPinColumnsDialog(_visibleWindowsColumns(displayColumns)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF147A6E),
+                      side: const BorderSide(color: Color(0xFF147A6E)),
+                      backgroundColor: const Color(0xFFF2FAF8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: EdgeInsets.zero,
+                    ),
+                    child: Icon(_pinnedColumns.isEmpty ? Icons.push_pin_outlined : Icons.push_pin),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (canDelete) ...[
+                  ValueListenableBuilder<int>(
+                    valueListenable: _deleteSelectionVersion,
+                    builder: (context, _, __) {
+                      final hasSelection = _selectedDeleteRows.isNotEmpty;
+                      return SizedBox(
+                        width: 44,
+                        height: 44,
+                        child: OutlinedButton(
+                          onPressed: hasSelection ? _deleteSelectedRows : null,
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: Colors.red.shade700,
+                            side: BorderSide(color: hasSelection ? Colors.red.shade700 : Colors.grey.shade300),
+                            backgroundColor: hasSelection ? const Color(0xFFFFF4F4) : Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            padding: EdgeInsets.zero,
+                          ),
+                          child: const Icon(Icons.delete_outline),
+                        ),
+                      );
                     },
                   ),
-                ),
+                  const SizedBox(width: 10),
+                ],
+                // Mantener visibles Importar y Exportar en la barra.
+                // La habilitación real sigue controlada dentro de cada botón
+                // por canImport/canExport, loading, offline, error y registros.
+                _importButton(),
                 const SizedBox(width: 10),
-              ],
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: OutlinedButton(
-                  onPressed: displayColumns.isEmpty ? null : () => _showPinColumnsDialog(_visibleWindowsColumns(displayColumns)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF147A6E),
-                    side: const BorderSide(color: Color(0xFF147A6E)),
-                    backgroundColor: const Color(0xFFF2FAF8),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: EdgeInsets.zero,
-                  ),
-                  child: Icon(_pinnedColumns.isEmpty ? Icons.push_pin_outlined : Icons.push_pin),
-                ),
-              ),
-              const SizedBox(width: 10),
-              if (canDelete) ...[
-                ValueListenableBuilder<int>(
-                  valueListenable: _deleteSelectionVersion,
-                  builder: (context, _, __) {
-                    final hasSelection = _selectedDeleteRows.isNotEmpty;
-                    return SizedBox(
-                      width: 44,
-                      height: 44,
-                      child: OutlinedButton(
-                        onPressed: hasSelection ? _deleteSelectedRows : null,
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red.shade700,
-                          side: BorderSide(color: hasSelection ? Colors.red.shade700 : Colors.grey.shade300),
-                          backgroundColor: hasSelection ? const Color(0xFFFFF4F4) : Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          padding: EdgeInsets.zero,
-                        ),
-                        child: const Icon(Icons.delete_outline),
+                _exportButton(),
+                if (_isPersonalPlanillaTable) ...[
+                  const SizedBox(width: 10),
+                  _photocheckButton(),
+                ],
+                const SizedBox(width: 10),
+                if (canInsert)
+                  SizedBox(
+                    width: 44,
+                    height: 44,
+                    child: OutlinedButton(
+                      onPressed: _newRecord,
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: const Color(0xFF147A6E),
+                        backgroundColor: const Color(0xFFF2FAF8),
+                        side: const BorderSide(color: Color(0xFFB7DDD6)),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: EdgeInsets.zero,
                       ),
-                    );
-                  },
-                ),
-                const SizedBox(width: 10),
-              ],
-              // Mantener visibles Importar y Exportar en la barra.
-              // La habilitación real sigue controlada dentro de cada botón
-              // por canImport/canExport, loading, offline, error y registros.
-              _importButton(),
-              const SizedBox(width: 10),
-              _exportButton(),
-              if (_isPersonalPlanillaTable) ...[
-                const SizedBox(width: 10),
-                _photocheckButton(),
-              ],
-              const SizedBox(width: 10),
-              SizedBox(
-                width: 44,
-                height: 44,
-                child: OutlinedButton(
-                  onPressed: _newRecord,
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF147A6E),
-                    backgroundColor: const Color(0xFFF2FAF8),
-                    side: const BorderSide(color: Color(0xFFB7DDD6)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    padding: EdgeInsets.zero,
+                      child: const Icon(Icons.add),
+                    ),
                   ),
-                  child: const Icon(Icons.add),
-                ),
-              ),
               ],
             ),
           ),
@@ -5793,9 +5726,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Widget _mobileBody() {
     List<String> mobileColumns() {
-      final rawColumns = displayColumns.isNotEmpty
-          ? displayColumns
-          : _columnsFromRows(records.isNotEmpty ? records : filteredRecords);
+      final rawColumns = displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records.isNotEmpty ? records : filteredRecords);
       return _matrixColumnsForTable(
         tableName ?? widget.format['tabla_destino']?.toString() ?? '',
         rawColumns,
@@ -5828,14 +5759,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         );
       }
       return Container(
-        padding: format.bgColor == null
-            ? EdgeInsets.zero
-            : const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        padding: format.bgColor == null ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(
           color: format.bgColor,
-          border: format.borderColor == null
-              ? null
-              : Border.all(color: format.borderColor!),
+          border: format.borderColor == null ? null : Border.all(color: format.borderColor!),
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
@@ -5905,9 +5832,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                         valueListenable: _deleteSelectionVersion,
                                         builder: (context, _, __) => IconButton(
                                           tooltip: 'Eliminar seleccionados',
-                                          onPressed: _selectedDeleteRows.isEmpty
-                                              ? null
-                                              : _deleteSelectedRows,
+                                          onPressed: _selectedDeleteRows.isEmpty ? null : _deleteSelectedRows,
                                           icon: Badge(
                                             isLabelVisible: _selectedDeleteRows.isNotEmpty,
                                             label: Text('${_selectedDeleteRows.length}'),
@@ -5965,10 +5890,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                             cellBuilder: mobileCell,
                                             onEdit: canUpdate ? _editRemoteRecord : null,
                                             selectionEnabled: canDelete,
-                                            isSelected: (row, index) => _selectedDeleteRowKeys
-                                                .contains(_remoteRowHighlightKey(row, index)),
-                                            onSelected: (row, index, selected) =>
-                                                _toggleDeleteSelection(row, index, selected),
+                                            isSelected: (row, index) => _selectedDeleteRowKeys.contains(_remoteRowHighlightKey(row, index)),
+                                            onSelected: (row, index, selected) => _toggleDeleteSelection(row, index, selected),
                                           ),
                                         ),
                                 ),
@@ -5979,11 +5902,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                         ),
         ),
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _newRecord,
-        tooltip: 'Nuevo registro',
-        child: const Icon(Icons.add),
-      ),
+      floatingActionButton: canInsert
+          ? FloatingActionButton.extended(
+              onPressed: _newRecord,
+              tooltip: 'Nuevo registro',
+              icon: const Icon(Icons.add),
+              label: const Text('Nuevo'),
+            )
+          : null,
     );
   }
 
@@ -6000,16 +5926,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           ),
           IconButton(
             tooltip: 'Página anterior',
-            onPressed: loading || _currentPage == 0
-                ? null
-                : () => _goToPage(_currentPage - 1),
+            onPressed: loading || _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
             icon: const Icon(Icons.chevron_left),
           ),
           IconButton(
             tooltip: 'Página siguiente',
-            onPressed: loading || !_hasNextPage
-                ? null
-                : () => _goToPage(_currentPage + 1),
+            onPressed: loading || !_hasNextPage ? null : () => _goToPage(_currentPage + 1),
             icon: const Icon(Icons.chevron_right),
           ),
         ],

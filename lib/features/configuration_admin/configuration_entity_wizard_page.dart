@@ -112,6 +112,7 @@ class _ConfigurationEntityWizardPageState
     selectedContentType =
         definition['tipo_contenido']?.toString() ?? 'FORMATOS';
     active = definition['activo'] != false;
+    if (draft['_requested_action'] == 'DEACTIVATE') currentStep = 4;
     validation = draft['validacion'] is Map
         ? Map<String, dynamic>.from(draft['validacion'] as Map)
         : null;

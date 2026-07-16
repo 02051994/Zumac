@@ -75,7 +75,6 @@ class _ModulesPageState extends State<ModulesPage> {
     _desktopSidebarCache = null;
   }
 
-
   @override
   void dispose() {
     _desktopSidebarOpenNotifier.dispose();
@@ -92,12 +91,9 @@ class _ModulesPageState extends State<ModulesPage> {
   Future<void> _loadConfigurationAccess() async {
     if (Supabase.instance.client.auth.currentUser == null) return;
     try {
-      final contextData = await ConfigurationAdminRepository()
-          .loadContext()
-          .timeout(const Duration(seconds: 4));
+      final contextData = await ConfigurationAdminRepository().loadContext().timeout(const Duration(seconds: 4));
       if (!mounted) return;
-      setState(() =>
-          canManageConfiguration = contextData['puede_gestionar'] == true);
+      setState(() => canManageConfiguration = contextData['puede_gestionar'] == true);
     } catch (_) {
       // El constructor requiere conexión. La navegación offline principal no
       // debe bloquearse si Supabase no responde.
@@ -114,7 +110,6 @@ class _ModulesPageState extends State<ModulesPage> {
     if (!mounted) return;
     await _loadConfigurationAccess();
   }
-
 
   Future<void> _refreshPendingBadge() async {
     final p = await local.pendingCount();
@@ -170,15 +165,11 @@ class _ModulesPageState extends State<ModulesPage> {
       case 'inicio_gt':
         return 'INICIO';
       default:
-        return _sectionHasFormatModules(_txt(section['id']))
-            ? 'FORMATOS'
-            : 'GENERICO';
+        return _sectionHasFormatModules(_txt(section['id'])) ? 'FORMATOS' : 'GENERICO';
     }
   }
 
-  bool _sectionUsesDynamicViews(Map<String, dynamic> section) =>
-      _sectionKind(section) == 'VISTAS_DINAMICAS' ||
-      _sectionHasDynamicViews(_txt(section['id']));
+  bool _sectionUsesDynamicViews(Map<String, dynamic> section) => _sectionKind(section) == 'VISTAS_DINAMICAS' || _sectionHasDynamicViews(_txt(section['id']));
 
   void _onSectionExpansionChanged(String sectionId, bool expanded) {
     final next = expanded ? sectionId : (_expandedSectionId == sectionId ? null : _expandedSectionId);
@@ -197,8 +188,6 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   bool _sectionHasFormatModules(String sectionId) => _modulesForSection(sectionId).isNotEmpty;
-
-
 
   List<String> _permissionSectionIds(dynamic raw) {
     final text = raw?.toString().trim() ?? '';
@@ -252,14 +241,8 @@ class _ModulesPageState extends State<ModulesPage> {
         return;
       }
 
-      final moduleRows = await Supabase.instance.client
-          .from('MATRIZ_MODULOS_GRAFICOS_DINAMICOS')
-          .select()
-          .timeout(const Duration(seconds: 2));
-      final viewRows = await Supabase.instance.client
-          .from('MATRIZ_VISTAS_REPORTES')
-          .select()
-          .timeout(const Duration(seconds: 2));
+      final moduleRows = await Supabase.instance.client.from('MATRIZ_MODULOS_GRAFICOS_DINAMICOS').select().timeout(const Duration(seconds: 2));
+      final viewRows = await Supabase.instance.client.from('MATRIZ_VISTAS_REPORTES').select().timeout(const Duration(seconds: 2));
 
       List<Map<String, dynamic>> permissionRows = [];
       final user = Supabase.instance.client.auth.currentUser;
@@ -277,14 +260,10 @@ class _ModulesPageState extends State<ModulesPage> {
         }
       }
 
-      final modulesLoaded = List<Map<String, dynamic>>.from(moduleRows)
-          .where((m) => _asBool(m['activo'], fallback: true))
-          .toList()
+      final modulesLoaded = List<Map<String, dynamic>>.from(moduleRows).where((m) => _asBool(m['activo'], fallback: true)).toList()
         ..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
 
-      final viewsLoaded = List<Map<String, dynamic>>.from(viewRows)
-          .where((v) => _asBool(v['activo'], fallback: true))
-          .toList()
+      final viewsLoaded = List<Map<String, dynamic>>.from(viewRows).where((v) => _asBool(v['activo'], fallback: true)).toList()
         ..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
 
       reportModules = modulesLoaded;
@@ -310,11 +289,8 @@ class _ModulesPageState extends State<ModulesPage> {
         _asBool(p['activo'], fallback: true));
   }
 
-
   List<Map<String, dynamic>> _dynamicViewsForSection(String sectionId) {
-    return dynamicViews
-        .where((v) => _sameId(v['seccion'], sectionId) && _asBool(v['activo'], fallback: true))
-        .toList()
+    return dynamicViews.where((v) => _sameId(v['seccion'], sectionId) && _asBool(v['activo'], fallback: true)).toList()
       ..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
   }
 
@@ -331,9 +307,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   List<Map<String, dynamic>> _reportViewsForModule(Map<String, dynamic> module) {
     final moduleId = _txt(module['id']);
-    return reportViews
-        .where((v) => _txt(v['id_modulo_reporte']) == moduleId && _canReportView(module, v))
-        .toList()
+    return reportViews.where((v) => _txt(v['id_modulo_reporte']) == moduleId && _canReportView(module, v)).toList()
       ..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
   }
 
@@ -360,9 +334,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Future<List<Map<String, dynamic>>> _loadDynamicViewsForSidebar() async {
     final rows = await local.getAll('local_dynamic_views', orderBy: 'orden');
-    final hasPendingViews = rows.any((v) =>
-        _sameId(v['seccion'], 'registros_pendientes') &&
-        _asBool(v['activo'], fallback: true));
+    final hasPendingViews = rows.any((v) => _sameId(v['seccion'], 'registros_pendientes') && _asBool(v['activo'], fallback: true));
 
     // Defensa específica: si el cache local no trae vistas de Registros Pendientes,
     // consultamos la matriz real. Esto evita que el menú quede como botón plano
@@ -376,10 +348,7 @@ class _ModulesPageState extends State<ModulesPage> {
             .order('orden')
             .timeout(const Duration(seconds: 2));
 
-        final mapped = List<Map<String, dynamic>>.from(remoteRows)
-            .map(_dynamicViewToLocalRow)
-            .where((v) => _asBool(v['activo'], fallback: true))
-            .toList();
+        final mapped = List<Map<String, dynamic>>.from(remoteRows).map(_dynamicViewToLocalRow).where((v) => _asBool(v['activo'], fallback: true)).toList();
 
         if (mapped.isNotEmpty) {
           await local.upsertTable('local_dynamic_views', mapped);
@@ -390,8 +359,7 @@ class _ModulesPageState extends State<ModulesPage> {
           for (final r in mapped) {
             merged[_txt(r['id'])] = r;
           }
-          return merged.values.toList()
-            ..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
+          return merged.values.toList()..sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
         }
       } catch (_) {
         // Offline o RLS: usamos el cache local existente.
@@ -426,40 +394,20 @@ class _ModulesPageState extends State<ModulesPage> {
     await Future<void>.delayed(const Duration(milliseconds: 1));
     final permissions = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawPermissions
-            .where((e) =>
-                belongsToActiveEmpresa(e) &&
-                e['user_id']?.toString().trim() == activeUserId)
-            .toList();
+        : rawPermissions.where((e) => belongsToActiveEmpresa(e) && e['user_id']?.toString().trim() == activeUserId).toList();
 
     final sectionPerms = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawSectionPerms
-            .where((e) =>
-                belongsToActiveEmpresa(e) &&
-                e['user_id']?.toString().trim() == activeUserId)
-            .toList();
+        : rawSectionPerms.where((e) => belongsToActiveEmpresa(e) && e['user_id']?.toString().trim() == activeUserId).toList();
 
     final profileRows = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
-        : rawProfileRows
-            .where((e) =>
-                belongsToActiveEmpresa(e) &&
-                e['id']?.toString().trim() == activeUserId)
-            .toList();
+        : rawProfileRows.where((e) => belongsToActiveEmpresa(e) && e['id']?.toString().trim() == activeUserId).toList();
 
-    final allowedModuleIds = permissions
-        .where((e) => _asBool(e['can_view']))
-        .map((e) => _txt(e['modulo']))
-        .where((e) => e.isNotEmpty)
-        .toSet()
-        .toList();
+    final allowedModuleIds = permissions.where((e) => _asBool(e['can_view'])).map((e) => _txt(e['modulo'])).where((e) => e.isNotEmpty).toSet().toList();
 
-    final allowedSectionIds = sectionPerms
-        .where((e) => _asBool(e['can_view'], fallback: true))
-        .map((e) => _txt(e['seccion_id']))
-        .where((e) => e.isNotEmpty)
-        .toSet();
+    final allowedSectionIds =
+        sectionPerms.where((e) => _asBool(e['can_view'], fallback: true)).map((e) => _txt(e['seccion_id'])).where((e) => e.isNotEmpty).toSet();
 
     List<Map<String, dynamic>> moduleRows = [];
     if (allowedModuleIds.isNotEmpty) {
@@ -475,11 +423,8 @@ class _ModulesPageState extends State<ModulesPage> {
     await Future<void>.delayed(const Duration(milliseconds: 1));
     final moduleFormats = <String, List<Map<String, dynamic>>>{};
     for (final moduleId in allowedModuleIds) {
-      final allowedFormatKeys = permissions
-          .where((e) => _asBool(e['can_view']) && _sameId(e['modulo'], moduleId))
-          .map((e) => _id(e['formato']))
-          .where((e) => e.isNotEmpty)
-          .toSet();
+      final allowedFormatKeys =
+          permissions.where((e) => _asBool(e['can_view']) && _sameId(e['modulo'], moduleId)).map((e) => _id(e['formato'])).where((e) => e.isNotEmpty).toSet();
       if (allowedFormatKeys.isEmpty) {
         moduleFormats[moduleId] = [];
         continue;
@@ -491,8 +436,7 @@ class _ModulesPageState extends State<ModulesPage> {
         orderBy: 'orden',
       );
       moduleFormats[moduleId] = candidates.where((format) {
-        return allowedFormatKeys.contains(_id(format['id'])) ||
-            allowedFormatKeys.contains(_id(format['tabla_destino']));
+        return allowedFormatKeys.contains(_id(format['id'])) || allowedFormatKeys.contains(_id(format['tabla_destino']));
       }).toList();
       await Future<void>.delayed(const Duration(milliseconds: 1));
     }
@@ -509,9 +453,8 @@ class _ModulesPageState extends State<ModulesPage> {
       if (!belongsToActiveEmpresa(view)) return false;
       if (!_asBool(view['activo'], fallback: true)) return false;
       final sectionId = _txt(view['seccion']);
-      final sectionIsAllowed = allowedSectionIds.isEmpty ||
-          allowedSectionIds.any((allowed) => _sameId(allowed, sectionId)) ||
-          _sameId(sectionId, 'registros_pendientes');
+      final sectionIsAllowed =
+          allowedSectionIds.isEmpty || allowedSectionIds.any((allowed) => _sameId(allowed, sectionId)) || _sameId(sectionId, 'registros_pendientes');
       if (!sectionIsAllowed) return false;
 
       // Registros Pendientes debe respetar la jerarquía configurada en
@@ -533,9 +476,7 @@ class _ModulesPageState extends State<ModulesPage> {
       final moduleId = _txt(view['modulo']);
       return permissions.any((permission) {
         final permModule = _txt(permission['modulo']);
-        final canSee = _asBool(permission['can_view_pending']) ||
-            _asBool(permission['can_view']) ||
-            _asBool(permission['can_complete_pending']);
+        final canSee = _asBool(permission['can_view_pending']) || _asBool(permission['can_view']) || _asBool(permission['can_complete_pending']);
         if (!canSee) return false;
         final sectionMatches = _permissionIncludesSection(permission, sectionId);
         final moduleMatches = permModule.isEmpty || _sameId(permModule, moduleId);
@@ -549,9 +490,7 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       modules = moduleRows;
-      sections = localSections
-          .where((e) => e['activo'] == 1 && belongsToActiveEmpresa(e))
-          .toList();
+      sections = localSections.where((e) => e['activo'] == 1 && belongsToActiveEmpresa(e)).toList();
       formatsByModule = moduleFormats;
       dynamicViews = visibleDynamicViews;
       allowedSections = allowedSectionIds;
@@ -582,7 +521,11 @@ class _ModulesPageState extends State<ModulesPage> {
           }
         },
       );
-      if (mounted) setState(() { busyProgress = 0.97; busyMessage = 'Aplicando cambios locales...'; });
+      if (mounted)
+        setState(() {
+          busyProgress = 0.97;
+          busyMessage = 'Aplicando cambios locales...';
+        });
       await loadLocal();
       if (!mounted) return;
       if (mounted) setState(() => busyProgress = 1);
@@ -604,7 +547,6 @@ class _ModulesPageState extends State<ModulesPage> {
       }
     }
   }
-
 
   Future<void> checkAppUpdate() async {
     final action = await showMenu<String>(
@@ -842,15 +784,14 @@ class _ModulesPageState extends State<ModulesPage> {
       return () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsPage()));
     }
     if (_sectionUsesDynamicViews(section)) {
-      return () => Navigator.push(context, MaterialPageRoute(builder: (_) => DynamicViewsPage(section: section, onPendingChanged: loadLocal))).then((_) => loadLocal());
+      return () =>
+          Navigator.push(context, MaterialPageRoute(builder: (_) => DynamicViewsPage(section: section, onPendingChanged: loadLocal))).then((_) => loadLocal());
     }
     return () => Navigator.push(context, MaterialPageRoute(builder: (_) => GenericSectionPage(section: section))).then((_) => loadLocal());
   }
 
   Widget _menuItems() {
-    final visibleSections = sections
-        .where((s) => _canSection(s['id']?.toString() ?? ''))
-        .toList();
+    final visibleSections = sections.where((s) => _canSection(s['id']?.toString() ?? '')).toList();
 
     if (visibleSections.isEmpty && _canSection('modulos')) {
       visibleSections.add({
@@ -874,7 +815,6 @@ class _ModulesPageState extends State<ModulesPage> {
       ],
     );
   }
-
 
   void _selectDesktopSection(Map<String, dynamic> section) {
     if (desktopSelectedSection?['id']?.toString() == section['id']?.toString() &&
@@ -937,7 +877,6 @@ class _ModulesPageState extends State<ModulesPage> {
     });
   }
 
-
   void _selectDesktopDynamicView(Map<String, dynamic> section, Map<String, dynamic> view) {
     setState(() {
       _clearDesktopContentCache();
@@ -957,7 +896,8 @@ class _ModulesPageState extends State<ModulesPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('Bienvenidos al Sistema Zumac', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF0D5F78))),
+          Text('Bienvenidos al Sistema Zumac',
+              style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF0D5F78))),
           const SizedBox(height: 28),
           Opacity(
             opacity: 0.96,
@@ -1106,7 +1046,6 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
-
   String _desktopSidebarSignature() {
     final selected = [
       desktopSidebarOpen ? 'open' : 'closed',
@@ -1141,9 +1080,7 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _desktopSidebar() {
-    final visibleSections = sections
-        .where((section) => _canSection(section['id']?.toString() ?? ''))
-        .toList();
+    final visibleSections = sections.where((section) => _canSection(section['id']?.toString() ?? '')).toList();
 
     return Container(
       width: desktopSidebarOpen ? 320 : 64,
@@ -1192,8 +1129,7 @@ class _ModulesPageState extends State<ModulesPage> {
                             child: ExpansionTile(
                               key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
                               initiallyExpanded: _expandedSectionId == _txt(section['id']),
-                              onExpansionChanged: (expanded) =>
-                                  _onSectionExpansionChanged(_txt(section['id']), expanded),
+                              onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
                               leading: Icon(_iconForSection(_txt(section['id']), section['icono']?.toString()), color: Colors.white),
                               iconColor: Colors.white,
                               collapsedIconColor: Colors.white70,
@@ -1237,8 +1173,7 @@ class _ModulesPageState extends State<ModulesPage> {
                               child: ExpansionTile(
                                 key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
                                 initiallyExpanded: _expandedSectionId == _txt(section['id']),
-                                onExpansionChanged: (expanded) =>
-                                    _onSectionExpansionChanged(_txt(section['id']), expanded),
+                                onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
                                 leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()), color: Colors.white70),
                                 iconColor: Colors.white,
                                 collapsedIconColor: Colors.white70,
@@ -1288,8 +1223,7 @@ class _ModulesPageState extends State<ModulesPage> {
                               child: ExpansionTile(
                                 key: ValueKey('desktop-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
                                 initiallyExpanded: _expandedSectionId == _txt(section['id']),
-                                onExpansionChanged: (expanded) =>
-                                    _onSectionExpansionChanged(_txt(section['id']), expanded),
+                                onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
                                 leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString()), color: Colors.white70),
                                 iconColor: Colors.white,
                                 collapsedIconColor: Colors.white70,
@@ -1301,15 +1235,18 @@ class _ModulesPageState extends State<ModulesPage> {
                                     iconColor: Colors.white,
                                     collapsedIconColor: Colors.white54,
                                     title: Text(entry.key, style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
-                                    children: entry.value.map((view) => ListTile(
-                                      dense: true,
-                                      contentPadding: const EdgeInsets.only(left: 46, right: 8),
-                                      leading: const Icon(Icons.view_list_outlined, color: Colors.white54, size: 18),
-                                      title: Text(view['nombre_vista']?.toString() ?? view['id']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12.5)),
-                                      selected: desktopSelectedDynamicView?['id']?.toString() == view['id']?.toString(),
-                                      selectedTileColor: Colors.white10,
-                                      onTap: () => _selectDesktopDynamicView(section, view),
-                                    )).toList(),
+                                    children: entry.value
+                                        .map((view) => ListTile(
+                                              dense: true,
+                                              contentPadding: const EdgeInsets.only(left: 46, right: 8),
+                                              leading: const Icon(Icons.view_list_outlined, color: Colors.white54, size: 18),
+                                              title: Text(view['nombre_vista']?.toString() ?? view['id']?.toString() ?? '',
+                                                  maxLines: 2, overflow: TextOverflow.ellipsis, style: const TextStyle(color: Colors.white, fontSize: 12.5)),
+                                              selected: desktopSelectedDynamicView?['id']?.toString() == view['id']?.toString(),
+                                              selectedTileColor: Colors.white10,
+                                              onTap: () => _selectDesktopDynamicView(section, view),
+                                            ))
+                                        .toList(),
                                   );
                                 }).toList(),
                               ),
@@ -1399,9 +1336,7 @@ class _ModulesPageState extends State<ModulesPage> {
       desktopSelectedReportView = null;
       mobileSelectedSpecial = specialRows.isNotEmpty
           ? Map<String, dynamic>.from(specialRows.first)
-          : ((format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL'
-              ? <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}
-              : null);
+          : ((format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL' ? <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1} : null);
     });
   }
 
@@ -1449,7 +1384,9 @@ class _ModulesPageState extends State<ModulesPage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text('Bienvenidos al Sistema Zumac', textAlign: TextAlign.center, style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF0D5F78))),
+          Text('Bienvenidos al Sistema Zumac',
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF0D5F78))),
           const SizedBox(height: 24),
           Opacity(
             opacity: 0.96,
@@ -1521,7 +1458,8 @@ class _ModulesPageState extends State<ModulesPage> {
       final kind = _sectionKind(section);
       if (kind == 'REGISTROS_LOCALES') return LocalRecordsPage(embedded: true, onChanged: loadLocal);
       if (kind == 'REPORTES') return const ReportsPage(embedded: true, showRail: false);
-      if (_sectionUsesDynamicViews(section)) return DynamicViewsPage(section: section, view: desktopSelectedDynamicView, embedded: true, onPendingChanged: loadLocal);
+      if (_sectionUsesDynamicViews(section))
+        return DynamicViewsPage(section: section, view: desktopSelectedDynamicView, embedded: true, onPendingChanged: loadLocal);
       if (!_sectionHasFormatModules(id)) return GenericSectionPage(section: section, embedded: true);
     }
 
@@ -1529,9 +1467,7 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _mobileMenuItems() {
-    final visibleSections = sections
-        .where((s) => _canSection(s['id']?.toString() ?? ''))
-        .toList();
+    final visibleSections = sections.where((s) => _canSection(s['id']?.toString() ?? '')).toList();
 
     if (visibleSections.isEmpty && _canSection('modulos')) {
       visibleSections.add({
@@ -1551,8 +1487,7 @@ class _ModulesPageState extends State<ModulesPage> {
             ExpansionTile(
               key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
               initiallyExpanded: _expandedSectionId == _txt(section['id']),
-              onExpansionChanged: (expanded) =>
-                  _onSectionExpansionChanged(_txt(section['id']), expanded),
+              onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection(_txt(section['id']), section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: _modulesForSection(_txt(section['id'])).map((module) {
@@ -1594,8 +1529,7 @@ class _ModulesPageState extends State<ModulesPage> {
             ExpansionTile(
               key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
               initiallyExpanded: _expandedSectionId == _txt(section['id']),
-              onExpansionChanged: (expanded) =>
-                  _onSectionExpansionChanged(_txt(section['id']), expanded),
+              onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection('reportes', section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: reportModules.map((module) {
@@ -1632,8 +1566,7 @@ class _ModulesPageState extends State<ModulesPage> {
             ExpansionTile(
               key: ValueKey('mobile-section-${_txt(section['id'])}-${_expandedSectionId == _txt(section['id'])}'),
               initiallyExpanded: _expandedSectionId == _txt(section['id']),
-              onExpansionChanged: (expanded) =>
-                  _onSectionExpansionChanged(_txt(section['id']), expanded),
+              onExpansionChanged: (expanded) => _onSectionExpansionChanged(_txt(section['id']), expanded),
               leading: Icon(_iconForSection(section['id']?.toString() ?? '', section['icono']?.toString())),
               title: Text(_sectionTitle(section), style: const TextStyle(fontWeight: FontWeight.w700)),
               children: () {
@@ -1647,19 +1580,23 @@ class _ModulesPageState extends State<ModulesPage> {
                     ),
                   ];
                 }
-                return grouped.entries.map((entry) => ExpansionTile(
-                  tilePadding: const EdgeInsets.only(left: 32, right: 16),
-                  leading: const Icon(Icons.folder_open_outlined, size: 20),
-                  title: Text(entry.key),
-                  children: entry.value.map((view) => ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.only(left: 72, right: 16),
-                    leading: const Icon(Icons.view_list_outlined, size: 18),
-                    title: Text(view['nombre_vista']?.toString() ?? view['id']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
-                    subtitle: Text(view['tabla_destino']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
-                    onTap: () => _selectMobileDynamicView(section, view),
-                  )).toList(),
-                )).toList();
+                return grouped.entries
+                    .map((entry) => ExpansionTile(
+                          tilePadding: const EdgeInsets.only(left: 32, right: 16),
+                          leading: const Icon(Icons.folder_open_outlined, size: 20),
+                          title: Text(entry.key),
+                          children: entry.value
+                              .map((view) => ListTile(
+                                    dense: true,
+                                    contentPadding: const EdgeInsets.only(left: 72, right: 16),
+                                    leading: const Icon(Icons.view_list_outlined, size: 18),
+                                    title: Text(view['nombre_vista']?.toString() ?? view['id']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis),
+                                    subtitle: Text(view['tabla_destino']?.toString() ?? '', style: const TextStyle(fontSize: 11)),
+                                    onTap: () => _selectMobileDynamicView(section, view),
+                                  ))
+                              .toList(),
+                        ))
+                    .toList();
               }(),
             )
           else
@@ -1674,7 +1611,6 @@ class _ModulesPageState extends State<ModulesPage> {
       ],
     );
   }
-
 
   Widget _mobileModulesList() {
     return ListView.separated(
@@ -1720,8 +1656,8 @@ class _ModulesPageState extends State<ModulesPage> {
         if (canManageConfiguration)
           IconButton(
             onPressed: busy ? null : _openConfigurationAdmin,
-            icon: const Icon(Icons.add_circle_outline),
-            tooltip: 'Constructor visual',
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            tooltip: 'Administrar plataforma',
           ),
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -1738,8 +1674,7 @@ class _ModulesPageState extends State<ModulesPage> {
           alignment: Alignment.topRight,
           children: [
             IconButton(onPressed: busy ? null : syncPending, icon: const Icon(Icons.sync), tooltip: 'Sincronizar'),
-            if (pending > 0)
-              CircleAvatar(radius: 10, child: Text('$pending', style: const TextStyle(fontSize: 11))),
+            if (pending > 0) CircleAvatar(radius: 10, child: Text('$pending', style: const TextStyle(fontSize: 11))),
           ],
         ),
       ],
@@ -1790,5 +1725,4 @@ class _ModulesPageState extends State<ModulesPage> {
       ),
     );
   }
-
 }

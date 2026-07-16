@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/services/local_db.dart';
+import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 
 class UsersPage extends StatefulWidget {
@@ -23,8 +24,12 @@ class _UsersPageState extends State<UsersPage> {
   List<Map<String, dynamic>> formats = [];
   List<Map<String, dynamic>> sections = [];
   List<Map<String, dynamic>> profiles = [];
+  List<Map<String, dynamic>> memberships = [];
 
   String? selectedUserId;
+  String? activeEmpresaId;
+  String currentActorRole = '';
+  String selectedRole = 'COLABORADOR';
   final selectedFormats = <String>{};
   final originalFormats = <String>{};
   final selectedSections = <String>{};
@@ -37,6 +42,8 @@ class _UsersPageState extends State<UsersPage> {
   bool loading = true;
   bool saving = false;
   String? loadError;
+
+  bool get canAssignRoles => currentActorRole == 'ADMIN';
 
   @override
   void initState() {
@@ -81,7 +88,20 @@ class _UsersPageState extends State<UsersPage> {
       var remoteFormats = <Map<String, dynamic>>[];
       var remoteSections = <Map<String, dynamic>>[];
       var remoteProfiles = <Map<String, dynamic>>[];
+      var remoteMemberships = <Map<String, dynamic>>[];
+      final empresaId = await LocalSession().cachedEmpresaId();
       final warnings = <String>[];
+
+      if (empresaId.trim().isNotEmpty) {
+        try {
+          final rows = await supabase.from('USUARIOS_EMPRESAS_APPGT').select().eq('empresa_id', empresaId);
+          remoteMemberships = List<Map<String, dynamic>>.from(rows);
+        } catch (e) {
+          warnings.add(
+            'No se pudieron cargar los roles de la empresa: ${SyncService().friendlyError(e)}',
+          );
+        }
+      }
 
       try {
         remoteModules = await _selectRemoteRows(table: 'MATRIZ_MODULOS_APPGT');
@@ -109,10 +129,7 @@ class _UsersPageState extends State<UsersPage> {
         remoteProfiles = List<Map<String, dynamic>>.from(rows);
       } catch (_) {
         try {
-          final rows = await supabase
-              .from('PERFILES_DE_USUARIOS_APPGT')
-              .select()
-              .order('nombres');
+          final rows = await supabase.from('PERFILES_DE_USUARIOS_APPGT').select().order('nombres');
           remoteProfiles = List<Map<String, dynamic>>.from(rows);
         } catch (e) {
           warnings.add('No se pudieron cargar usuarios administrables: ${SyncService().friendlyError(e)}');
@@ -120,11 +137,18 @@ class _UsersPageState extends State<UsersPage> {
       }
 
       if (!mounted) return;
+      final actorId = supabase.auth.currentUser?.id;
+      final actorMembership = remoteMemberships.where(
+        (row) => row['user_id']?.toString() == actorId,
+      );
       setState(() {
         modules = remoteModules.where((e) => e['activo'] != false && e['activo'] != 0).toList();
         formats = remoteFormats.where((e) => e['activo'] != false && e['activo'] != 0).toList();
         sections = remoteSections.where((e) => e['activo'] != false && e['activo'] != 0).toList();
         profiles = remoteProfiles.where((e) => e['activo'] != false && e['activo'] != 0).toList();
+        memberships = remoteMemberships;
+        activeEmpresaId = empresaId;
+        currentActorRole = actorMembership.isEmpty ? '' : actorMembership.first['rol']?.toString().toUpperCase() ?? '';
         loading = false;
         loadError = warnings.isEmpty ? null : warnings.join('\n');
       });
@@ -187,6 +211,55 @@ class _UsersPageState extends State<UsersPage> {
     return null;
   }
 
+  Map<String, dynamic>? _membershipForUser(String userId) {
+    for (final membership in memberships) {
+      if (membership['user_id']?.toString() == userId && membership['empresa_id']?.toString() == activeEmpresaId) {
+        return membership;
+      }
+    }
+    return null;
+  }
+
+  String _roleDescription(String role) {
+    switch (role) {
+      case 'ADMIN':
+        return 'Administra roles, configura y publica cambios.';
+      case 'GESTOR':
+        return 'Prepara configuraciones, pero no las publica.';
+      case 'VISUALIZADOR':
+        return 'Consulta únicamente lo que tenga permitido.';
+      default:
+        return 'Trabaja con los formatos y acciones que se le asignen.';
+    }
+  }
+
+  Future<void> _saveSelectedRole(String userId) async {
+    if (!canAssignRoles || activeEmpresaId == null) return;
+    final actorId = supabase.auth.currentUser?.id;
+    if (userId == actorId && selectedRole != 'ADMIN') {
+      throw StateError(
+        'No puede quitarse su propio rol ADMIN desde esta pantalla.',
+      );
+    }
+
+    final existing = _membershipForUser(userId);
+    final payload = <String, dynamic>{
+      'user_id': userId,
+      'empresa_id': activeEmpresaId,
+      'rol': selectedRole,
+      'activo': true,
+      'updated_at': DateTime.now().toUtc().toIso8601String(),
+    };
+    if (existing == null) {
+      payload['es_predeterminada'] = false;
+      await supabase.from('USUARIOS_EMPRESAS_APPGT').insert(payload);
+      memberships.add(Map<String, dynamic>.from(payload));
+    } else {
+      await supabase.from('USUARIOS_EMPRESAS_APPGT').update(payload).eq('id', existing['id']);
+      existing.addAll(payload);
+    }
+  }
+
   List<String> _candidateUserIds(String userId) {
     final result = <String>{userId.trim()};
     final profile = _selectedProfile();
@@ -228,10 +301,7 @@ class _UsersPageState extends State<UsersPage> {
       }
 
       try {
-        final rows = await supabase
-            .from('PERMISOS_DE_USUARIOS_APPGT')
-            .select()
-            .eq('user_id', candidate);
+        final rows = await supabase.from('PERMISOS_DE_USUARIOS_APPGT').select().eq('user_id', candidate);
         for (final row in List<Map<String, dynamic>>.from(rows)) {
           final key = _permissionKey(row['modulo'], row['formato']);
           if (key != '::') byKey[key] = row;
@@ -246,6 +316,7 @@ class _UsersPageState extends State<UsersPage> {
   }
 
   Future<void> _loadPermissionsForUser(String userId) async {
+    final membership = _membershipForUser(userId);
     setState(() {
       selectedFormats.clear();
       originalFormats.clear();
@@ -254,6 +325,7 @@ class _UsersPageState extends State<UsersPage> {
       canInsert = true;
       canUpdate = false;
       canDelete = false;
+      selectedRole = membership?['rol']?.toString().toUpperCase() ?? 'COLABORADOR';
     });
 
     try {
@@ -284,10 +356,7 @@ class _UsersPageState extends State<UsersPage> {
                 final mk = m?.toString();
                 final fk = f?.toString();
 
-                if (mk != null &&
-                    mk.trim().isNotEmpty &&
-                    fk != null &&
-                    fk.trim().isNotEmpty) {
+                if (mk != null && mk.trim().isNotEmpty && fk != null && fk.trim().isNotEmpty) {
                   selectedFormats.add(_permissionKey(mk, fk));
                 }
               }
@@ -352,10 +421,7 @@ class _UsersPageState extends State<UsersPage> {
     };
 
     if (existing != null && existing['id'] != null) {
-      await supabase
-          .from('PERMISOS_DE_USUARIOS_APPGT')
-          .update(payload)
-          .eq('id', existing['id']);
+      await supabase.from('PERMISOS_DE_USUARIOS_APPGT').update(payload).eq('id', existing['id']);
     } else {
       await supabase.from('PERMISOS_DE_USUARIOS_APPGT').insert(payload);
     }
@@ -380,12 +446,7 @@ class _UsersPageState extends State<UsersPage> {
       // Respaldo directo si la RPC no está disponible.
     }
 
-    await supabase
-        .from('PERMISOS_DE_USUARIOS_APPGT')
-        .delete()
-        .eq('user_id', userId)
-        .eq('modulo', modulo)
-        .eq('formato', formato);
+    await supabase.from('PERMISOS_DE_USUARIOS_APPGT').delete().eq('user_id', userId).eq('modulo', modulo).eq('formato', formato);
   }
 
   Future<void> _save() async {
@@ -404,6 +465,7 @@ class _UsersPageState extends State<UsersPage> {
 
     setState(() => saving = true);
     try {
+      await _saveSelectedRole(userId);
       final removed = originalFormats.difference(selectedFormats);
 
       for (final key in removed) {
@@ -441,11 +503,11 @@ class _UsersPageState extends State<UsersPage> {
       if (!mounted) return;
       widget.onChanged?.call();
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Permisos actualizados. El usuario debe actualizar matrices o volver a iniciar sesión.')),
+        const SnackBar(content: Text('Rol y permisos actualizados. El usuario debe actualizar datos o volver a iniciar sesión.')),
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudieron guardar los permisos: ${SyncService().friendlyError(e)}')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudieron guardar el rol o los permisos: ${SyncService().friendlyError(e)}')));
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -466,97 +528,161 @@ class _UsersPageState extends State<UsersPage> {
   @override
   Widget build(BuildContext context) {
     final body = loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(14),
-              children: [
-                if (loadError != null) ...[
-                  Card(
-                    color: const Color(0xFFFFF3E0),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text(loadError!, style: const TextStyle(fontSize: 12.5)),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                ],
-                DropdownButtonFormField<String>(
-                  value: selectedUserId,
-                  decoration: const InputDecoration(
-                    labelText: 'Usuario',
-                    border: OutlineInputBorder(),
-                    isDense: true,
-                    prefixIcon: Icon(Icons.person_search),
-                  ),
-                  items: profiles.map((profile) {
-                    final id = _profileUserId(profile);
-                    return DropdownMenuItem<String>(
-                      value: id,
-                      child: Text(_profileLabel(profile), overflow: TextOverflow.ellipsis),
-                    );
-                  }).toList(),
-                  onChanged: (value) async {
-                    setState(() => selectedUserId = value);
-                    if (value != null) await _loadPermissionsForUser(value);
-                  },
-                ),
-                const SizedBox(height: 12),
+        ? const Center(child: CircularProgressIndicator())
+        : ListView(
+            padding: const EdgeInsets.all(14),
+            children: [
+              if (loadError != null) ...[
                 Card(
+                  color: const Color(0xFFFFF3E0),
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                    padding: const EdgeInsets.all(12),
+                    child: Text(loadError!, style: const TextStyle(fontSize: 12.5)),
+                  ),
+                ),
+                const SizedBox(height: 10),
+              ],
+              DropdownButtonFormField<String>(
+                value: selectedUserId,
+                decoration: const InputDecoration(
+                  labelText: 'Usuario',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon: Icon(Icons.person_search),
+                ),
+                items: profiles.map((profile) {
+                  final id = _profileUserId(profile);
+                  return DropdownMenuItem<String>(
+                    value: id,
+                    child: Text(_profileLabel(profile), overflow: TextOverflow.ellipsis),
+                  );
+                }).toList(),
+                onChanged: (value) async {
+                  setState(() => selectedUserId = value);
+                  if (value != null) await _loadPermissionsForUser(value);
+                },
+              ),
+              const SizedBox(height: 12),
+              if (selectedUserId != null) ...[
+                Card(
+                  elevation: 0,
+                  color: const Color(0xFFEAF4F6),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                    side: const BorderSide(color: Color(0xFFC8E0E6)),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Tipo de permiso', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
-                        _permissionSwitch(label: 'Ver', value: canView, onChanged: (v) => setState(() => canView = v)),
-                        _permissionSwitch(label: 'Insertar', value: canInsert, onChanged: (v) => setState(() => canInsert = v)),
-                        _permissionSwitch(label: 'Actualizar', value: canUpdate, onChanged: (v) => setState(() => canUpdate = v)),
-                        _permissionSwitch(label: 'Eliminar', value: canDelete, onChanged: (v) => setState(() => canDelete = v)),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Text('Formatos', style: TextStyle(fontWeight: FontWeight.w700)),
-                const SizedBox(height: 8),
-                for (final module in modules) ...[
-                  Card(
-                    child: ExpansionTile(
-                      tilePadding: const EdgeInsets.symmetric(horizontal: 12),
-                      title: Text('${module['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                      subtitle: Text('${module['id']}', style: const TextStyle(fontSize: 11)),
-                      children: [
-                        for (final format in _formatsFor(module['id']?.toString() ?? ''))
-                          CheckboxListTile(
-                            dense: true,
-                            value: selectedFormats.contains(_permissionKey(module['id'], format['id'])),
-                            title: Text('${format['nombre']}', style: const TextStyle(fontSize: 13)),
-                            subtitle: Text('${format['id']}', style: const TextStyle(fontSize: 11)),
-                            onChanged: selectedUserId == null
-                                ? null
-                                : (value) {
-                                    final key = _permissionKey(module['id'], format['id']);
-                                    setState(() {
-                                      if (value == true) {
-                                        selectedFormats.add(key);
-                                      } else {
-                                        selectedFormats.remove(key);
-                                      }
-                                    });
-                                  },
+                        const Row(
+                          children: [
+                            Icon(Icons.badge_outlined, color: Color(0xFF176B87)),
+                            SizedBox(width: 8),
+                            Text(
+                              'Rol general en la empresa',
+                              style: TextStyle(
+                                color: Color(0xFF17324D),
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        DropdownButtonFormField<String>(
+                          value: selectedRole,
+                          isExpanded: true,
+                          decoration: InputDecoration(
+                            labelText: 'Rol',
+                            prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+                            helperText: canAssignRoles ? _roleDescription(selectedRole) : 'Solo un ADMIN puede cambiar roles.',
+                          ),
+                          items: const [
+                            DropdownMenuItem(value: 'ADMIN', child: Text('Administrador')),
+                            DropdownMenuItem(value: 'GESTOR', child: Text('Gestor')),
+                            DropdownMenuItem(value: 'COLABORADOR', child: Text('Colaborador')),
+                            DropdownMenuItem(value: 'VISUALIZADOR', child: Text('Visualizador')),
+                          ],
+                          onChanged: !canAssignRoles || selectedUserId == supabase.auth.currentUser?.id
+                              ? null
+                              : (value) => setState(() {
+                                    selectedRole = value ?? 'COLABORADOR';
+                                  }),
+                        ),
+                        if (selectedUserId == supabase.auth.currentUser?.id && canAssignRoles)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 7),
+                            child: Text(
+                              'Tu propio rol ADMIN está protegido para evitar perder el acceso de administración.',
+                              style: TextStyle(
+                                color: Color(0xFF60758A),
+                                fontSize: 12,
+                              ),
+                            ),
                           ),
                       ],
                     ),
                   ),
-                ],
-                const SizedBox(height: 14),
-                FilledButton.icon(
-                  onPressed: saving ? null : _save,
-                  icon: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save),
-                  label: Text(saving ? 'Guardando...' : 'Guardar permisos'),
+                ),
+                const SizedBox(height: 12),
+              ],
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Acciones permitidas en los formatos', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700)),
+                      _permissionSwitch(label: 'Ver', value: canView, onChanged: (v) => setState(() => canView = v)),
+                      _permissionSwitch(label: 'Insertar', value: canInsert, onChanged: (v) => setState(() => canInsert = v)),
+                      _permissionSwitch(label: 'Actualizar', value: canUpdate, onChanged: (v) => setState(() => canUpdate = v)),
+                      _permissionSwitch(label: 'Eliminar', value: canDelete, onChanged: (v) => setState(() => canDelete = v)),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text('Formatos', style: TextStyle(fontWeight: FontWeight.w700)),
+              const SizedBox(height: 8),
+              for (final module in modules) ...[
+                Card(
+                  child: ExpansionTile(
+                    tilePadding: const EdgeInsets.symmetric(horizontal: 12),
+                    title: Text('${module['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+                    subtitle: Text('${module['id']}', style: const TextStyle(fontSize: 11)),
+                    children: [
+                      for (final format in _formatsFor(module['id']?.toString() ?? ''))
+                        CheckboxListTile(
+                          dense: true,
+                          value: selectedFormats.contains(_permissionKey(module['id'], format['id'])),
+                          title: Text('${format['nombre']}', style: const TextStyle(fontSize: 13)),
+                          subtitle: Text('${format['id']}', style: const TextStyle(fontSize: 11)),
+                          onChanged: selectedUserId == null
+                              ? null
+                              : (value) {
+                                  final key = _permissionKey(module['id'], format['id']);
+                                  setState(() {
+                                    if (value == true) {
+                                      selectedFormats.add(key);
+                                    } else {
+                                      selectedFormats.remove(key);
+                                    }
+                                  });
+                                },
+                        ),
+                    ],
+                  ),
                 ),
               ],
-            );
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: saving ? null : _save,
+                icon: saving ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save),
+                label: Text(saving ? 'Guardando...' : 'Guardar rol y permisos'),
+              ),
+            ],
+          );
 
     if (widget.embedded) {
       return Column(
@@ -580,7 +706,7 @@ class _UsersPageState extends State<UsersPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Permisos'),
+        title: const Text('Usuarios, roles y permisos'),
         actions: [
           IconButton(
             tooltip: 'Actualizar lista',
