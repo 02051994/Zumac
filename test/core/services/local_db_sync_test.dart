@@ -46,6 +46,14 @@ void main() {
         evidence_json text
       )
     ''');
+    await database.execute('''
+      create table local_matrix_rows(
+        source_table text,
+        row_key text,
+        payload_json text,
+        primary key(source_table, row_key)
+      )
+    ''');
     local = LocalDb.forTesting(database);
   });
 
@@ -198,6 +206,38 @@ void main() {
         remoteUpdatedAt: '2026-07-15T10:00:00Z',
       ),
       isFalse,
+    );
+  });
+
+  test('el identificador con prefijo continúa la secuencia local y remota',
+      () async {
+    await database.insert('local_matrix_rows', {
+      'source_table': 'REGISTROS',
+      'row_key': 'remoto-4',
+      'payload_json': jsonEncode({'CODIGO': 'GT-GB-G4'}),
+    });
+    await local.insertPending({
+      'id_local': 'pendiente-7',
+      'user_id': 'usuario-a',
+      'tabla_destino': 'REGISTROS',
+      'payload_json': jsonEncode({'CODIGO': 'GT-GB-G7'}),
+    });
+
+    expect(
+      await local.nextIncrementalIdentifier(
+        table: 'REGISTROS',
+        field: 'CODIGO',
+        prefix: 'GT-GB-G',
+      ),
+      'GT-GB-G8',
+    );
+    expect(
+      await local.nextIncrementalIdentifier(
+        table: 'REGISTROS',
+        field: 'CODIGO',
+        prefix: 'GT-GB-G',
+      ),
+      'GT-GB-G9',
     );
   });
 }

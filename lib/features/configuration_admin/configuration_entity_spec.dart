@@ -36,7 +36,7 @@ class ConfigurationEntitySpec {
       ),
       ConfigurationQuestion(
         id: 'nombre',
-        label: '¿Qué nombre verá el usuario?',
+        label: 'Nombre de rubro',
         required: true,
         reason: 'Identifica la línea de negocio o ámbito principal.',
       ),
@@ -86,7 +86,7 @@ class ConfigurationEntitySpec {
       ),
       ConfigurationQuestion(
         id: 'nombre',
-        label: '¿Qué nombre verá el usuario?',
+        label: 'Nombre de sección',
         required: true,
         reason: 'Identifica la sección en la navegación.',
       ),
@@ -147,7 +147,7 @@ class ConfigurationEntitySpec {
       ),
       ConfigurationQuestion(
         id: 'nombre',
-        label: '¿Qué nombre verá el usuario?',
+        label: 'Nombre del módulo',
         required: true,
         reason: 'Identifica el módulo dentro de su sección.',
       ),
@@ -241,4 +241,38 @@ String normalizeConfigurationCode(String value) {
   normalized = normalized.replaceAll(RegExp(r'[^A-Z0-9_-]+'), '_');
   normalized = normalized.replaceAll(RegExp(r'_+'), '_');
   return normalized.replaceAll(RegExp(r'^_+|_+$'), '');
+}
+
+String generatedEntityCode(String type, String visibleName) {
+  final prefix = switch (type.trim().toUpperCase()) {
+    'RUBRO' => 'rubro',
+    'SECCION' => 'seccion',
+    'MODULO' => 'modulo',
+    _ => 'item',
+  };
+  const replacements = <String, String>{
+    'á': 'a',
+    'é': 'e',
+    'í': 'i',
+    'ó': 'o',
+    'ú': 'u',
+    'ü': 'u',
+    'ñ': 'n',
+    'Á': 'A',
+    'É': 'E',
+    'Í': 'I',
+    'Ó': 'O',
+    'Ú': 'U',
+    'Ü': 'U',
+    'Ñ': 'N',
+  };
+  var folded = visibleName;
+  for (final entry in replacements.entries) {
+    folded = folded.replaceAll(entry.key, entry.value);
+  }
+  final normalized = normalizeConfigurationCode(folded).toLowerCase();
+  final suffix = normalized.isEmpty ? 'nuevo' : normalized;
+  final maxSuffixLength = 63 - prefix.length - 1;
+  final end = suffix.length > maxSuffixLength ? maxSuffixLength : suffix.length;
+  return '${prefix}_${suffix.substring(0, end)}';
 }

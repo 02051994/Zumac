@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/services/local_db.dart';
+import '../../core/services/app_update_service.dart';
 import '../../core/services/login_error_message.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
@@ -22,16 +23,69 @@ class _LoginPageState extends State<LoginPage> {
   final session = LocalSession();
   bool loading = false;
   bool updatingUsers = false;
+  bool checkingAppUpdate = false;
   bool updatedDataThisSession = false;
   String? updateMessage;
   bool passwordVisible = false;
+  bool _brandingPrecached = false;
   double loadingProgress = 0;
   String loadingMessage = 'Preparando...';
+
+  Future<void> checkAppUpdate() async {
+    if (checkingAppUpdate || loading || updatingUsers) return;
+    setState(() => checkingAppUpdate = true);
+    try {
+      final result = await AppUpdateService().checkAndDownloadLatest();
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text(
+            result.hasUpdate ? 'Actualización descargada' : 'Actualizar app',
+          ),
+          content: Text(result.message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Aceptar'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No se pudo verificar o descargar la actualización: $error',
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => checkingAppUpdate = false);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
     _loadCachedEmail();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_brandingPrecached) return;
+    _brandingPrecached = true;
+    final targetPixels = MediaQuery.sizeOf(context).width >= 900 ? 680 : 560;
+    precacheImage(
+      ResizeImage(
+        const AssetImage('assets/images/logo_bienvenida.png'),
+        width: targetPixels,
+        height: targetPixels,
+      ),
+      context,
+    );
   }
 
   Future<void> _loadCachedEmail() async {
@@ -46,8 +100,7 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<void> _authenticateForDataUpdate() async {
     final client = Supabase.instance.client;
-    if (client.auth.currentUser != null &&
-        client.auth.currentSession != null) {
+    if (client.auth.currentUser != null && client.auth.currentSession != null) {
       return;
     }
 
@@ -90,6 +143,7 @@ class _LoginPageState extends State<LoginPage> {
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
         allowFullFallback: !hasCache,
+        forceConfigurationRefresh: true,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -310,7 +364,7 @@ class _LoginPageState extends State<LoginPage> {
                 loadingProgress = 0.70;
                 loadingMessage = 'Actualizando permisos...';
               });
-            await SyncService().downloadAllForOffline();
+            await SyncService().refreshLoginPermissionsOnly();
           } else {
             if (mounted)
               setState(() {
@@ -403,18 +457,24 @@ class _LoginPageState extends State<LoginPage> {
           Container(
             decoration: const BoxDecoration(
               gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xFFEAF4E5), Color(0xFFF8FAF4)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xFF061F36),
+                  Color(0xFF0D5F78),
+                  Color(0xFF2B7A78),
+                ],
+                stops: [0, 0.58, 1],
               ),
             ),
             child: Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.all(22),
+                padding: const EdgeInsets.fromLTRB(22, 76, 22, 28),
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 430),
                   child: Card(
-                    elevation: 3,
+                    elevation: 18,
+                    shadowColor: Colors.black45,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(24)),
                     child: Padding(
@@ -425,10 +485,13 @@ class _LoginPageState extends State<LoginPage> {
                           ClipRRect(
                             borderRadius: BorderRadius.circular(54),
                             child: Image.asset(
-                              'assets/images/logo_zumac.jpeg',
+                              'assets/images/logo_app.png',
                               width: 108,
                               height: 108,
+                              cacheWidth: 324,
+                              cacheHeight: 324,
                               fit: BoxFit.cover,
+                              filterQuality: FilterQuality.high,
                               errorBuilder: (_, __, ___) =>
                                   const Icon(Icons.eco, size: 64),
                             ),
@@ -519,6 +582,39 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                     ),
                   ),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 0,
+            right: 0,
+            child: SafeArea(
+              minimum: const EdgeInsets.only(top: 8, right: 12),
+              child: Material(
+                color: Colors.white.withValues(alpha: 0.16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.white.withValues(alpha: 0.28)),
+                ),
+                child: IconButton(
+                  tooltip: 'Actualizar app',
+                  onPressed: (checkingAppUpdate || loading || updatingUsers)
+                      ? null
+                      : checkAppUpdate,
+                  icon: checkingAppUpdate
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(
+                          Icons.system_update_alt,
+                          color: Colors.white,
+                        ),
                 ),
               ),
             ),

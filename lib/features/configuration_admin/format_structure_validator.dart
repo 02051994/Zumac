@@ -32,7 +32,7 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
   }
   if (!_technicalCode.hasMatch(text(payload, 'codigo'))) {
     errors.add(
-        'El formato necesita un código técnico válido de 2 a 63 caracteres.');
+        'No se pudo preparar el formato con ese nombre. Pruebe con otro nombre.');
   }
   if (text(payload, 'modulo_id').isEmpty) {
     errors.add('Seleccione el módulo donde se publicará el formato.');
@@ -50,6 +50,7 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
 
   final tableCodes = <String>{};
   final physicalTables = <String>{};
+  final tableNames = <String>{};
   for (var tableIndex = 0; tableIndex < rawTables.length; tableIndex++) {
     final rawTable = rawTables[tableIndex];
     if (rawTable is! Map) {
@@ -61,17 +62,23 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
     final code = text(table, 'codigo');
     final physicalName = text(table, 'tabla_destino');
     if (!_technicalCode.hasMatch(code)) {
-      errors.add('$prefix: indique un código técnico válido.');
+      errors.add(
+          '$prefix: no se pudo generar su identificador. Cambie el nombre.');
     } else if (!tableCodes.add(code.toUpperCase())) {
-      errors.add('$prefix: el código técnico está repetido.');
+      errors.add('$prefix: el nombre está repetido, por favor elija otro.');
     }
-    if (text(table, 'nombre').isEmpty) {
+    final visibleTableName = text(table, 'nombre');
+    if (visibleTableName.isEmpty) {
       errors.add('$prefix: indique el nombre visible.');
+    } else if (!tableNames.add(visibleTableName.toUpperCase())) {
+      errors.add(
+          '$prefix: "$visibleTableName" ya existe, por favor elija otro nombre.');
     }
     if (!_technicalCode.hasMatch(physicalName)) {
-      errors.add('$prefix: indique un nombre físico válido.');
+      errors
+          .add('$prefix: no se pudo preparar con ese nombre. Pruebe con otro.');
     } else if (!physicalTables.add(physicalName.toUpperCase())) {
-      errors.add('$prefix: el nombre físico está repetido.');
+      errors.add('$prefix: el nombre está repetido, por favor elija otro.');
     }
     if (table['es_detalle'] == true &&
         (text(table, 'tabla_padre').isEmpty ||
@@ -97,14 +104,17 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
       final code = text(field, 'codigo');
       final physicalName = text(field, 'campo');
       if (!_technicalCode.hasMatch(code)) {
-        errors.add('$fieldPrefix: indique un código técnico válido.');
+        errors.add(
+            '$fieldPrefix: no se pudo generar su identificador. Cambie el nombre.');
       } else if (!fieldCodes.add(code.toUpperCase())) {
-        errors.add('$fieldPrefix: el código técnico está repetido.');
+        errors.add(
+            '$fieldPrefix: el nombre está repetido, por favor elija otro.');
       }
       if (physicalName.isEmpty || physicalName.length > 63) {
-        errors.add('$fieldPrefix: indique el nombre físico.');
+        errors.add('$fieldPrefix: cambie el nombre por uno más corto.');
       } else if (!physicalFields.add(physicalName.toUpperCase())) {
-        errors.add('$fieldPrefix: el nombre físico está repetido.');
+        errors.add(
+            '$fieldPrefix: el nombre está repetido, por favor elija otro.');
       }
       if (text(field, 'etiqueta').isEmpty) {
         errors.add('$fieldPrefix: indique la etiqueta visible.');
@@ -119,6 +129,17 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
       }
 
       final rawMatrices = field['matrices'];
+      final hasDropdownMatrix = rawMatrices is List &&
+          rawMatrices.whereType<Map>().any((matrix) =>
+              text(Map<String, dynamic>.from(matrix), 'clase_matriz')
+                  .toUpperCase() ==
+              'DROPDOWN');
+      if ((uiType == 'dropdown' || uiType == 'multiselect') &&
+          text(field, 'id_campo_dropdown').isEmpty &&
+          !hasDropdownMatrix) {
+        errors.add(
+            '$fieldPrefix: seleccione la tabla y el campo que alimentarán la lista.');
+      }
       if (rawMatrices is! List) continue;
       final matrixCodes = <String>{};
       for (var matrixIndex = 0;
@@ -135,9 +156,10 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
         final code = text(matrix, 'codigo');
         final matrixClass = text(matrix, 'clase_matriz').toUpperCase();
         if (!_technicalCode.hasMatch(code)) {
-          errors.add('$matrixPrefix: indique un código técnico válido.');
+          errors.add('$matrixPrefix: no se pudo preparar con ese nombre.');
         } else if (!matrixCodes.add(code.toUpperCase())) {
-          errors.add('$matrixPrefix: el código técnico está repetido.');
+          errors.add(
+              '$matrixPrefix: el nombre está repetido, por favor elija otro.');
         }
         if (text(matrix, 'nombre').isEmpty) {
           errors.add('$matrixPrefix: indique el nombre visible.');

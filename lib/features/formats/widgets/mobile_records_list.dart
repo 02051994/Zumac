@@ -50,15 +50,60 @@ class MobileRecordsList extends StatefulWidget {
 
 class _MobileRecordsListState extends State<MobileRecordsList> {
   static const double _numberWidth = 58;
-  static const double _selectionWidth = 48;
+  static const double _selectionWidth = 72;
   static const double _editWidth = 58;
-  static const double _columnWidth = 168;
+  static const double _columnWidth = 176;
+  static const double _headerHeight = 56;
+  static const double _rowHeight = 76;
 
   final ScrollController _horizontalController = ScrollController();
+  final ScrollController _numberVerticalController = ScrollController();
+  final ScrollController _contentVerticalController = ScrollController();
+  bool _syncingVerticalScroll = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _numberVerticalController.addListener(_syncFromNumberColumn);
+    _contentVerticalController.addListener(_syncFromContent);
+  }
+
+  void _syncFromNumberColumn() => _syncVertical(
+        source: _numberVerticalController,
+        target: _contentVerticalController,
+      );
+
+  void _syncFromContent() => _syncVertical(
+        source: _contentVerticalController,
+        target: _numberVerticalController,
+      );
+
+  void _syncVertical({
+    required ScrollController source,
+    required ScrollController target,
+  }) {
+    if (_syncingVerticalScroll || !source.hasClients || !target.hasClients) {
+      return;
+    }
+    final offset = source.offset.clamp(
+      target.position.minScrollExtent,
+      target.position.maxScrollExtent,
+    );
+    if ((target.offset - offset).abs() < 0.5) return;
+    _syncingVerticalScroll = true;
+    target.jumpTo(offset);
+    _syncingVerticalScroll = false;
+  }
 
   @override
   void dispose() {
     _horizontalController.dispose();
+    _numberVerticalController
+      ..removeListener(_syncFromNumberColumn)
+      ..dispose();
+    _contentVerticalController
+      ..removeListener(_syncFromContent)
+      ..dispose();
     super.dispose();
   }
 
@@ -82,9 +127,16 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
       builder: (context, constraints) {
         final actionWidth = (widget.selectionEnabled ? _selectionWidth : 0) +
             (widget.onEdit != null ? _editWidth : 0);
-        final contentWidth =
-            _numberWidth + (widget.columns.length * _columnWidth) + actionWidth;
-        final tableWidth = math.max(constraints.maxWidth, contentWidth);
+        final scrollingContentWidth =
+            (widget.columns.length * _columnWidth) + actionWidth;
+        final availableScrollingWidth = math.max(
+          0.0,
+          constraints.maxWidth - _numberWidth,
+        );
+        final tableWidth = math.max(
+          availableScrollingWidth,
+          scrollingContentWidth,
+        );
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -116,32 +168,59 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
             ),
             const SizedBox(height: 7),
             Expanded(
-              child: Scrollbar(
-                controller: _horizontalController,
-                thumbVisibility: true,
-                notificationPredicate: (notification) =>
-                    notification.metrics.axis == Axis.horizontal,
-                child: SingleChildScrollView(
-                  key: const Key('mobile-records-list'),
-                  controller: _horizontalController,
-                  scrollDirection: Axis.horizontal,
-                  child: SizedBox(
-                    width: tableWidth,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  SizedBox(
+                    key: const Key('mobile-table-frozen-number-column'),
+                    width: _numberWidth,
                     child: Column(
                       children: [
-                        _headerRow(),
+                        _numberHeader(),
                         Expanded(
                           child: ListView.builder(
+                            controller: _numberVerticalController,
                             padding: const EdgeInsets.only(bottom: 84),
+                            itemExtent: _rowHeight,
                             itemCount: widget.records.length,
-                            itemBuilder: (context, index) =>
-                                _recordRow(context, index),
+                            itemBuilder: (context, index) => _numberCell(index),
                           ),
                         ),
                       ],
                     ),
                   ),
-                ),
+                  Expanded(
+                    child: Scrollbar(
+                      controller: _horizontalController,
+                      thumbVisibility: true,
+                      notificationPredicate: (notification) =>
+                          notification.metrics.axis == Axis.horizontal,
+                      child: SingleChildScrollView(
+                        key: const Key('mobile-records-list'),
+                        controller: _horizontalController,
+                        scrollDirection: Axis.horizontal,
+                        child: SizedBox(
+                          width: tableWidth,
+                          child: Column(
+                            children: [
+                              _scrollingHeaderRow(),
+                              Expanded(
+                                child: ListView.builder(
+                                  controller: _contentVerticalController,
+                                  padding: const EdgeInsets.only(bottom: 84),
+                                  itemExtent: _rowHeight,
+                                  itemCount: widget.records.length,
+                                  itemBuilder: (context, index) =>
+                                      _scrollingRecordRow(context, index),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -150,20 +229,30 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
     );
   }
 
-  Widget _headerRow() {
+  Widget _numberHeader() {
+    return Container(
+      height: _headerHeight,
+      decoration: const BoxDecoration(
+        color: Color(0xFF0F5265),
+        borderRadius: BorderRadius.only(topLeft: Radius.circular(12)),
+      ),
+      child: _headerCell('N°', _numberWidth, alignment: Alignment.center),
+    );
+  }
+
+  Widget _scrollingHeaderRow() {
     return Container(
       key: const Key('mobile-table-header'),
-      constraints: const BoxConstraints(minHeight: 48),
+      height: _headerHeight,
       decoration: const BoxDecoration(
         gradient: LinearGradient(
           colors: [Color(0xFF0F5265), Color(0xFF176B87)],
         ),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
+        borderRadius: BorderRadius.only(topRight: Radius.circular(12)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          _headerCell('N°', _numberWidth, alignment: Alignment.center),
           if (widget.selectionEnabled)
             _headerCell('Elegir', _selectionWidth, alignment: Alignment.center),
           for (final column in widget.columns)
@@ -189,8 +278,11 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
       ),
       child: Text(
         label,
-        maxLines: 2,
+        maxLines: 3,
+        softWrap: true,
         overflow: TextOverflow.ellipsis,
+        textAlign:
+            alignment == Alignment.center ? TextAlign.center : TextAlign.left,
         style: const TextStyle(
           color: Colors.white,
           fontSize: 11.5,
@@ -200,84 +292,94 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
     );
   }
 
-  Widget _recordRow(BuildContext context, int index) {
+  Color _rowColor(int index, bool selected) => selected
+      ? const Color(0xFFDDF1F4)
+      : index.isEven
+          ? Colors.white
+          : const Color(0xFFF7FAFB);
+
+  Widget _numberCell(int index) {
     final record = widget.records[index];
     final number = widget.rowNumberOffset + index + 1;
     final selected = widget.isSelected?.call(record, index) ?? false;
+    return Container(
+      key: ValueKey('mobile-record-number-$number'),
+      height: _rowHeight,
+      color: _rowColor(index, selected),
+      child: _dataCell(
+        SizedBox(
+          width: 30,
+          height: 30,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              color: Color(0xFF176B87),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '$number',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+          ),
+        ),
+        _numberWidth,
+        alignment: Alignment.center,
+      ),
+    );
+  }
 
+  Widget _scrollingRecordRow(BuildContext context, int index) {
+    final record = widget.records[index];
+    final number = widget.rowNumberOffset + index + 1;
+    final selected = widget.isSelected?.call(record, index) ?? false;
     return Container(
       key: ValueKey('mobile-record-$number'),
-      constraints: const BoxConstraints(minHeight: 56),
-      color: selected
-          ? const Color(0xFFDDF1F4)
-          : index.isEven
-              ? Colors.white
-              : const Color(0xFFF7FAFB),
-      child: IntrinsicHeight(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
+      height: _rowHeight,
+      color: _rowColor(index, selected),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (widget.selectionEnabled)
             _dataCell(
-              SizedBox(
-                width: 30,
-                height: 30,
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF176B87),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      '$number',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                  ),
-                ),
+              Checkbox(
+                value: selected,
+                activeColor: const Color(0xFF0D5F78),
+                onChanged: widget.onSelected == null
+                    ? null
+                    : (value) => widget.onSelected!(
+                          record,
+                          index,
+                          value ?? false,
+                        ),
               ),
-              _numberWidth,
+              _selectionWidth,
               alignment: Alignment.center,
             ),
-            if (widget.selectionEnabled)
-              _dataCell(
-                Checkbox(
-                  value: selected,
-                  activeColor: const Color(0xFF0D5F78),
-                  onChanged: widget.onSelected == null
-                      ? null
-                      : (value) => widget.onSelected!(
-                            record,
-                            index,
-                            value ?? false,
-                          ),
+          for (final column in widget.columns)
+            _dataCell(
+              widget.cellBuilder(context, record, column),
+              _columnWidth,
+            ),
+          if (widget.onEdit != null)
+            _dataCell(
+              IconButton(
+                key: ValueKey('edit-record-$number'),
+                tooltip: 'Editar registro',
+                onPressed: () => widget.onEdit!(record),
+                icon: const Icon(
+                  Icons.edit_outlined,
+                  color: Color(0xFF176B87),
                 ),
-                _selectionWidth,
-                alignment: Alignment.center,
               ),
-            for (final column in widget.columns)
-              _dataCell(
-                widget.cellBuilder(context, record, column),
-                _columnWidth,
-              ),
-            if (widget.onEdit != null)
-              _dataCell(
-                IconButton(
-                  key: ValueKey('edit-record-$number'),
-                  tooltip: 'Editar registro',
-                  onPressed: () => widget.onEdit!(record),
-                  icon: const Icon(
-                    Icons.edit_outlined,
-                    color: Color(0xFF176B87),
-                  ),
-                ),
-                _editWidth,
-                alignment: Alignment.center,
-              ),
-          ],
-        ),
+              _editWidth,
+              alignment: Alignment.center,
+            ),
+        ],
       ),
     );
   }

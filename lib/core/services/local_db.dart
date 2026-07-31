@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -17,6 +18,11 @@ class LocalDb {
   Database? _db;
 
   Future<String> _databasePath() async {
+    // En Web no existe un directorio del sistema de archivos. La fábrica
+    // sqflite_common_ffi_web usa este nombre para persistir la base en
+    // IndexedDB mediante SQLite/Wasm.
+    if (kIsWeb) return 'appgt_offline_subtables.db';
+
     // En Windows, sqflite_common_ffi puede devolver una ruta relativa dentro
     // de .dart_tool si se usa getDatabasesPath(). Eso generaba dos bases
     // distintas: una para flutter run y otra para el EXE release.
@@ -30,7 +36,7 @@ class LocalDb {
     final path = await _databasePath();
     _db = await openDatabase(
       path,
-      version: 29,
+      version: 31,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (database) async {
@@ -51,6 +57,11 @@ class LocalDb {
         tipo_ui text,
         id_campo_dropdown text,
         formula_funcion text,
+        formula_tipo text,
+        formula_tabla_origen text,
+        formula_campo_valor text,
+        formula_campo_condicion text,
+        formula_valor_condicion text,
         valor_default text,
         id_generador text,
         editable integer,
@@ -70,17 +81,33 @@ class LocalDb {
         lista_destino_photo text,
         orden_lista_photo integer,
         formato_condicional_campo text,
+        condicion_color_texto text,
+        condicion_color_fondo text,
+        condicion_color_borde text,
         color_texto text,
         color_fondo text,
         color_borde text,
+        tamanio_letra real,
         aplicar_formato_condicional_tabla integer,
         sub_titulo text,
         fila_sub_titulo integer,
+        subtitulo_alineacion text,
+        subtitulo_tamanio_letra real,
+        subtitulo_color text,
+        subtitulo_padding text,
         grupo_captura text,
         titulo1 text,
         titulo2 text,
         codigo1 text,
         codigo2 text,
+        titulo1_alineacion text,
+        titulo1_tamanio_letra real,
+        titulo1_color text,
+        titulo1_padding text,
+        titulo2_alineacion text,
+        titulo2_tamanio_letra real,
+        titulo2_color text,
+        titulo2_padding text,
         activo integer
       )
     ''');
@@ -165,6 +192,7 @@ class LocalDb {
   Future<void> _upgradeNavigationMetadata(Database db) async {
     if (!await _tableExists(db, 'local_sections')) return;
     await _ensureColumn(db, 'local_sections', 'rubro_id', 'text');
+    await _ensureColumn(db, 'local_sections', 'color', 'text');
     await _ensureColumn(
       db,
       'local_sections',
@@ -172,6 +200,11 @@ class LocalDb {
       "text not null default 'GENERICO'",
     );
     await _ensureColumn(db, 'local_sections', 'ruta_flutter', 'text');
+    await _ensureColumn(db, 'local_modules', 'rubro_id', 'text');
+    await _ensureColumn(db, 'local_modules', 'icono', 'text');
+    await _ensureColumn(db, 'local_modules', 'color', 'text');
+    await _ensureColumn(db, 'local_formats', 'rubro_id', 'text');
+    await _ensureColumn(db, 'local_format_tables', 'rubro_id', 'text');
   }
 
   Future<bool> _tableExists(Database db, String table) async {
@@ -192,6 +225,14 @@ class LocalDb {
     await _ensureColumn(db, 'local_form_fields', 'tipo_ui', 'text');
     await _ensureColumn(db, 'local_form_fields', 'id_campo_dropdown', 'text');
     await _ensureColumn(db, 'local_form_fields', 'formula_funcion', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'formula_tipo', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'formula_tabla_origen', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'formula_campo_valor', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'formula_campo_condicion', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'formula_valor_condicion', 'text');
     await _ensureColumn(db, 'local_form_fields', 'valor_default', 'text');
     await _ensureColumn(db, 'local_form_fields', 'id_generador', 'text');
     await _ensureColumn(db, 'local_form_fields', 'editable', 'integer');
@@ -215,18 +256,41 @@ class LocalDb {
         db, 'local_form_fields', 'orden_lista_photo', 'integer');
     await _ensureColumn(
         db, 'local_form_fields', 'formato_condicional_campo', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'condicion_color_texto', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'condicion_color_fondo', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'condicion_color_borde', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_texto', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_fondo', 'text');
     await _ensureColumn(db, 'local_form_fields', 'color_borde', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'tamanio_letra', 'real');
     await _ensureColumn(db, 'local_form_fields',
         'aplicar_formato_condicional_tabla', 'integer');
     await _ensureColumn(db, 'local_form_fields', 'sub_titulo', 'text');
     await _ensureColumn(db, 'local_form_fields', 'fila_sub_titulo', 'integer');
+    await _ensureColumn(
+        db, 'local_form_fields', 'subtitulo_alineacion', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'subtitulo_tamanio_letra', 'real');
+    await _ensureColumn(db, 'local_form_fields', 'subtitulo_color', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'subtitulo_padding', 'text');
     await _ensureColumn(db, 'local_form_fields', 'grupo_captura', 'text');
     await _ensureColumn(db, 'local_form_fields', 'titulo1', 'text');
     await _ensureColumn(db, 'local_form_fields', 'titulo2', 'text');
     await _ensureColumn(db, 'local_form_fields', 'codigo1', 'text');
     await _ensureColumn(db, 'local_form_fields', 'codigo2', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'titulo1_alineacion', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'titulo1_tamanio_letra', 'real');
+    await _ensureColumn(db, 'local_form_fields', 'titulo1_color', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'titulo1_padding', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'titulo2_alineacion', 'text');
+    await _ensureColumn(
+        db, 'local_form_fields', 'titulo2_tamanio_letra', 'real');
+    await _ensureColumn(db, 'local_form_fields', 'titulo2_color', 'text');
+    await _ensureColumn(db, 'local_form_fields', 'titulo2_padding', 'text');
     await _ensureColumn(db, 'local_form_fields', 'activo', 'integer');
   }
 
@@ -248,9 +312,17 @@ class LocalDb {
     await db.execute('''
       create table if not exists local_lotes_variedades(
         turno text primary key,
-        variedad text
+        variedad text,
+        latitud real,
+        longitud real,
+        precision_gps real,
+        fecha_gps text
       )
     ''');
+    await _ensureColumn(db, 'local_lotes_variedades', 'latitud', 'real');
+    await _ensureColumn(db, 'local_lotes_variedades', 'longitud', 'real');
+    await _ensureColumn(db, 'local_lotes_variedades', 'precision_gps', 'real');
+    await _ensureColumn(db, 'local_lotes_variedades', 'fecha_gps', 'text');
   }
 
   Future<void> _createLocalPlagasConceptos(Database db) async {
@@ -333,6 +405,15 @@ class LocalDb {
     """);
   }
 
+  Future<void> _createLocalIdSequences(Database db) async {
+    await db.execute("""
+      create table if not exists local_id_sequences(
+        scope_key text primary key,
+        last_value integer not null default 0
+      )
+    """);
+  }
+
   Future<void> _createLocalTableCache(Database db) async {
     await db.execute("""
       create table if not exists local_table_cache(
@@ -380,6 +461,7 @@ class LocalDb {
         nombre text,
         seccion text,
         icono text,
+        color text,
         orden integer,
         numero_decimales integer,
         grid_fila integer,
@@ -422,6 +504,8 @@ class LocalDb {
   Future<void> _upgradeLocalPermissions(Database db) async {
     await _ensureColumn(db, 'local_permissions', 'can_export', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_import', 'integer');
+    await _ensureColumn(db, 'local_permissions', 'can_review', 'integer');
+    await _ensureColumn(db, 'local_permissions', 'can_approve', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_view_pending', 'integer');
     await _ensureColumn(
         db, 'local_permissions', 'can_complete_pending', 'integer');
@@ -438,6 +522,11 @@ class LocalDb {
     await _createLocalSpecialFormats(db);
     await _upgradeLocalFormatTables(db);
     await _ensureColumn(db, 'local_formats', 'tabla_visible_app', 'integer');
+    await _ensureColumn(db, 'local_formats', 'capacidades', 'text');
+    await _ensureColumn(db, 'local_formats', 'flujo_estados', 'text');
+    await _ensureColumn(db, 'local_formats', 'workflow_enabled', 'integer');
+    await _ensureColumn(db, 'local_formats', 'geolocation_enabled', 'integer');
+    await _ensureColumn(db, 'local_formats', 'approvals_enabled', 'integer');
     await _createLocalSections(db);
     await _upgradeLocalPermissions(db);
     await _createLocalLotesVariedades(db);
@@ -449,6 +538,7 @@ class LocalDb {
     await _createLocalTableCache(db);
     await _createLocalDynamicViews(db);
     await _createLocalSyncMeta(db);
+    await _createLocalIdSequences(db);
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
@@ -511,11 +601,15 @@ class LocalDb {
     if (oldVersion < 24) {
       await _upgradePendingRecords(db);
     }
+    if (oldVersion < 31) {
+      await _createLocalIdSequences(db);
+    }
     await _ensureColumn(db, 'local_modules', 'seccion', 'text');
     await _ensureColumn(db, 'local_formats', 'tabla_visible_app', 'integer');
     await _upgradeLocalPermissions(db);
     await _upgradeLocalFormatTables(db);
     await _createLocalSyncMeta(db);
+    await _createLocalIdSequences(db);
     await _createLocalDynamicViews(db);
     await _ensureIndexes(db);
     await _upgradePendingRecords(db);
@@ -528,6 +622,9 @@ class LocalDb {
       create table local_modules(
         id text primary key,
         nombre text,
+        icono text,
+        color text,
+        rubro_id text,
         orden integer,
         numero_decimales integer,
         grid_fila integer,
@@ -545,9 +642,15 @@ class LocalDb {
         id text primary key,
         modulo_id text,
         nombre text,
+        rubro_id text,
         tabla_destino text,
         ruta_flutter text,
         tabla_visible_app integer,
+        capacidades text,
+        flujo_estados text,
+        workflow_enabled integer,
+        geolocation_enabled integer,
+        approvals_enabled integer,
         orden integer,
         numero_decimales integer,
         grid_fila integer,
@@ -564,6 +667,7 @@ class LocalDb {
         id text primary key,
         formato_id text,
         nombre text,
+        rubro_id text,
         tabla_destino text,
         orden integer,
         numero_decimales integer,
@@ -599,6 +703,8 @@ class LocalDb {
         can_delete integer,
         can_export integer,
         can_import integer,
+        can_review integer,
+        can_approve integer,
         can_view_pending integer,
         can_complete_pending integer,
         seccion text,
@@ -1233,6 +1339,20 @@ class LocalDb {
     return decoded;
   }
 
+  Future<List<String>> matrixSourceTables() async {
+    final database = await db;
+    final rows = await database.rawQuery(
+      'select distinct source_table from local_matrix_rows '
+      'where source_table is not null and trim(source_table) <> ? '
+      'order by source_table',
+      [''],
+    );
+    return rows
+        .map((row) => row['source_table']?.toString().trim() ?? '')
+        .where((value) => value.isNotEmpty)
+        .toList(growable: false);
+  }
+
   Future<Map<String, dynamic>?> getTableCacheInfo(String sourceTable) async {
     final cleanTable = sourceTable.trim();
     if (cleanTable.isEmpty) return null;
@@ -1372,6 +1492,76 @@ class LocalDb {
     scopedRow.putIfAbsent('empresa_id', () => TenantConfig.defaultEmpresaId);
     await database.insert('pending_records', scopedRow,
         conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  Future<String> nextIncrementalIdentifier({
+    required String table,
+    required String field,
+    required String prefix,
+  }) async {
+    final database = await db;
+    await _createLocalIdSequences(database);
+    final cleanPrefix = prefix.trim();
+    final scope =
+        '${table.trim().toUpperCase()}|${field.trim().toUpperCase()}|$cleanPrefix';
+    return database.transaction((txn) async {
+      var maximum = 0;
+      final sequence = await txn.query(
+        'local_id_sequences',
+        columns: ['last_value'],
+        where: 'scope_key = ?',
+        whereArgs: [scope],
+        limit: 1,
+      );
+      if (sequence.isNotEmpty) {
+        maximum = (sequence.first['last_value'] as num?)?.toInt() ?? 0;
+      }
+
+      final expression = RegExp(
+        '^${RegExp.escape(cleanPrefix)}([0-9]+)\$',
+        caseSensitive: false,
+      );
+      void inspectRows(List<Map<String, Object?>> rows) {
+        for (final row in rows) {
+          try {
+            final payload = jsonDecode(
+              row['payload_json']?.toString() ?? '{}',
+            ) as Map<String, dynamic>;
+            dynamic value;
+            for (final entry in payload.entries) {
+              if (entry.key.toUpperCase() == field.trim().toUpperCase()) {
+                value = entry.value;
+                break;
+              }
+            }
+            final match = expression.firstMatch(value?.toString().trim() ?? '');
+            final number = int.tryParse(match?.group(1) ?? '') ?? 0;
+            if (number > maximum) maximum = number;
+          } catch (_) {}
+        }
+      }
+
+      inspectRows(await txn.query(
+        'local_matrix_rows',
+        columns: ['payload_json'],
+        where: 'source_table = ?',
+        whereArgs: [table],
+      ));
+      inspectRows(await txn.query(
+        'pending_records',
+        columns: ['payload_json'],
+        where: 'tabla_destino = ?',
+        whereArgs: [table],
+      ));
+
+      final next = maximum + 1;
+      await txn.insert(
+        'local_id_sequences',
+        {'scope_key': scope, 'last_value': next},
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      return '$cleanPrefix$next';
+    });
   }
 
   Future<void> _pruneLocalRecords(Database database) async {

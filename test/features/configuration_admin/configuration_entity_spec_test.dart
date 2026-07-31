@@ -72,4 +72,19 @@ void main() {
       'CONTROL_DE_COSECHA_2026',
     );
   });
+
+  test('genera códigos automáticos con el prefijo de cada entidad', () {
+    expect(
+      generatedEntityCode('RUBRO', 'Agroexportación'),
+      'rubro_agroexportacion',
+    );
+    expect(
+      generatedEntityCode('SECCION', 'Operaciones Agrícolas'),
+      'seccion_operaciones_agricolas',
+    );
+    expect(
+      generatedEntityCode('MODULO', 'Almacén Central'),
+      'modulo_almacen_central',
+    );
+  });
 }

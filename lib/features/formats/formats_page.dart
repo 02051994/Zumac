@@ -60,7 +60,6 @@ class _FormatsPageState extends State<FormatsPage> {
                   child: ListTile(
                     leading: const Icon(Icons.assignment),
                     title: Text('${f['nombre']}'),
-                    subtitle: Text('${f['id']}'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () async {
                       final special = await local.where(

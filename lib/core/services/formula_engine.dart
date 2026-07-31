@@ -195,7 +195,9 @@ class FormulaEngine {
         // Una palabra seguida de paréntesis es llamada de función y puede
         // formar parte de una expresión matemática: 0.20 * NUM(...).
         var j = i - 1;
-        while (j >= 0 && expr[j].trim().isEmpty) j--;
+        while (j >= 0 && expr[j].trim().isEmpty) {
+          j--;
+        }
         while (j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) {
           j--;
         }
@@ -559,6 +561,9 @@ class FormulaEngine {
       case 'LOOKUP':
       case 'BUSCAR':
         return _lookup(args);
+      case 'LIST':
+      case 'LISTA':
+        return _list(args);
       case 'SEMANA':
         return _datePart(args, 'SEMANA');
       case 'ANIO':
@@ -692,6 +697,8 @@ class FormulaEngine {
       'LOOKUPR': 'LOOKUP',
       'LOOKUPP': 'LOOKUP',
       'BUSCAR': 'BUSCAR',
+      'LIST': 'LISTA',
+      'LISTA': 'LISTA',
       'WEEK': 'SEMANA',
       'YEAR': 'ANIO',
       'ANO': 'ANIO',
@@ -912,6 +919,27 @@ class FormulaEngine {
       }
     }
     return '';
+  }
+
+  String _list(List<String> args) {
+    if (args.length < 2) return '';
+    final sourceTable = _cleanToken(args[0]);
+    final returnColumn = _cleanToken(args[1]);
+    final filterColumn = args.length >= 4 ? _cleanToken(args[2]) : '';
+    final filterValue = args.length >= 4
+        ? _evalExpression(args[3]).toString().trim()
+        : '';
+    final values = <String>[];
+    for (final row in matrixRowsByTable[sourceTable] ?? const []) {
+      if (filterColumn.isNotEmpty) {
+        final candidate =
+            _valueByColumnName(row, filterColumn)?.toString().trim() ?? '';
+        if (candidate != filterValue) continue;
+      }
+      final value = _valueByColumnName(row, returnColumn)?.toString().trim() ?? '';
+      if (value.isNotEmpty && !values.contains(value)) values.add(value);
+    }
+    return values.join(', ');
   }
 
   dynamic _valueByColumnName(Map<String, dynamic> row, String column) {

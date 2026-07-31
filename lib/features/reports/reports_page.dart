@@ -80,15 +80,28 @@ class _ReportsPageState extends State<ReportsPage> {
 
   String _normKey(dynamic value) {
     var s = _text(value).toLowerCase();
-    const map = {'á': 'a', 'é': 'e', 'í': 'i', 'ó': 'o', 'ú': 'u', 'ü': 'u', 'ñ': 'n'};
+    const map = {
+      'á': 'a',
+      'é': 'e',
+      'í': 'i',
+      'ó': 'o',
+      'ú': 'u',
+      'ü': 'u',
+      'ñ': 'n'
+    };
     map.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'[^a-z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return s
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   String _stripReference(dynamic value) {
     var out = _text(value);
-    if (out.startsWith('[') && out.endsWith(']')) out = out.substring(1, out.length - 1);
-    if (out.startsWith('{{') && out.endsWith('}}')) out = out.substring(2, out.length - 2);
+    if (out.startsWith('[') && out.endsWith(']'))
+      out = out.substring(1, out.length - 1);
+    if (out.startsWith('{{') && out.endsWith('}}'))
+      out = out.substring(2, out.length - 2);
     return out.trim();
   }
 
@@ -96,19 +109,25 @@ class _ReportsPageState extends State<ReportsPage> {
     final clean = _stripReference(identifier);
     if (clean.isEmpty) return '';
     final wanted = _normKey(clean);
-    final fields = _reportFieldsByTable[_normKey(table)] ?? const <Map<String, dynamic>>[];
+    final fields =
+        _reportFieldsByTable[_normKey(table)] ?? const <Map<String, dynamic>>[];
     for (final field in fields) {
       final matches = [
         field['id'],
         field['campo'],
         field['etiqueta'],
       ].any((value) => _normKey(value) == wanted);
-      if (matches) return _text(field['campo']).isNotEmpty ? _text(field['campo']) : clean;
+      if (matches)
+        return _text(field['campo']).isNotEmpty ? _text(field['campo']) : clean;
     }
     return clean;
   }
 
-  String _quoteColumn(String column) => column.contains(' ') || column.contains('-') || column.contains('/') || column.contains('(') || column.contains(')')
+  String _quoteColumn(String column) => column.contains(' ') ||
+          column.contains('-') ||
+          column.contains('/') ||
+          column.contains('(') ||
+          column.contains(')')
       ? '"$column"'
       : column;
 
@@ -138,7 +157,9 @@ class _ReportsPageState extends State<ReportsPage> {
       });
       return output;
     }
-    return _text(chart['nombre_grafico']).isNotEmpty ? _text(chart['nombre_grafico']) : _text(chart['codigo_grafico']);
+    return _text(chart['nombre_grafico']).isNotEmpty
+        ? _text(chart['nombre_grafico'])
+        : _text(chart['codigo_grafico']);
   }
 
   String _viewModuleId(Map<String, dynamic> view) {
@@ -151,7 +172,9 @@ class _ReportsPageState extends State<ReportsPage> {
     for (final candidate in candidates) {
       final n = _normKey(candidate);
       if (n.isEmpty || n == 'reportes') continue;
-      final module = reportModules.where((m) => _normKey(m['id']) == n || _normKey(m['nombre']) == n).toList();
+      final module = reportModules
+          .where((m) => _normKey(m['id']) == n || _normKey(m['nombre']) == n)
+          .toList();
       if (module.isNotEmpty) return _text(module.first['id']);
     }
     return '';
@@ -168,7 +191,10 @@ class _ReportsPageState extends State<ReportsPage> {
     return reportPermissions.any((p) {
       final sameView = _text(p['id_vista_reporte']) == viewId;
       final sameModule = _text(p['id_modulo_reporte']) == moduleId;
-      return sameView && sameModule && _asBool(p['puede_ver'], fallback: true) && _asBool(p['activo'], fallback: true);
+      return sameView &&
+          sameModule &&
+          _asBool(p['puede_ver'], fallback: true) &&
+          _asBool(p['activo'], fallback: true);
     });
   }
 
@@ -182,7 +208,8 @@ class _ReportsPageState extends State<ReportsPage> {
       return _hasPermissionForView(viewId, moduleId);
     }).toList();
 
-    moduleViews.sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
+    moduleViews
+        .sort((a, b) => _asInt(a['orden']).compareTo(_asInt(b['orden'])));
     return moduleViews;
   }
 
@@ -196,13 +223,10 @@ class _ReportsPageState extends State<ReportsPage> {
       // Lectura tolerante: algunas matrices nuevas pueden estar recién creadas,
       // con RLS/policies en ajuste o con cache de esquema. Por eso primero leemos
       // todo y filtramos/ordenamos en Flutter.
-      final moduleRows = await _supabase
-          .from('MATRIZ_MODULOS_GRAFICOS_DINAMICOS')
-          .select();
+      final moduleRows =
+          await _supabase.from('MATRIZ_MODULOS_GRAFICOS_DINAMICOS').select();
 
-      final viewRows = await _supabase
-          .from('MATRIZ_VISTAS_REPORTES')
-          .select();
+      final viewRows = await _supabase.from('MATRIZ_VISTAS_REPORTES').select();
 
       List<Map<String, dynamic>> permissionRows = [];
       final user = _supabase.auth.currentUser;
@@ -238,7 +262,10 @@ class _ReportsPageState extends State<ReportsPage> {
           if (moduleId.isEmpty) continue;
           derived[moduleId] = {
             'id': moduleId,
-            'nombre': moduleId.replaceAll('grafico_', '').replaceAll('_', ' ').toUpperCase(),
+            'nombre': moduleId
+                .replaceAll('grafico_', '')
+                .replaceAll('_', ' ')
+                .toUpperCase(),
             'orden': _asInt(view['orden']),
             'activo': true,
           };
@@ -260,7 +287,8 @@ class _ReportsPageState extends State<ReportsPage> {
           (m) => _text(m['id']) == _text(widget.initialModuleId),
           orElse: () => loadedModules.first,
         );
-        await _selectModule(preferredModule, preferredViewId: widget.initialViewId);
+        await _selectModule(preferredModule,
+            preferredViewId: widget.initialViewId);
       }
     } catch (e) {
       if (!mounted) return;
@@ -271,7 +299,8 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
-  Future<void> _selectModule(Map<String, dynamic> module, {String? preferredViewId}) async {
+  Future<void> _selectModule(Map<String, dynamic> module,
+      {String? preferredViewId}) async {
     final moduleViews = _viewsForModule(module);
     setState(() {
       selectedModule = module;
@@ -293,7 +322,8 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _readConfigByVista(String table, String vistaId) async {
+  Future<List<Map<String, dynamic>>> _readConfigByVista(
+      String table, String vistaId) async {
     try {
       final rows = await _supabase
           .from(table)
@@ -324,8 +354,10 @@ class _ReportsPageState extends State<ReportsPage> {
 
     final vistaId = _text(view['id']);
     try {
-      final filterRows = await _readConfigByVista('MATRIZ_FILTROS_DINAMICOS', vistaId);
-      final chartConfigRows = await _readConfigByVista('MATRIZ_GRAFICOS_DINAMICOS', vistaId);
+      final filterRows =
+          await _readConfigByVista('MATRIZ_FILTROS_DINAMICOS', vistaId);
+      final chartConfigRows =
+          await _readConfigByVista('MATRIZ_GRAFICOS_DINAMICOS', vistaId);
 
       if (!mounted) return;
       setState(() {
@@ -356,7 +388,8 @@ class _ReportsPageState extends State<ReportsPage> {
 
     for (final filter in filters) {
       final column = _fieldColumn(table, filter['campo']);
-      if (column.isNotEmpty && selectedFilters.containsKey(_text(filter['codigo_filtro']))) {
+      if (column.isNotEmpty &&
+          selectedFilters.containsKey(_text(filter['codigo_filtro']))) {
         columns.add(_quoteColumn(column));
       }
     }
@@ -370,7 +403,8 @@ class _ReportsPageState extends State<ReportsPage> {
     return columns.isEmpty ? '*' : columns.join(',');
   }
 
-  dynamic _applyFilter(dynamic query, String column, String operator, dynamic value) {
+  dynamic _applyFilter(
+      dynamic query, String column, String operator, dynamic value) {
     switch (operator) {
       case 'gte':
       case '>=':
@@ -394,7 +428,8 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _queryChartRows(Map<String, dynamic> chart) async {
+  Future<List<Map<String, dynamic>>> _queryChartRows(
+      Map<String, dynamic> chart) async {
     final useRpc = _asBool(chart['usa_rpc']);
     final rpcName = _text(chart['nombre_rpc']);
 
@@ -403,7 +438,8 @@ class _ReportsPageState extends State<ReportsPage> {
       for (final filter in filters) {
         final code = _text(filter['codigo_filtro']);
         final param = _text(filter['parametro_rpc']);
-        if (code.isEmpty || param.isEmpty || !selectedFilters.containsKey(code)) continue;
+        if (code.isEmpty || param.isEmpty || !selectedFilters.containsKey(code))
+          continue;
         final value = selectedFilters[code];
         if (value == null || value.toString().trim().isEmpty) continue;
         params[param] = value;
@@ -421,10 +457,15 @@ class _ReportsPageState extends State<ReportsPage> {
     for (final filter in filters) {
       final code = _text(filter['codigo_filtro']);
       final column = _fieldColumn(table, filter['campo']);
-      if (code.isEmpty || column.isEmpty || !selectedFilters.containsKey(code)) continue;
+      if (code.isEmpty || column.isEmpty || !selectedFilters.containsKey(code))
+        continue;
       final value = selectedFilters[code];
       if (value == null || value.toString().trim().isEmpty) continue;
-      query = _applyFilter(query, column, _text(filter['operador']).isEmpty ? 'eq' : _text(filter['operador']), value);
+      query = _applyFilter(
+          query,
+          column,
+          _text(filter['operador']).isEmpty ? 'eq' : _text(filter['operador']),
+          value);
     }
 
     final orderColumn = _fieldColumn(table, _asMap(chart['eje_x'])['campo']);
@@ -459,7 +500,9 @@ class _ReportsPageState extends State<ReportsPage> {
     final output = <String, List<Map<String, dynamic>>>{};
     try {
       for (final chart in charts) {
-        final code = _text(chart['codigo_grafico']).isNotEmpty ? _text(chart['codigo_grafico']) : _text(chart['id']);
+        final code = _text(chart['codigo_grafico']).isNotEmpty
+            ? _text(chart['codigo_grafico'])
+            : _text(chart['id']);
         output[code] = await _queryChartRows(chart);
       }
       if (!mounted) return;
@@ -480,7 +523,9 @@ class _ReportsPageState extends State<ReportsPage> {
 
   Widget _buildFilter(Map<String, dynamic> filter) {
     final code = _text(filter['codigo_filtro']);
-    final label = _text(filter['nombre_filtro']).isEmpty ? code : _text(filter['nombre_filtro']);
+    final label = _text(filter['nombre_filtro']).isEmpty
+        ? code
+        : _text(filter['nombre_filtro']);
     final design = _text(filter['disenio']).toLowerCase();
     final values = _asList(filter['valores_estaticos']);
 
@@ -489,7 +534,8 @@ class _ReportsPageState extends State<ReportsPage> {
         width: 210,
         child: TextFormField(
           initialValue: selectedFilters[code]?.toString() ?? '',
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+          decoration: InputDecoration(
+              labelText: label, border: const OutlineInputBorder()),
           readOnly: true,
           onTap: () async {
             final picked = await showDatePicker(
@@ -499,20 +545,27 @@ class _ReportsPageState extends State<ReportsPage> {
               initialDate: DateTime.now(),
             );
             if (picked == null) return;
-            setState(() => selectedFilters[code] = picked.toIso8601String().substring(0, 10));
+            setState(() => selectedFilters[code] =
+                picked.toIso8601String().substring(0, 10));
           },
         ),
       );
     }
 
-    if (values.isNotEmpty || design == 'dropdown' || design == 'lista_desplegable') {
+    if (values.isNotEmpty ||
+        design == 'dropdown' ||
+        design == 'lista_desplegable') {
       return SizedBox(
         width: 230,
         child: DropdownButtonFormField<String>(
-          value: selectedFilters[code]?.toString().isEmpty == false ? selectedFilters[code]?.toString() : null,
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+          value: selectedFilters[code]?.toString().isEmpty == false
+              ? selectedFilters[code]?.toString()
+              : null,
+          decoration: InputDecoration(
+              labelText: label, border: const OutlineInputBorder()),
           items: values
-              .map((e) => DropdownMenuItem<String>(value: e.toString(), child: Text(e.toString())))
+              .map((e) => DropdownMenuItem<String>(
+                  value: e.toString(), child: Text(e.toString())))
               .toList(),
           onChanged: (value) => setState(() => selectedFilters[code] = value),
         ),
@@ -523,7 +576,8 @@ class _ReportsPageState extends State<ReportsPage> {
       width: 230,
       child: TextFormField(
         initialValue: selectedFilters[code]?.toString() ?? '',
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        decoration: InputDecoration(
+            labelText: label, border: const OutlineInputBorder()),
         onChanged: (value) => selectedFilters[code] = value,
       ),
     );
@@ -565,7 +619,8 @@ class _ReportsPageState extends State<ReportsPage> {
   Widget _viewsRail() {
     if (loadingViews) return const Center(child: CircularProgressIndicator());
     if (reportModules.isEmpty) {
-      return const Center(child: Text('No hay módulos configurados en MATRIZ_MODULOS_GRAFICOS_DINAMICOS.'));
+      return const Center(
+          child: Text('No hay módulos de reportes configurados.'));
     }
 
     return ListView.builder(
@@ -577,14 +632,19 @@ class _ReportsPageState extends State<ReportsPage> {
             padding: const EdgeInsets.fromLTRB(6, 2, 6, 10),
             child: Text(
               'Módulos de reportes',
-              style: Theme.of(context).textTheme.labelLarge?.copyWith(fontWeight: FontWeight.w800),
+              style: Theme.of(context)
+                  .textTheme
+                  .labelLarge
+                  ?.copyWith(fontWeight: FontWeight.w800),
             ),
           );
         }
 
         final module = reportModules[index - 1];
         final moduleId = _text(module['id']);
-        final moduleName = _text(module['nombre']).isEmpty ? moduleId : _text(module['nombre']);
+        final moduleName = _text(module['nombre']).isEmpty
+            ? moduleId
+            : _text(module['nombre']);
         final moduleViews = _viewsForModule(module);
         final selectedModuleId = _text(selectedModule?['id']);
         final initiallyExpanded = selectedModuleId == moduleId;
@@ -595,7 +655,8 @@ class _ReportsPageState extends State<ReportsPage> {
             key: PageStorageKey<String>('report_module_$moduleId'),
             initiallyExpanded: initiallyExpanded,
             leading: const Icon(Icons.folder_copy_outlined),
-            title: Text(moduleName, maxLines: 1, overflow: TextOverflow.ellipsis),
+            title:
+                Text(moduleName, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text('${moduleViews.length} vistas', maxLines: 1),
             onExpansionChanged: (expanded) {
               if (expanded && selectedModuleId != moduleId) {
@@ -610,17 +671,25 @@ class _ReportsPageState extends State<ReportsPage> {
                     ),
                   ]
                 : moduleViews.map((view) {
-                    final selected = _text(selectedView?['id']) == _text(view['id']);
+                    final selected =
+                        _text(selectedView?['id']) == _text(view['id']);
                     return ListTile(
                       dense: true,
-                      leading: Icon(selected ? Icons.radio_button_checked : Icons.radio_button_unchecked),
+                      leading: Icon(selected
+                          ? Icons.radio_button_checked
+                          : Icons.radio_button_unchecked),
                       title: Text(
-                        _text(view['nombre_vista']).isEmpty ? _text(view['id']) : _text(view['nombre_vista']),
+                        _text(view['nombre_vista']).isEmpty
+                            ? _text(view['id'])
+                            : _text(view['nombre_vista']),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       selected: selected,
-                      selectedTileColor: Theme.of(context).colorScheme.primaryContainer.withOpacity(.55),
+                      selectedTileColor: Theme.of(context)
+                          .colorScheme
+                          .primaryContainer
+                          .withOpacity(.55),
                       onTap: () async {
                         if (selectedModuleId != moduleId) {
                           await _selectModule(module);
@@ -643,7 +712,8 @@ class _ReportsPageState extends State<ReportsPage> {
     return null;
   }
 
-  List<_ChartPoint> _pointsFor(Map<String, dynamic> chart, List<Map<String, dynamic>> rows) {
+  List<_ChartPoint> _pointsFor(
+      Map<String, dynamic> chart, List<Map<String, dynamic>> rows) {
     final table = _text(chart['tabla_origen']);
     final ejeX = _asMap(chart['eje_x']);
     final ejeY1 = _asMap(chart['eje_y_1']);
@@ -655,7 +725,9 @@ class _ReportsPageState extends State<ReportsPage> {
     for (final row in rows) {
       final x = _text(_rowValue(row, xField));
       if (x.isEmpty) continue;
-      grouped.putIfAbsent(x, () => <double>[]).add(_asDouble(_rowValue(row, yField)));
+      grouped
+          .putIfAbsent(x, () => <double>[])
+          .add(_asDouble(_rowValue(row, yField)));
     }
 
     final aggregation = _text(ejeY1['agregacion']).toLowerCase();
@@ -691,18 +763,23 @@ class _ReportsPageState extends State<ReportsPage> {
   }
 
   Widget _chartCard(Map<String, dynamic> chart) {
-    final code = _text(chart['codigo_grafico']).isNotEmpty ? _text(chart['codigo_grafico']) : _text(chart['id']);
+    final code = _text(chart['codigo_grafico']).isNotEmpty
+        ? _text(chart['codigo_grafico'])
+        : _text(chart['id']);
     final rows = chartRows[code] ?? const <Map<String, dynamic>>[];
     final type = _text(chart['tipo_grafico']).toLowerCase();
     final points = _pointsFor(chart, rows);
 
     Widget chartBody;
     if (rows.isEmpty) {
-      chartBody = const Center(child: Text('Sin datos para los filtros actuales.'));
+      chartBody =
+          const Center(child: Text('Sin datos para los filtros actuales.'));
     } else if (type == 'tabla') {
       chartBody = _SimpleTable(rows: rows);
     } else if (type == 'indicador' || type == 'kpi' || type == 'tarjeta') {
-      final value = points.isEmpty ? 0 : points.map((e) => e.y).fold<double>(0, (a, b) => a + b);
+      final value = points.isEmpty
+          ? 0
+          : points.map((e) => e.y).fold<double>(0, (a, b) => a + b);
       chartBody = Center(
         child: Text(
           value.toStringAsFixed(value.truncateToDouble() == value ? 0 : 2),
@@ -725,7 +802,8 @@ class _ReportsPageState extends State<ReportsPage> {
                 Expanded(
                   child: Text(
                     _chartTitle(chart),
-                    style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                        fontSize: 17, fontWeight: FontWeight.w800),
                   ),
                 ),
               ],
@@ -743,7 +821,9 @@ class _ReportsPageState extends State<ReportsPage> {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(error!, textAlign: TextAlign.center, style: const TextStyle(color: Colors.red)),
+          child: Text(error!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.red)),
         ),
       );
     }
@@ -755,9 +835,11 @@ class _ReportsPageState extends State<ReportsPage> {
         child: Opacity(
           opacity: .92,
           child: Image.asset(
-            'assets/images/logo_zumac.jpeg',
+            'assets/images/logo_bienvenida.png',
             width: 150,
+            cacheWidth: 450,
             fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
           ),
         ),
       );
@@ -769,7 +851,8 @@ class _ReportsPageState extends State<ReportsPage> {
         if (loadingData) const LinearProgressIndicator(minHeight: 2),
         Expanded(
           child: charts.isEmpty
-              ? const Center(child: Text('Esta vista aún no tiene gráficos configurados.'))
+              ? const Center(
+                  child: Text('Esta vista aún no tiene gráficos configurados.'))
               : ListView.builder(
                   padding: const EdgeInsets.only(bottom: 24),
                   itemCount: charts.length,
@@ -783,9 +866,12 @@ class _ReportsPageState extends State<ReportsPage> {
   @override
   void didUpdateWidget(covariant ReportsPage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.initialModuleId != widget.initialModuleId || oldWidget.initialViewId != widget.initialViewId) {
+    if (oldWidget.initialModuleId != widget.initialModuleId ||
+        oldWidget.initialViewId != widget.initialViewId) {
       if (reportModules.isEmpty) return;
-      final module = reportModules.where((m) => _text(m['id']) == _text(widget.initialModuleId)).toList();
+      final module = reportModules
+          .where((m) => _text(m['id']) == _text(widget.initialModuleId))
+          .toList();
       if (module.isNotEmpty) {
         _selectModule(module.first, preferredViewId: widget.initialViewId);
       }
@@ -801,7 +887,8 @@ class _ReportsPageState extends State<ReportsPage> {
           return _content();
         }
         if (!wide) {
-          final railHeight = math.min(360.0, math.max(230.0, constraints.maxHeight * .38));
+          final railHeight =
+              math.min(360.0, math.max(230.0, constraints.maxHeight * .38));
           return Column(
             children: [
               SizedBox(height: railHeight, child: _viewsRail()),
@@ -843,7 +930,8 @@ class _SimpleChart extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    if (points.isEmpty) return const Center(child: Text('No hay puntos para graficar.'));
+    if (points.isEmpty)
+      return const Center(child: Text('No hay puntos para graficar.'));
     return CustomPaint(
       painter: _SimpleChartPainter(points: points, chartType: chartType),
       child: const SizedBox.expand(),
@@ -859,15 +947,27 @@ class _SimpleChartPainter extends CustomPainter {
 
   String _normalizedType() {
     final t = chartType.toLowerCase().trim();
-    if (t.contains('barra_horizontal') || t.contains('horizontal_bar') || t.contains('bar_horizontal')) return 'barra_horizontal';
-    if (t.contains('barra') || t == 'bar' || t == 'column' || t == 'columna') return 'barra';
-    if (t.contains('circular') || t.contains('circulo') || t == 'pie' || t == 'pastel' || t == 'torta') return 'pie';
+    if (t.contains('barra_horizontal') ||
+        t.contains('horizontal_bar') ||
+        t.contains('bar_horizontal')) return 'barra_horizontal';
+    if (t.contains('barra') || t == 'bar' || t == 'column' || t == 'columna')
+      return 'barra';
+    if (t.contains('circular') ||
+        t.contains('circulo') ||
+        t == 'pie' ||
+        t == 'pastel' ||
+        t == 'torta') return 'pie';
     if (t == 'dona' || t == 'donut' || t.contains('anillo')) return 'dona';
-    if (t.contains('dispersion') || t == 'scatter' || t == 'xy') return 'dispersion';
+    if (t.contains('dispersion') || t == 'scatter' || t == 'xy')
+      return 'dispersion';
     if (t.contains('area')) return 'area';
     if (t.contains('escalon') || t == 'step' || t == 'stepline') return 'step';
     if (t.contains('lollipop') || t.contains('palito')) return 'lollipop';
-    if (t.contains('linea') || t.contains('línea') || t == 'line' || t == 'spline' || t == 'curva') return 'linea';
+    if (t.contains('linea') ||
+        t.contains('línea') ||
+        t == 'line' ||
+        t == 'spline' ||
+        t == 'curva') return 'linea';
     return t.isEmpty ? 'linea' : t;
   }
 
@@ -877,7 +977,8 @@ class _SimpleChartPainter extends CustomPainter {
     const right = 18.0;
     const top = 18.0;
     const bottom = 46.0;
-    final plot = Rect.fromLTRB(left, top, size.width - right, size.height - bottom);
+    final plot =
+        Rect.fromLTRB(left, top, size.width - right, size.height - bottom);
 
     final axisPaint = Paint()
       ..strokeWidth = 1
@@ -903,27 +1004,43 @@ class _SimpleChartPainter extends CustomPainter {
     for (var i = 1; i <= 4; i++) {
       final y = plot.bottom - (plot.height * i / 4);
       canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), gridPaint);
-      _drawText(canvas, (safeMax * i / 4).toStringAsFixed(1), Offset(4, y - 7), 10, const Color(0xFF555555));
+      _drawText(canvas, (safeMax * i / 4).toStringAsFixed(1), Offset(4, y - 7),
+          10, const Color(0xFF555555));
     }
 
     if (type == 'pie' || type == 'dona') {
-      final total = points.map((e) => e.y.abs()).fold<double>(0, (a, b) => a + b);
+      final total =
+          points.map((e) => e.y.abs()).fold<double>(0, (a, b) => a + b);
       if (total <= 0) return;
       final radius = math.min(plot.width, plot.height) / 2.4;
       final center = plot.center;
       var start = -math.pi / 2;
       final palette = <Color>[
-        const Color(0xFF1565C0), const Color(0xFF2E7D32), const Color(0xFFE65100), const Color(0xFF6A1B9A),
-        const Color(0xFF00838F), const Color(0xFFC62828), const Color(0xFF455A64), const Color(0xFF827717),
+        const Color(0xFF1565C0),
+        const Color(0xFF2E7D32),
+        const Color(0xFFE65100),
+        const Color(0xFF6A1B9A),
+        const Color(0xFF00838F),
+        const Color(0xFFC62828),
+        const Color(0xFF455A64),
+        const Color(0xFF827717),
       ];
       for (var i = 0; i < points.length; i++) {
         final sweep = (points[i].y.abs() / total) * math.pi * 2;
-        final paint = Paint()..style = PaintingStyle.fill..color = palette[i % palette.length].withOpacity(.82);
-        canvas.drawArc(Rect.fromCircle(center: center, radius: radius), start, sweep, true, paint);
+        final paint = Paint()
+          ..style = PaintingStyle.fill
+          ..color = palette[i % palette.length].withOpacity(.82);
+        canvas.drawArc(Rect.fromCircle(center: center, radius: radius), start,
+            sweep, true, paint);
         start += sweep;
       }
       if (type == 'dona') {
-        canvas.drawCircle(center, radius * .48, Paint()..style = PaintingStyle.fill..color = const Color(0xFFF8FAF4));
+        canvas.drawCircle(
+            center,
+            radius * .48,
+            Paint()
+              ..style = PaintingStyle.fill
+              ..color = const Color(0xFFF8FAF4));
       }
       return;
     }
@@ -935,7 +1052,9 @@ class _SimpleChartPainter extends CustomPainter {
         final p = points[i];
         final y = plot.top + gap * i + gap / 2;
         final x = plot.left + (p.y / safeMax) * plot.width;
-        canvas.drawRect(Rect.fromLTRB(plot.left, y - barHeight / 2, x, y + barHeight / 2), fillPaint);
+        canvas.drawRect(
+            Rect.fromLTRB(plot.left, y - barHeight / 2, x, y + barHeight / 2),
+            fillPaint);
         if (i % math.max(1, points.length ~/ 7) == 0) {
           _drawText(canvas, p.x, Offset(4, y - 7), 9, const Color(0xFF333333));
         }
@@ -950,9 +1069,12 @@ class _SimpleChartPainter extends CustomPainter {
         final p = points[i];
         final x = plot.left + gap * i + gap / 2;
         final y = plot.bottom - (p.y / safeMax) * plot.height;
-        canvas.drawRect(Rect.fromLTRB(x - barWidth / 2, y, x + barWidth / 2, plot.bottom), fillPaint);
+        canvas.drawRect(
+            Rect.fromLTRB(x - barWidth / 2, y, x + barWidth / 2, plot.bottom),
+            fillPaint);
         if (i % math.max(1, points.length ~/ 6) == 0) {
-          _drawRotatedText(canvas, p.x, Offset(x - 4, plot.bottom + 8), 10, const Color(0xFF333333));
+          _drawRotatedText(canvas, p.x, Offset(x - 4, plot.bottom + 8), 10,
+              const Color(0xFF333333));
         }
       }
       return;
@@ -961,7 +1083,9 @@ class _SimpleChartPainter extends CustomPainter {
     final path = Path();
     final areaPath = Path();
     for (var i = 0; i < points.length; i++) {
-      final x = points.length == 1 ? plot.center.dx : plot.left + (plot.width * i / (points.length - 1));
+      final x = points.length == 1
+          ? plot.center.dx
+          : plot.left + (plot.width * i / (points.length - 1));
       final y = plot.bottom - (points[i].y / safeMax) * plot.height;
       if (i == 0) {
         path.moveTo(x, y);
@@ -971,29 +1095,43 @@ class _SimpleChartPainter extends CustomPainter {
         path.lineTo(x, y);
         areaPath.lineTo(x, y);
       }
-      canvas.drawCircle(Offset(x, y), type == 'dispersion' || type == 'lollipop' ? 4.5 : 3, fillPaint);
+      canvas.drawCircle(Offset(x, y),
+          type == 'dispersion' || type == 'lollipop' ? 4.5 : 3, fillPaint);
       if (type == 'lollipop') {
         canvas.drawLine(Offset(x, plot.bottom), Offset(x, y), dataPaint);
       }
       if (i % math.max(1, points.length ~/ 6) == 0) {
-        _drawRotatedText(canvas, points[i].x, Offset(x - 4, plot.bottom + 8), 10, const Color(0xFF333333));
+        _drawRotatedText(canvas, points[i].x, Offset(x - 4, plot.bottom + 8),
+            10, const Color(0xFF333333));
       }
     }
     if (type == 'area') {
       areaPath.lineTo(plot.right, plot.bottom);
       areaPath.close();
-      canvas.drawPath(areaPath, Paint()..style = PaintingStyle.fill..color = const Color(0xFF1565C0).withOpacity(.18));
+      canvas.drawPath(
+          areaPath,
+          Paint()
+            ..style = PaintingStyle.fill
+            ..color = const Color(0xFF1565C0).withOpacity(.18));
     }
     if (type == 'step') {
       final stepPath = Path();
       for (var i = 0; i < points.length; i++) {
-        final x = points.length == 1 ? plot.center.dx : plot.left + (plot.width * i / (points.length - 1));
+        final x = points.length == 1
+            ? plot.center.dx
+            : plot.left + (plot.width * i / (points.length - 1));
         final y = plot.bottom - (points[i].y / safeMax) * plot.height;
         if (i == 0) {
           stepPath.moveTo(x, y);
         } else {
-          final previousX = points.length == 1 ? plot.center.dx : plot.left + (plot.width * (i - 1) / (points.length - 1));
-          stepPath.lineTo(x, stepPath.getBounds().isEmpty ? y : plot.bottom - (points[i - 1].y / safeMax) * plot.height);
+          final previousX = points.length == 1
+              ? plot.center.dx
+              : plot.left + (plot.width * (i - 1) / (points.length - 1));
+          stepPath.lineTo(
+              x,
+              stepPath.getBounds().isEmpty
+                  ? y
+                  : plot.bottom - (points[i - 1].y / safeMax) * plot.height);
           stepPath.lineTo(x, y);
         }
       }
@@ -1003,19 +1141,23 @@ class _SimpleChartPainter extends CustomPainter {
     }
   }
 
-  void _drawText(Canvas canvas, String text, Offset offset, double size, Color color) {
+  void _drawText(
+      Canvas canvas, String text, Offset offset, double size, Color color) {
     final tp = TextPainter(
-      text: TextSpan(text: text, style: TextStyle(fontSize: size, color: color)),
+      text:
+          TextSpan(text: text, style: TextStyle(fontSize: size, color: color)),
       textDirection: TextDirection.ltr,
       maxLines: 1,
     )..layout(maxWidth: 44);
     tp.paint(canvas, offset);
   }
 
-  void _drawRotatedText(Canvas canvas, String text, Offset offset, double size, Color color) {
+  void _drawRotatedText(
+      Canvas canvas, String text, Offset offset, double size, Color color) {
     final short = text.length > 12 ? '${text.substring(0, 12)}…' : text;
     final tp = TextPainter(
-      text: TextSpan(text: short, style: TextStyle(fontSize: size, color: color)),
+      text:
+          TextSpan(text: short, style: TextStyle(fontSize: size, color: color)),
       textDirection: TextDirection.ltr,
       maxLines: 1,
     )..layout(maxWidth: 80);
@@ -1037,7 +1179,6 @@ class _SimpleTable extends StatelessWidget {
 
   const _SimpleTable({required this.rows});
 
-
   @override
   Widget build(BuildContext context) {
     if (rows.isEmpty) return const SizedBox.shrink();
@@ -1051,7 +1192,9 @@ class _SimpleTable extends StatelessWidget {
             columns: columns.map((c) => DataColumn(label: Text(c))).toList(),
             rows: rows.take(100).map((row) {
               return DataRow(
-                cells: columns.map((c) => DataCell(Text(row[c]?.toString() ?? ''))).toList(),
+                cells: columns
+                    .map((c) => DataCell(Text(row[c]?.toString() ?? '')))
+                    .toList(),
               );
             }).toList(),
           ),

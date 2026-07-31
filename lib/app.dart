@@ -45,6 +45,46 @@ class _AppGTState extends State<AppGT> {
       navigatorKey: _navigatorKey,
       debugShowCheckedModeBanner: false,
       title: 'Zumac',
+      builder: (context, child) {
+        final width = MediaQuery.sizeOf(context).width;
+        final scale = (width / 1440).clamp(1.0, 1.12).toDouble();
+        final controlHeight = (44 * scale).clamp(44.0, 50.0).toDouble();
+        final base = Theme.of(context);
+        final radius = RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        );
+        return Theme(
+          data: base.copyWith(
+            textTheme: base.textTheme.apply(fontSizeFactor: scale),
+            inputDecorationTheme: base.inputDecorationTheme.copyWith(
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12 * scale,
+                vertical: 11 * scale,
+              ),
+            ),
+            filledButtonTheme: FilledButtonThemeData(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF0D5F78),
+                foregroundColor: Colors.white,
+                minimumSize: Size(0, controlHeight),
+                shape: radius,
+              ),
+            ),
+            outlinedButtonTheme: OutlinedButtonThemeData(
+              style: OutlinedButton.styleFrom(
+                minimumSize: Size(0, controlHeight),
+                shape: radius,
+              ),
+            ),
+            iconButtonTheme: IconButtonThemeData(
+              style: IconButton.styleFrom(
+                minimumSize: Size.square(width < 600 ? 44 : 46),
+              ),
+            ),
+          ),
+          child: child ?? const SizedBox.shrink(),
+        );
+      },
       theme: ThemeData(
         useMaterial3: true,
         colorSchemeSeed: const Color(0xFF0D5F78),

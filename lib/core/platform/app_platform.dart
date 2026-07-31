@@ -9,5 +9,8 @@ bool get isDesktopRuntime {
 }
 
 bool isWideDesktopLayout(BuildContext context) {
-  return isDesktopRuntime && MediaQuery.sizeOf(context).width >= 900;
+  // Web y escritorio comparten la misma experiencia cuando hay espacio.
+  // En pantallas angostas se conserva la navegación táctil/responsive.
+  return (isDesktopRuntime || kIsWeb) &&
+      MediaQuery.sizeOf(context).width >= 900;
 }

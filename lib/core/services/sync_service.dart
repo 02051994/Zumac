@@ -387,10 +387,12 @@ class SyncService {
 
       final formula = _cleanNullable(f['formula_funcion']);
       final lookupMatch = RegExp(
-              r'(?:LOOKU[PR]|LOOKUP|BUSCAR)\s*\(\s*([^,;\)]+)',
+              r'(?:LOOKU[PR]|LOOKUP|BUSCAR|LISTA|LIST)\s*\(\s*([^,;\)]+)',
               caseSensitive: false)
           .firstMatch(formula);
-      final lookupTable = lookupMatch?.group(1)?.trim() ?? '';
+      final lookupTable = (lookupMatch?.group(1)?.trim() ?? '')
+          .replaceAll('"', '')
+          .replaceAll("'", '');
       if (lookupTable.isNotEmpty &&
           !_excludedOfflineSourceTables.contains(lookupTable))
         sourceTables.add(lookupTable);
@@ -810,6 +812,7 @@ class SyncService {
 
   Future<void> downloadAllForOffline(
       {bool allowFullFallback = true,
+      bool forceConfigurationRefresh = false,
       void Function(String message)? onProgress}) async {
     void progress(String message) => onProgress?.call(message);
     progress('Consultando cambios...');
@@ -854,6 +857,24 @@ class SyncService {
     // marca local bootstrap_last_sync_at.
     final changedTables =
         hasCache ? await _changedTablesSince(previousSync) : null;
+    if (hasCache &&
+        changedTables != null &&
+        changedTables.isEmpty &&
+        !forceConfigurationRefresh) {
+      progress('Los datos ya están al día. Verificando permisos...');
+      await _yieldToUi();
+      await refreshLoginPermissionsOnly();
+      await _local.setMetaValues({
+        'bootstrap_last_sync_at': syncCheckpoint,
+        'sync_checkpoint_config_at': syncCheckpoint,
+        'sync_checkpoint_data_at': syncCheckpoint,
+        'sync_checkpoint_permissions_at': syncCheckpoint,
+        'sync_checkpoint_matrices_at': syncCheckpoint,
+      });
+      progress('No hay cambios nuevos.');
+      await _yieldToUi();
+      return;
+    }
     progress('Descargando paquete incremental...');
     await _yieldToUi();
     final bootstrap = await _tryBootstrapRpc(
@@ -986,8 +1007,10 @@ class SyncService {
             const Duration(hours: 24);
     final configChanged = changedTables == null ||
         configTables.any((table) => _tableChanged(changedTables, table));
-    final refreshFullConfig =
-        !incremental || configChanged || periodicSafetyRefresh;
+    final refreshFullConfig = forceConfigurationRefresh ||
+        !incremental ||
+        configChanged ||
+        periodicSafetyRefresh;
 
     if (refreshFullConfig) {
       progress('Actualizando configuración...');
@@ -1172,6 +1195,9 @@ class SyncService {
                 'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'nombre': e['nombre'],
                 'seccion': e['seccion']?.toString().trim() ?? '',
+                'icono': e['icono']?.toString() ?? 'apps',
+                'color': e['color']?.toString(),
+                'rubro_id': e['rubro_id']?.toString(),
                 'orden': e['orden'] ?? 0,
                 'activo': _activeInt(e),
               })
@@ -1189,9 +1215,20 @@ class SyncService {
                 'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'modulo_id': e['modulo_id'],
                 'nombre': e['nombre'],
+                'rubro_id': e['rubro_id']?.toString(),
                 'tabla_destino': e['tabla_destino'],
                 'ruta_flutter': e['ruta_flutter'],
                 'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
+                'capacidades': e['capacidades'] is Map
+                    ? jsonEncode(e['capacidades'])
+                    : (e['capacidades']?.toString() ?? '{}'),
+                'flujo_estados': e['flujo_estados'] is List
+                    ? jsonEncode(e['flujo_estados'])
+                    : (e['flujo_estados']?.toString() ?? '[]'),
+                'workflow_enabled': _boolValue(e['workflow_enabled']) ? 1 : 0,
+                'geolocation_enabled':
+                    _boolValue(e['geolocation_enabled']) ? 1 : 0,
+                'approvals_enabled': _boolValue(e['approvals_enabled']) ? 1 : 0,
                 'orden': e['orden'] ?? 0,
                 'activo': _activeInt(e),
               })
@@ -1209,6 +1246,7 @@ class SyncService {
                 'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
                 'formato_id': e['formato_id'],
                 'nombre': e['nombre'],
+                'rubro_id': e['rubro_id']?.toString(),
                 'tabla_destino': e['tabla_destino'],
                 'orden': e['orden'] ?? 0,
                 'tipo_relacion':
@@ -1268,6 +1306,8 @@ class SyncService {
                 'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
                 'can_export': _boolValue(e['can_export']) ? 1 : 0,
                 'can_import': _boolValue(e['can_import']) ? 1 : 0,
+                'can_review': _boolValue(e['can_review']) ? 1 : 0,
+                'can_approve': _boolValue(e['can_approve']) ? 1 : 0,
                 'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
                 'can_complete_pending':
                     _boolValue(e['can_complete_pending']) ? 1 : 0,
@@ -1352,14 +1392,14 @@ class SyncService {
       sections
           .map((e) {
             final id = e['id']?.toString() ?? '';
-        return {
-          'id': id,
-          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
-          'nombre': e['nombre']?.toString() ?? id,
+            return {
+              'id': id,
+              'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+              'nombre': e['nombre']?.toString() ?? id,
               'icono': e['icono']?.toString() ?? 'apps',
+              'color': e['color']?.toString(),
               'rubro_id': e['rubro_id']?.toString(),
-              'tipo_contenido':
-                  e['tipo_contenido']?.toString() ?? 'GENERICO',
+              'tipo_contenido': e['tipo_contenido']?.toString() ?? 'GENERICO',
               'ruta_flutter': e['ruta_flutter']?.toString(),
               'orden': e['orden'] ?? 0,
               'numero_decimales': e['numero_decimales'],
@@ -1383,10 +1423,10 @@ class SyncService {
                 ? e['seccion'].toString().trim()
                 : (e['seccion_id']?.toString().trim() ?? '');
             final userId = e['user_id']?.toString() ?? '';
-        return {
-          'id': e['id']?.toString() ?? '${userId}_$sectionId',
-          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
-          'user_id': userId,
+            return {
+              'id': e['id']?.toString() ?? '${userId}_$sectionId',
+              'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+              'user_id': userId,
               'seccion_id': sectionId,
               'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
               'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
@@ -1434,6 +1474,11 @@ class SyncService {
         'tipo_ui': e['tipo_ui'] ?? e['tipo_control'] ?? e['tipo'] ?? 'text',
         'id_campo_dropdown': e['id_campo_dropdown']?.toString(),
         'formula_funcion': (e['formula_funcion'] ?? e['formula'])?.toString(),
+        'formula_tipo': e['formula_tipo']?.toString(),
+        'formula_tabla_origen': e['formula_tabla_origen']?.toString(),
+        'formula_campo_valor': e['formula_campo_valor']?.toString(),
+        'formula_campo_condicion': e['formula_campo_condicion']?.toString(),
+        'formula_valor_condicion': e['formula_valor_condicion']?.toString(),
         'valor_default': e['valor_default']?.toString(),
         'id_generador': e['id_generador']?.toString(),
         'editable': e['editable'] == false ? 0 : 1,
@@ -1513,6 +1558,12 @@ class SyncService {
           'condición formato',
           'formato_condicional'
         ])?.toString(),
+        'condicion_color_texto':
+            _valueByColumn(e, ['condicion_color_texto'])?.toString(),
+        'condicion_color_fondo':
+            _valueByColumn(e, ['condicion_color_fondo'])?.toString(),
+        'condicion_color_borde':
+            _valueByColumn(e, ['condicion_color_borde'])?.toString(),
         'color_texto':
             _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])
                 ?.toString(),
@@ -1522,6 +1573,7 @@ class SyncService {
         'color_borde':
             _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])
                 ?.toString(),
+        'tamanio_letra': _valueByColumn(e, ['tamanio_letra', 'tamano_letra']),
         'aplicar_formato_condicional_tabla': _boolValueOrDefault(
                 _valueByColumn(e, [
                   'aplicar_formato_condicional_tabla',
@@ -1541,6 +1593,13 @@ class SyncService {
           'fila_subtitulo',
           'fila subtitulo'
         ]),
+        'subtitulo_alineacion':
+            _valueByColumn(e, ['subtitulo_alineacion'])?.toString(),
+        'subtitulo_tamanio_letra':
+            _valueByColumn(e, ['subtitulo_tamanio_letra']),
+        'subtitulo_color': _valueByColumn(e, ['subtitulo_color'])?.toString(),
+        'subtitulo_padding':
+            _valueByColumn(e, ['subtitulo_padding'])?.toString(),
         'grupo_captura':
             _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
         'titulo1':
@@ -1555,6 +1614,16 @@ class SyncService {
         'codigo2':
             _valueByColumn(e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])
                 ?.toString(),
+        'titulo1_alineacion':
+            _valueByColumn(e, ['titulo1_alineacion'])?.toString(),
+        'titulo1_tamanio_letra': _valueByColumn(e, ['titulo1_tamanio_letra']),
+        'titulo1_color': _valueByColumn(e, ['titulo1_color'])?.toString(),
+        'titulo1_padding': _valueByColumn(e, ['titulo1_padding'])?.toString(),
+        'titulo2_alineacion':
+            _valueByColumn(e, ['titulo2_alineacion'])?.toString(),
+        'titulo2_tamanio_letra': _valueByColumn(e, ['titulo2_tamanio_letra']),
+        'titulo2_color': _valueByColumn(e, ['titulo2_color'])?.toString(),
+        'titulo2_padding': _valueByColumn(e, ['titulo2_padding'])?.toString(),
         'activo': _activeInt(e),
       });
     }
@@ -1572,7 +1641,13 @@ class SyncService {
       if (turno.isEmpty) continue;
       lotesRows[turno] = {
         'turno': turno,
-        'variedad': e['VARIEDAD']?.toString().trim() ?? ''
+        'variedad': e['VARIEDAD']?.toString().trim() ?? '',
+        'latitud': _valueByColumn(e, ['LATITUD', 'LATITUDE']),
+        'longitud': _valueByColumn(e, ['LONGITUD', 'LONGITUDE']),
+        'precision_gps':
+            _valueByColumn(e, ['PRECISION_GPS', 'PRECISION GPS', 'ACCURACY']),
+        'fecha_gps':
+            _valueByColumn(e, ['FECHA_GPS', 'FECHA GPS', 'GPS_AT'])?.toString(),
       };
     }
     await saveLocal(
@@ -1698,7 +1773,8 @@ class SyncService {
       final number = normalized['numero_version']?.toString().trim() ?? '';
       final version = normalized['version']?.toString().trim() ?? '';
       final publishedAt = normalized['published_at']?.toString().trim() ?? '';
-      if (number.isNotEmpty) checkpoints['configuration_version_number'] = number;
+      if (number.isNotEmpty)
+        checkpoints['configuration_version_number'] = number;
       if (version.isNotEmpty) checkpoints['configuration_version'] = version;
       if (publishedAt.isNotEmpty) {
         checkpoints['configuration_published_at'] = publishedAt;
@@ -1719,25 +1795,22 @@ class SyncService {
     if (user == null) return;
     final activeEmpresaId = await LocalSession().cachedEmpresaId();
 
-    final profileRows = await _supabase
-        .from('PERFILES_DE_USUARIOS_APPGT')
-        .select()
-        .eq('id', user.id);
+    final results = await Future.wait<dynamic>([
+      _supabase.from('PERFILES_DE_USUARIOS_APPGT').select().eq('id', user.id),
+      _supabase
+          .from('PERMISOS_DE_USUARIOS_APPGT')
+          .select()
+          .eq('user_id', user.id),
+      _supabase
+          .from('PERMISOS_SECCIONES_APPGT')
+          .select()
+          .eq('user_id', user.id),
+    ]);
 
-    final permissionRows = await _supabase
-        .from('PERMISOS_DE_USUARIOS_APPGT')
-        .select()
-        .eq('user_id', user.id);
-
-    final sectionPermissionRows = await _supabase
-        .from('PERMISOS_SECCIONES_APPGT')
-        .select()
-        .eq('user_id', user.id);
-
-    final profiles = List<Map<String, dynamic>>.from(profileRows as List);
-    final permissions = List<Map<String, dynamic>>.from(permissionRows as List);
+    final profiles = List<Map<String, dynamic>>.from(results[0] as List);
+    final permissions = List<Map<String, dynamic>>.from(results[1] as List);
     final sectionPermissions =
-        List<Map<String, dynamic>>.from(sectionPermissionRows as List);
+        List<Map<String, dynamic>>.from(results[2] as List);
 
     await _local.upsertTable(
       'local_profile',
@@ -1807,10 +1880,10 @@ class SyncService {
                 ? e['seccion'].toString().trim()
                 : (e['seccion_id']?.toString().trim() ?? '');
             final userId = e['user_id']?.toString() ?? '';
-        return {
-          'id': e['id']?.toString() ?? '${userId}_$sectionId',
-          'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
-          'user_id': userId,
+            return {
+              'id': e['id']?.toString() ?? '${userId}_$sectionId',
+              'empresa_id': e['empresa_id']?.toString() ?? activeEmpresaId,
+              'user_id': userId,
               'seccion_id': sectionId,
               'can_view': (!_isDeletedRow(e) && _activeInt(e) == 1) ? 1 : 0,
               'can_insert': _boolValue(e['can_insert']) ? 1 : 0,
@@ -1967,8 +2040,7 @@ class SyncService {
       'MATRIZ_FORMULAS_APPGT',
     ]) {
       try {
-        dynamicSourceRows[matrixTable] =
-            await _selectAllRowsPaged(matrixTable);
+        dynamicSourceRows[matrixTable] = await _selectAllRowsPaged(matrixTable);
       } catch (_) {
         // Compatibilidad temporal con proyectos que aun no aplicaron la matriz.
       }
@@ -1997,6 +2069,9 @@ class SyncService {
                 'id': e['id'],
                 'nombre': e['nombre'],
                 'seccion': e['seccion']?.toString().trim() ?? '',
+                'icono': e['icono']?.toString() ?? 'apps',
+                'color': e['color']?.toString(),
+                'rubro_id': e['rubro_id']?.toString(),
                 'orden': e['orden'] ?? 0,
                 'activo': _activeInt(e),
               })
@@ -2010,9 +2085,20 @@ class SyncService {
                 'id': e['id'],
                 'modulo_id': e['modulo_id'],
                 'nombre': e['nombre'],
+                'rubro_id': e['rubro_id']?.toString(),
                 'tabla_destino': e['tabla_destino'],
                 'ruta_flutter': e['ruta_flutter'],
                 'tabla_visible_app': _boolValue(e['tabla_visible_app']) ? 1 : 0,
+                'capacidades': e['capacidades'] is Map
+                    ? jsonEncode(e['capacidades'])
+                    : (e['capacidades']?.toString() ?? '{}'),
+                'flujo_estados': e['flujo_estados'] is List
+                    ? jsonEncode(e['flujo_estados'])
+                    : (e['flujo_estados']?.toString() ?? '[]'),
+                'workflow_enabled': _boolValue(e['workflow_enabled']) ? 1 : 0,
+                'geolocation_enabled':
+                    _boolValue(e['geolocation_enabled']) ? 1 : 0,
+                'approvals_enabled': _boolValue(e['approvals_enabled']) ? 1 : 0,
                 'orden': e['orden'] ?? 0,
                 'activo': 1,
               })
@@ -2026,6 +2112,7 @@ class SyncService {
                 'id': e['id'],
                 'formato_id': e['formato_id'],
                 'nombre': e['nombre'],
+                'rubro_id': e['rubro_id']?.toString(),
                 'tabla_destino': e['tabla_destino'],
                 'orden': e['orden'] ?? 0,
                 'tipo_relacion':
@@ -2081,6 +2168,8 @@ class SyncService {
                 'can_delete': _boolValue(e['can_delete']) ? 1 : 0,
                 'can_export': _boolValue(e['can_export']) ? 1 : 0,
                 'can_import': _boolValue(e['can_import']) ? 1 : 0,
+                'can_review': _boolValue(e['can_review']) ? 1 : 0,
+                'can_approve': _boolValue(e['can_approve']) ? 1 : 0,
                 'can_view_pending': _boolValue(e['can_view_pending']) ? 1 : 0,
                 'can_complete_pending':
                     _boolValue(e['can_complete_pending']) ? 1 : 0,
@@ -2159,9 +2248,9 @@ class SyncService {
               'id': id,
               'nombre': e['nombre']?.toString() ?? id,
               'icono': e['icono']?.toString() ?? 'apps',
+              'color': e['color']?.toString(),
               'rubro_id': e['rubro_id']?.toString(),
-              'tipo_contenido':
-                  e['tipo_contenido']?.toString() ?? 'GENERICO',
+              'tipo_contenido': e['tipo_contenido']?.toString() ?? 'GENERICO',
               'ruta_flutter': e['ruta_flutter']?.toString(),
               'orden': e['orden'] ?? 0,
               'numero_decimales': e['numero_decimales'],
@@ -2225,6 +2314,11 @@ class SyncService {
           'tipo_ui': e['tipo_ui'] ?? e['tipo_control'] ?? e['tipo'] ?? 'text',
           'id_campo_dropdown': e['id_campo_dropdown']?.toString(),
           'formula_funcion': (e['formula_funcion'] ?? e['formula'])?.toString(),
+          'formula_tipo': e['formula_tipo']?.toString(),
+          'formula_tabla_origen': e['formula_tabla_origen']?.toString(),
+          'formula_campo_valor': e['formula_campo_valor']?.toString(),
+          'formula_campo_condicion': e['formula_campo_condicion']?.toString(),
+          'formula_valor_condicion': e['formula_valor_condicion']?.toString(),
           'valor_default': e['valor_default']?.toString(),
           'id_generador': e['id_generador']?.toString(),
           'editable': e['editable'] == false ? 0 : 1,
@@ -2296,6 +2390,12 @@ class SyncService {
             'condición formato',
             'formato_condicional'
           ])?.toString(),
+          'condicion_color_texto':
+              _valueByColumn(e, ['condicion_color_texto'])?.toString(),
+          'condicion_color_fondo':
+              _valueByColumn(e, ['condicion_color_fondo'])?.toString(),
+          'condicion_color_borde':
+              _valueByColumn(e, ['condicion_color_borde'])?.toString(),
           'color_texto':
               _valueByColumn(e, ['color_texto', 'color texto', 'texto_color'])
                   ?.toString(),
@@ -2305,6 +2405,7 @@ class SyncService {
           'color_borde':
               _valueByColumn(e, ['color_borde', 'color borde', 'borde_color'])
                   ?.toString(),
+          'tamanio_letra': _valueByColumn(e, ['tamanio_letra', 'tamano_letra']),
           'aplicar_formato_condicional_tabla': _boolValueOrDefault(
                   _valueByColumn(e, [
                     'aplicar_formato_condicional_tabla',
@@ -2324,6 +2425,13 @@ class SyncService {
             'fila_subtitulo',
             'fila subtitulo'
           ]),
+          'subtitulo_alineacion':
+              _valueByColumn(e, ['subtitulo_alineacion'])?.toString(),
+          'subtitulo_tamanio_letra':
+              _valueByColumn(e, ['subtitulo_tamanio_letra']),
+          'subtitulo_color': _valueByColumn(e, ['subtitulo_color'])?.toString(),
+          'subtitulo_padding':
+              _valueByColumn(e, ['subtitulo_padding'])?.toString(),
           'grupo_captura':
               _valueByColumn(e, ['grupo_captura', 'grupo captura'])?.toString(),
           'titulo1': _valueByColumn(
@@ -2334,6 +2442,16 @@ class SyncService {
               e, ['codigo1', 'codigo_1', 'codigo v1', 'codigo_v1'])?.toString(),
           'codigo2': _valueByColumn(
               e, ['codigo2', 'codigo_2', 'codigo v2', 'codigo_v2'])?.toString(),
+          'titulo1_alineacion':
+              _valueByColumn(e, ['titulo1_alineacion'])?.toString(),
+          'titulo1_tamanio_letra': _valueByColumn(e, ['titulo1_tamanio_letra']),
+          'titulo1_color': _valueByColumn(e, ['titulo1_color'])?.toString(),
+          'titulo1_padding': _valueByColumn(e, ['titulo1_padding'])?.toString(),
+          'titulo2_alineacion':
+              _valueByColumn(e, ['titulo2_alineacion'])?.toString(),
+          'titulo2_tamanio_letra': _valueByColumn(e, ['titulo2_tamanio_letra']),
+          'titulo2_color': _valueByColumn(e, ['titulo2_color'])?.toString(),
+          'titulo2_padding': _valueByColumn(e, ['titulo2_padding'])?.toString(),
           'activo': 1,
         });
       }
@@ -2411,6 +2529,12 @@ class SyncService {
       lotesRows[turno] = {
         'turno': turno,
         'variedad': e['VARIEDAD']?.toString().trim() ?? '',
+        'latitud': _valueByColumn(e, ['LATITUD', 'LATITUDE']),
+        'longitud': _valueByColumn(e, ['LONGITUD', 'LONGITUDE']),
+        'precision_gps':
+            _valueByColumn(e, ['PRECISION_GPS', 'PRECISION GPS', 'ACCURACY']),
+        'fecha_gps':
+            _valueByColumn(e, ['FECHA_GPS', 'FECHA GPS', 'GPS_AT'])?.toString(),
       };
     }
     await _local.replaceTable(
@@ -2533,8 +2657,7 @@ class SyncService {
   }) async {
     final cleaned = Map<String, dynamic>.from(payload);
     final rawTable = queueRow['tabla_destino']?.toString() ?? 'tabla';
-    final table =
-        _sanitizePathPart(rawTable);
+    final table = _sanitizePathPart(rawTable);
     final modulo =
         _sanitizePathPart(queueRow['modulo_id']?.toString() ?? 'modulo');
     final formato =
@@ -2572,7 +2695,9 @@ class SyncService {
           final empresaId = queueRow['empresa_id']?.toString().trim() ?? '';
           final userId = _supabase.auth.currentUser?.id ?? '';
           final storedId = queueRow['id_local']?.toString().trim() ?? '';
-          if (empresaId.isNotEmpty && userId.isNotEmpty && storedId.isNotEmpty) {
+          if (empresaId.isNotEmpty &&
+              userId.isNotEmpty &&
+              storedId.isNotEmpty) {
             await _supabase.from('ARCHIVOS_EVIDENCIA_APPGT').upsert(
               {
                 'empresa_id': empresaId,
@@ -2628,11 +2753,8 @@ class SyncService {
     if (idLocal.isEmpty || baseUpdatedAt.isEmpty) return null;
 
     try {
-      final rows = await _supabase
-          .from(table)
-          .select()
-          .eq('id_local', idLocal)
-          .limit(1);
+      final rows =
+          await _supabase.from(table).select().eq('id_local', idLocal).limit(1);
       if (rows.isEmpty) return null;
       final remote = Map<String, dynamic>.from(rows.first);
       final remoteUpdatedAt =

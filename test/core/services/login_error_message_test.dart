@@ -16,12 +16,13 @@ void main() {
         isNot('Se necesita conexión a internet para actualizar datos.'));
   });
 
-  test('una falla real de transporte identifica a Supabase', () {
+  test('una falla real de transporte usa un mensaje no técnico', () {
     final message = friendlyLoginError(
       Exception('SocketException: Failed host lookup'),
     );
 
-    expect(message, contains('no pudo contactar a Supabase'));
+    expect(message, contains('no pudo contactar al servicio en línea'));
+    expect(message, isNot(contains('Supabase')));
     expect(message, contains('Failed host lookup'));
   });
 }

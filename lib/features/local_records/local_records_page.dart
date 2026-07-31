@@ -26,6 +26,8 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
   final ScrollController _recordsHorizontalCtrl = ScrollController();
   final ScrollController _dialogVerticalCtrl = ScrollController();
   Map<String, _MasterDetailMeta> _masterDetailByFormat = {};
+  Map<String, String> _formatNames = {};
+  Map<String, String> _tableNames = {};
 
 
   @override
@@ -61,6 +63,7 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
       empresaId: await session.cachedEmpresaId(),
     );
     _masterDetailByFormat = await _loadMasterDetailMetas();
+    await _loadVisualNames();
 
     final grouped = <String, Map<String, dynamic>>{};
     final siblingIds = <String, List<String>>{};
@@ -126,6 +129,40 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
       );
     }
     return out;
+  }
+
+  Future<void> _loadVisualNames() async {
+    final formatRows = await local.getAll('local_formats', orderBy: 'orden');
+    final tableRows = await local.getAll('local_format_tables', orderBy: 'orden');
+    _formatNames = {
+      for (final row in formatRows)
+        if ((row['id']?.toString().trim() ?? '').isNotEmpty)
+          row['id'].toString().trim().toUpperCase():
+              row['nombre']?.toString().trim() ?? 'Formato',
+    };
+    _tableNames = {};
+    for (final row in tableRows) {
+      final physical = row['tabla_destino']?.toString().trim() ?? '';
+      if (physical.isEmpty) continue;
+      final label = row['nombre_tabla']?.toString().trim().isNotEmpty == true
+          ? row['nombre_tabla'].toString().trim()
+          : row['nombre']?.toString().trim().isNotEmpty == true
+              ? row['nombre'].toString().trim()
+              : _formatNames[
+                      row['formato_id']?.toString().trim().toUpperCase() ?? ''] ??
+                  'Registros';
+      _tableNames[physical.toUpperCase()] = label;
+    }
+  }
+
+  String _formatVisualName(dynamic formatId) {
+    final id = formatId?.toString().trim() ?? '';
+    return _formatNames[id.toUpperCase()] ?? 'Formato';
+  }
+
+  String _tableVisualName(dynamic table, {dynamic formatId}) {
+    final physical = table?.toString().trim() ?? '';
+    return _tableNames[physical.toUpperCase()] ?? _formatVisualName(formatId);
   }
 
   bool _isHeaderTableConfig(Map<String, dynamic> row) {
@@ -222,7 +259,7 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
   }
 
   String _title(Map<String, dynamic> row) {
-    final formato = row['formato_id']?.toString() ?? 'formato';
+    final formato = _formatVisualName(row['formato_id']);
     final count = row['__sibling_count'] is int ? row['__sibling_count'] as int : 1;
     if (row['__is_master_detail_group'] == true) {
       return '$formato · maestro-detalle · $count registros';
@@ -358,7 +395,7 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar registros seleccionados'),
-        content: Text('Se eliminarán ${selectedRows.length} registro(s) local(es). Esta acción no toca Supabase.'),
+        content: Text('Se eliminarán ${selectedRows.length} registro(s) de este dispositivo. Los datos ya sincronizados no cambiarán.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
@@ -497,7 +534,16 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(table, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800, color: const Color(0xFF123A56))),
+            Text(
+              _tableVisualName(
+                table,
+                formatId: localRows.isEmpty ? null : localRows.first['formato_id'],
+              ),
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF123A56),
+                  ),
+            ),
             const SizedBox(height: 8),
             Container(
               width: double.infinity,
@@ -679,7 +725,7 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Eliminar registro local'),
-        content: const Text('Solo se eliminará del celular. Esta acción no toca Supabase.'),
+        content: const Text('Solo se eliminará del celular. Los datos ya sincronizados no cambiarán.'),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
           FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Eliminar')),
@@ -979,12 +1025,11 @@ class _MasterDetailLocalEditorPage extends StatelessWidget {
       final iter = parentState._iterationOf(row, meta);
       return iter > 0 ? 'Muestra $iter' : 'Muestra';
     }
-    return table;
+    return parentState._tableVisualName(table, formatId: formatoId);
   }
 
   String _subtitleForRow(Map<String, dynamic> row) {
     final parts = <String>[
-      row['tabla_destino']?.toString() ?? '',
       row['created_at']?.toString() ?? '',
     ].where((e) => e.trim().isNotEmpty).toList();
     final error = row['error_mensaje']?.toString() ?? '';
@@ -1006,7 +1051,7 @@ class _MasterDetailLocalEditorPage extends StatelessWidget {
               columns: const [
                 DataColumn(label: Text('Estado')),
                 DataColumn(label: Text('Tipo')),
-                DataColumn(label: Text('Tabla')),
+                DataColumn(label: Text('Vista')),
                 DataColumn(label: Text('Fecha-Hora creación')),
                 DataColumn(label: Text('Error')),
                 DataColumn(label: Text('Acción')),
@@ -1016,7 +1061,10 @@ class _MasterDetailLocalEditorPage extends StatelessWidget {
                 return DataRow(cells: [
                   DataCell(Icon(synced ? Icons.lock_outline : Icons.edit_note, color: synced ? Colors.green : Colors.orange)),
                   DataCell(Text(_titleForRow(row))),
-                  DataCell(Text(row['tabla_destino']?.toString() ?? '')),
+                  DataCell(Text(parentState._tableVisualName(
+                    row['tabla_destino'],
+                    formatId: row['formato_id'],
+                  ))),
                   DataCell(Text(parentState._formatDateTime(row['created_at']))),
                   DataCell(parentState._errorLink(row['error_mensaje']?.toString() ?? '')),
                   DataCell(synced

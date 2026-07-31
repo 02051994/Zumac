@@ -1,13 +1,24 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../core/services/app_experience_service.dart';
+import '../../core/widgets/configuration_icon_catalog.dart';
+import '../../core/widgets/responsive_layout.dart';
 import 'configuration_admin_repository.dart';
 import 'configuration_entity_wizard_page.dart';
 import 'configuration_preview_page.dart';
 import 'format_structure_wizard_page.dart';
-import '../users/users_page.dart';
+
+enum CreatorEntryMode { create, edit }
 
 class ConfigurationAdminPage extends StatefulWidget {
-  const ConfigurationAdminPage({super.key});
+  const ConfigurationAdminPage({
+    super.key,
+    this.initialMode = CreatorEntryMode.create,
+  });
+
+  final CreatorEntryMode initialMode;
 
   @override
   State<ConfigurationAdminPage> createState() => _ConfigurationAdminPageState();
@@ -15,8 +26,12 @@ class ConfigurationAdminPage extends StatefulWidget {
 
 class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   final repository = ConfigurationAdminRepository();
+  final experience = AppExperienceService();
+  final pageScrollController = ScrollController();
+  final publishedSearchController = TextEditingController();
 
   bool loading = true;
+  bool refreshing = false;
   bool actionRunning = false;
   bool publicationPendingSync = false;
   String? error;
@@ -24,6 +39,13 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   List<Map<String, dynamic>> drafts = [];
   List<Map<String, dynamic>> publishedConfigurations = [];
   String publishedSearch = '';
+  String? selectedBuilderRubroId;
+  String? selectedPublishedRubroId;
+  bool experienceRestored = false;
+  Timer? persistViewTimer;
+  Map<String, dynamic> restoredViewState = <String, dynamic>{};
+  final Set<String> expandedPublishedSections = <String>{};
+  final Set<String> expandedPublishedModules = <String>{};
 
   bool get canManage => contextData['puede_gestionar'] == true;
   bool get canPublish => contextData['puede_publicar'] == true;
@@ -34,9 +56,73 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     _load();
   }
 
+  @override
+  void dispose() {
+    persistViewTimer?.cancel();
+    unawaited(_persistViewState());
+    pageScrollController.dispose();
+    publishedSearchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _restoreViewState() async {
+    if (experienceRestored) return;
+    final saved = await experience.loadCreatorView();
+    restoredViewState = Map<String, dynamic>.from(saved);
+    selectedBuilderRubroId = saved['builder_rubro_id']?.toString();
+    selectedPublishedRubroId = saved['published_rubro_id']?.toString();
+    publishedSearch = saved['search']?.toString() ?? '';
+    publishedSearchController.text = publishedSearch;
+    experienceRestored = true;
+    final offsetKey = widget.initialMode == CreatorEntryMode.edit
+        ? 'scroll_offset_edit'
+        : 'scroll_offset_create';
+    final offset = double.tryParse('${saved[offsetKey] ?? ''}');
+    if (offset != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (pageScrollController.hasClients) {
+          pageScrollController.jumpTo(
+            offset.clamp(0, pageScrollController.position.maxScrollExtent),
+          );
+        }
+      });
+    }
+  }
+
+  void _scheduleViewStatePersistence() {
+    persistViewTimer?.cancel();
+    persistViewTimer = Timer(
+      const Duration(milliseconds: 220),
+      () => unawaited(_persistViewState()),
+    );
+  }
+
+  Future<void> _persistViewState() {
+    final offsetKey = widget.initialMode == CreatorEntryMode.edit
+        ? 'scroll_offset_edit'
+        : 'scroll_offset_create';
+    restoredViewState = {
+      ...restoredViewState,
+      'builder_rubro_id': selectedBuilderRubroId,
+      'published_rubro_id': selectedPublishedRubroId,
+      'search': publishedSearch,
+      offsetKey:
+          pageScrollController.hasClients ? pageScrollController.offset : 0,
+    };
+    return experience.saveCreatorView(restoredViewState);
+  }
+
   Future<void> _load() async {
+    await _restoreViewState();
+    if (!mounted) return;
+    final hasContent =
+        contextData.isNotEmpty || publishedConfigurations.isNotEmpty;
     setState(() {
-      loading = true;
+      if (hasContent) {
+        refreshing = true;
+      } else {
+        loading = true;
+      }
       error = null;
     });
     try {
@@ -52,13 +138,30 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         contextData = loadedContext;
         drafts = loadedDrafts;
         publishedConfigurations = loadedPublished;
+        final rubroRows = _publishedRubrosFrom(
+          loadedContext,
+          loadedPublished,
+        );
+        if (!rubroRows.any(
+          (row) => row['id']?.toString() == selectedPublishedRubroId,
+        )) {
+          selectedPublishedRubroId =
+              rubroRows.isEmpty ? null : rubroRows.first['id']?.toString();
+        }
+        if (!rubroRows.any(
+          (row) => row['id']?.toString() == selectedBuilderRubroId,
+        )) {
+          selectedBuilderRubroId = null;
+        }
         loading = false;
+        refreshing = false;
       });
     } catch (exception) {
       if (!mounted) return;
       setState(() {
         error = 'No se pudo abrir el constructor: $exception';
         loading = false;
+        refreshing = false;
       });
     }
   }
@@ -91,12 +194,14 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         ? FormatStructureWizardPage(
             contextData: contextData,
             initialDraft: draft,
+            initialRubroId: selectedBuilderRubroId,
             repository: repository,
           )
         : ConfigurationEntityWizardPage(
             entityType: entityType,
             contextData: contextData,
             initialDraft: draft,
+            initialRubroId: selectedBuilderRubroId,
             repository: repository,
           );
     final published = await Navigator.of(context).push<bool>(
@@ -106,12 +211,6 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     );
     if (published == true) publicationPendingSync = true;
     await _load();
-  }
-
-  Future<void> _openUsersAndPermissions() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(builder: (_) => const UsersPage()),
-    );
   }
 
   Future<void> _validateDraft(Map<String, dynamic> draft) async {
@@ -207,16 +306,62 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     }
   }
 
+  Future<void> _discardDraft(Map<String, dynamic> draft) async {
+    final id = draft['id']?.toString();
+    if (id == null) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Descartar borrador'),
+        content: Text(
+          'Se eliminará el borrador “${draft['nombre'] ?? ''}”. La configuración publicada y sus registros no cambiarán.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.delete_outline),
+            label: const Text('Descartar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    setState(() => actionRunning = true);
+    try {
+      await repository.discardDraft(id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Borrador descartado.')),
+      );
+      await _load();
+    } catch (exception) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo descartar: $exception')),
+      );
+    } finally {
+      if (mounted) setState(() => actionRunning = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FA),
       appBar: AppBar(
-        title: const Text('Constructor visual'),
+        title: Text(
+          widget.initialMode == CreatorEntryMode.edit
+              ? 'Zumac Creator · Editar objetos'
+              : 'Zumac Creator · Nuevo objeto',
+        ),
         actions: [
           IconButton(
             tooltip: 'Actualizar panel',
-            onPressed: loading ? null : _load,
+            onPressed: loading || refreshing ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -229,39 +374,142 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                   ? _accessDenied()
                   : Stack(
                       children: [
-                        RefreshIndicator(
-                          onRefresh: _load,
-                          child: ListView(
-                            padding: const EdgeInsets.all(16),
-                            children: [
-                              _constructorGuide(),
-                              if (publicationPendingSync) ...[
-                                const SizedBox(height: 14),
-                                _syncNotice(),
-                              ],
-                              const SizedBox(height: 14),
-                              _entityActions(),
-                              const SizedBox(height: 18),
-                              _managementPanel(),
-                              const SizedBox(height: 22),
-                              _publishedPanel(),
-                              const SizedBox(height: 24),
-                              _draftsHeader(),
-                              const SizedBox(height: 10),
-                              if (drafts.isEmpty)
-                                _emptyDrafts()
-                              else
-                                ...drafts.map(_draftCard),
-                            ],
-                          ),
+                        IgnorePointer(
+                          ignoring: actionRunning,
+                          child: _creatorBody(),
                         ),
-                        if (actionRunning)
-                          const ColoredBox(
-                            color: Color(0x33000000),
-                            child: Center(child: CircularProgressIndicator()),
+                        if (refreshing || actionRunning)
+                          const Positioned(
+                            left: 0,
+                            right: 0,
+                            top: 0,
+                            child: LinearProgressIndicator(minHeight: 3),
                           ),
                       ],
                     ),
+    );
+  }
+
+  Widget _creatorBody() {
+    final editing = widget.initialMode == CreatorEntryMode.edit;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final horizontalPadding = constraints.maxWidth < 700 ? 12.0 : 24.0;
+        if (editing) {
+          return _editCreatorBody(horizontalPadding);
+        }
+        return RefreshIndicator(
+          onRefresh: _load,
+          child: ListView(
+            key: PageStorageKey(
+              editing
+                  ? 'zumac-creator-edit-scroll'
+                  : 'zumac-creator-new-scroll',
+            ),
+            controller: pageScrollController,
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              18,
+              horizontalPadding,
+              32,
+            ),
+            children: [
+              Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: ZumacResponsiveLimits.page,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _constructorGuide(),
+                      if (publicationPendingSync) ...[
+                        const SizedBox(height: 14),
+                        _syncNotice(),
+                      ],
+                      const SizedBox(height: 14),
+                      _rubroSelector(),
+                      if (selectedBuilderRubroId != null) ...[
+                        const SizedBox(height: 18),
+                        _entityActions(),
+                      ],
+                      const SizedBox(height: 24),
+                      _draftsHeader(),
+                      const SizedBox(height: 10),
+                      if (drafts.isEmpty)
+                        _emptyDrafts()
+                      else
+                        ...drafts.map(_draftCard),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _editCreatorBody(double horizontalPadding) {
+    final sections = _filteredPublishedSections();
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: CustomScrollView(
+        key: const PageStorageKey('zumac-creator-edit-scroll'),
+        controller: pageScrollController,
+        slivers: [
+          SliverPadding(
+            padding: EdgeInsets.fromLTRB(
+              horizontalPadding,
+              18,
+              horizontalPadding,
+              10,
+            ),
+            sliver: SliverToBoxAdapter(
+              child: Align(
+                alignment: Alignment.topCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(
+                    maxWidth: ZumacResponsiveLimits.page,
+                  ),
+                  child: _publishedPanel(includeSectionTiles: false),
+                ),
+              ),
+            ),
+          ),
+          if (sections.isNotEmpty)
+            SliverPadding(
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                0,
+                horizontalPadding,
+                32,
+              ),
+              sliver: SliverList.builder(
+                itemCount: sections.length,
+                itemBuilder: (context, index) {
+                  final section = sections[index];
+                  return Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(
+                        maxWidth: ZumacResponsiveLimits.page,
+                      ),
+                      child: _publishedSectionTile(
+                        section,
+                        publishedSearch.trim().toLowerCase(),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            )
+          else
+            const SliverToBoxAdapter(child: SizedBox(height: 32)),
+        ],
+      ),
     );
   }
 
@@ -270,7 +518,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Text(
-          '¿Qué deseas configurar?',
+          'Selecciona rubro',
           style: TextStyle(
             color: Color(0xFF17324D),
             fontSize: 19,
@@ -279,35 +527,114 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         ),
         const SizedBox(height: 4),
         const Text(
-          'La plataforma se organiza de lo general a lo específico:',
-          style: TextStyle(color: Color(0xFF60758A), fontSize: 13),
-        ),
-        const SizedBox(height: 10),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          decoration: BoxDecoration(
-            color: const Color(0xFFE8F3F5),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFC8E0E6)),
-          ),
-          child: const Row(
-            children: [
-              Icon(Icons.account_tree_outlined, color: Color(0xFF176B87)),
-              SizedBox(width: 9),
-              Expanded(
-                child: Text(
-                  'Rubro  →  Sección  →  Módulo  →  Formato',
-                  maxLines: 2,
-                  style: TextStyle(
-                    color: Color(0xFF315B68),
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
+          'El rubro mantiene juntas sus secciones, módulos, formatos, tablas y permisos.',
+          style: TextStyle(color: Color(0xFF60758A), fontSize: 12.5),
         ),
       ],
+    );
+  }
+
+  String _rubroName(Map<String, dynamic> row) {
+    if (row['id']?.toString() == 'rubro_general_zumac') {
+      return 'Agroexportación';
+    }
+    return row['nombre']?.toString() ?? 'Rubro';
+  }
+
+  Widget _rubroSelector() {
+    final rubros = _publishedRubros;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final visibleWidth = constraints.maxWidth;
+        final cardWidth = ((visibleWidth - 12) / 2).clamp(150.0, 260.0);
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(
+            children: [
+              _rubroCard(
+                width: cardWidth,
+                title: 'Agregar Rubro',
+                icon: Icons.add_circle_outline,
+                selected: false,
+                onTap: () => _openWizard('RUBRO'),
+              ),
+              for (final rubro in rubros) ...[
+                const SizedBox(width: 12),
+                _rubroCard(
+                  width: cardWidth,
+                  title: _rubroName(rubro),
+                  icon: configurationIconForName(
+                    rubro['icono']?.toString() ?? 'agriculture',
+                  ),
+                  selected: rubro['id']?.toString() == selectedBuilderRubroId,
+                  onTap: () {
+                    setState(
+                      () => selectedBuilderRubroId = rubro['id']?.toString(),
+                    );
+                    _scheduleViewStatePersistence();
+                  },
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _rubroCard({
+    required double width,
+    required String title,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return SizedBox(
+      width: width,
+      child: Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: selected ? const Color(0xFFE5F2F5) : Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: BorderSide(
+            color: selected ? const Color(0xFF176B87) : const Color(0xFFDCE6EC),
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 15),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF17324D),
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: 9),
+                Icon(icon, color: const Color(0xFF176B87), size: 32),
+                if (selected) ...[
+                  const SizedBox(height: 6),
+                  const Icon(
+                    Icons.check_circle,
+                    color: Color(0xFF0C7A5B),
+                    size: 18,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -336,53 +663,44 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   Widget _entityActions() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final cardWidth = constraints.maxWidth >= 900
-            ? (constraints.maxWidth - 30) / 3
-            : constraints.maxWidth >= 560
-                ? (constraints.maxWidth - 14) / 2
-                : constraints.maxWidth;
-        return Wrap(
-          spacing: 14,
-          runSpacing: 14,
+        final compact = constraints.maxWidth < 680;
+        final cardWidth =
+            compact ? constraints.maxWidth : (constraints.maxWidth - 16) / 3;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _entityCard(
-              width: cardWidth,
-              step: 1,
-              title: 'Rubro',
-              description:
-                  'Área principal del negocio. Ej.: Agricultura o Transporte.',
-              count: _templateCount('RUBRO'),
-              enabled: true,
-              onTap: () => _openWizard('RUBRO'),
+            Text(
+              'Crear en ${_selectedBuilderRubroName()}',
+              style: const TextStyle(
+                color: Color(0xFF17324D),
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
             ),
-            _entityCard(
-              width: cardWidth,
-              step: 2,
-              title: 'Sección',
-              description:
-                  'Grupo visible en el menú. Ej.: Operaciones o Calidad.',
-              count: _templateCount('SECCION'),
-              enabled: true,
-              onTap: () => _openWizard('SECCION'),
-            ),
-            _entityCard(
-              width: cardWidth,
-              step: 3,
-              title: 'Módulo',
-              description: 'Agrupa procesos o formularios relacionados.',
-              count: _templateCount('MODULO'),
-              enabled: true,
-              onTap: () => _openWizard('MODULO'),
-            ),
-            _entityCard(
-              width: cardWidth,
-              step: 4,
-              title: 'Formato',
-              description:
-                  'Crea el formulario, su tabla, campos, listas y reglas.',
-              count: _templateCount('FORMATO'),
-              enabled: true,
-              onTap: () => _openWizard('FORMATO'),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                _entityCard(
+                  width: cardWidth,
+                  icon: Icons.view_sidebar_outlined,
+                  title: 'Sección',
+                  onTap: () => _openWizard('SECCION'),
+                ),
+                _entityCard(
+                  width: cardWidth,
+                  icon: Icons.grid_view_outlined,
+                  title: 'Módulo',
+                  onTap: () => _openWizard('MODULO'),
+                ),
+                _entityCard(
+                  width: cardWidth,
+                  icon: Icons.assignment_outlined,
+                  title: 'Formato',
+                  onTap: () => _openWizard('FORMATO'),
+                ),
+              ],
             ),
           ],
         );
@@ -390,41 +708,135 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
     );
   }
 
-  int _templateCount(String type) {
-    final summary = contextData['resumen_plantillas'];
-    if (summary is! Map) return 0;
-    return int.tryParse('${summary[type] ?? 0}') ?? 0;
+  String _selectedBuilderRubroName() {
+    for (final rubro in _publishedRubros) {
+      if (rubro['id']?.toString() == selectedBuilderRubroId) {
+        return _rubroName(rubro);
+      }
+    }
+    return 'el rubro seleccionado';
   }
 
-  Widget _publishedPanel() {
-    final normalizedSearch = publishedSearch.trim().toLowerCase();
-    final filtered = publishedConfigurations.where((row) {
-      if (normalizedSearch.isEmpty) return true;
-      return (row['nombre']?.toString().toLowerCase() ?? '')
-              .contains(normalizedSearch) ||
-          (row['codigo']?.toString().toLowerCase() ?? '')
-              .contains(normalizedSearch) ||
-          (row['entidad_tipo']?.toString().toLowerCase() ?? '')
-              .contains(normalizedSearch);
+  List<Map<String, dynamic>> _publishedRubrosFrom(
+    Map<String, dynamic> context,
+    List<Map<String, dynamic>> published,
+  ) {
+    final byId = <String, Map<String, dynamic>>{};
+    final rawRubros = context['rubros'];
+    if (rawRubros is List) {
+      for (final raw in rawRubros.whereType<Map>()) {
+        final row = Map<String, dynamic>.from(raw);
+        final id = row['id']?.toString() ?? '';
+        if (id.isNotEmpty) byId[id] = row;
+      }
+    }
+    for (final row in published.where(
+      (item) => item['entidad_tipo']?.toString() == 'RUBRO',
+    )) {
+      final id = row['entidad_origen_id']?.toString() ??
+          row['codigo']?.toString() ??
+          '';
+      if (id.isEmpty) continue;
+      byId.putIfAbsent(
+        id,
+        () => {
+          'id': id,
+          'nombre': row['nombre']?.toString() ?? 'Rubro',
+          'orden': _definitionOrder(row),
+        },
+      );
+    }
+    final rows = byId.values.toList();
+    rows.sort((a, b) {
+      final order = (int.tryParse('${a['orden'] ?? 0}') ?? 0)
+          .compareTo(int.tryParse('${b['orden'] ?? 0}') ?? 0);
+      if (order != 0) return order;
+      return '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}');
+    });
+    return rows;
+  }
+
+  List<Map<String, dynamic>> get _publishedRubros =>
+      _publishedRubrosFrom(contextData, publishedConfigurations);
+
+  Map<String, dynamic> _publishedDefinition(Map<String, dynamic> row) {
+    final value = row['definicion'];
+    return value is Map
+        ? Map<String, dynamic>.from(value)
+        : <String, dynamic>{};
+  }
+
+  int _definitionOrder(Map<String, dynamic> row) =>
+      int.tryParse('${_publishedDefinition(row)['orden'] ?? 0}') ?? 0;
+
+  String _originId(Map<String, dynamic> row) =>
+      row['entidad_origen_id']?.toString() ?? row['codigo']?.toString() ?? '';
+
+  List<Map<String, dynamic>> _publishedChildren(
+    String type,
+    String parentId,
+  ) {
+    final rows = publishedConfigurations.where((row) {
+      return row['entidad_tipo']?.toString() == type &&
+          row['padre_origen_id']?.toString() == parentId;
     }).toList();
-    final visible = filtered.take(40).toList();
+    rows.sort((a, b) {
+      final order = _definitionOrder(a).compareTo(_definitionOrder(b));
+      if (order != 0) return order;
+      return '${a['nombre'] ?? ''}'.compareTo('${b['nombre'] ?? ''}');
+    });
+    return rows;
+  }
+
+  bool _publishedMatches(Map<String, dynamic> row, String query) {
+    if (query.isEmpty) return true;
+    return (row['nombre']?.toString().toLowerCase() ?? '').contains(query) ||
+        (row['codigo']?.toString().toLowerCase() ?? '').contains(query);
+  }
+
+  bool _formatBranchMatches(Map<String, dynamic> format, String query) {
+    if (_publishedMatches(format, query)) return true;
+    return _publishedChildren('TABLA', _originId(format))
+        .any((table) => _publishedMatches(table, query));
+  }
+
+  bool _moduleBranchMatches(Map<String, dynamic> module, String query) {
+    if (_publishedMatches(module, query)) return true;
+    return _publishedChildren('FORMATO', _originId(module))
+        .any((format) => _formatBranchMatches(format, query));
+  }
+
+  bool _sectionBranchMatches(Map<String, dynamic> section, String query) {
+    if (_publishedMatches(section, query)) return true;
+    return _publishedChildren('MODULO', _originId(section))
+        .any((module) => _moduleBranchMatches(module, query));
+  }
+
+  List<Map<String, dynamic>> _filteredPublishedSections() {
+    final normalizedSearch = publishedSearch.trim().toLowerCase();
+    return publishedConfigurations.where((row) {
+      final rubroId = row['rubro_id']?.toString() ??
+          _publishedDefinition(row)['rubro_id']?.toString();
+      return row['entidad_tipo']?.toString() == 'SECCION' &&
+          rubroId == selectedPublishedRubroId &&
+          _sectionBranchMatches(row, normalizedSearch);
+    }).toList()
+      ..sort((a, b) => _definitionOrder(a).compareTo(_definitionOrder(b)));
+  }
+
+  Widget _publishedPanel({bool includeSectionTiles = true}) {
+    final normalizedSearch = publishedSearch.trim().toLowerCase();
+    final sections = _filteredPublishedSections();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                'Editar u ocultar existentes',
-                style: TextStyle(
-                  color: Color(0xFF17324D),
-                  fontSize: 19,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Text('${publishedConfigurations.length} elemento(s)'),
-          ],
+        const Text(
+          'Editar u ocultar existentes',
+          style: TextStyle(
+            color: Color(0xFF17324D),
+            fontSize: 19,
+            fontWeight: FontWeight.w800,
+          ),
         ),
         const SizedBox(height: 4),
         const Text(
@@ -432,75 +844,351 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
           style: TextStyle(color: Color(0xFF60758A), fontSize: 12.5),
         ),
         const SizedBox(height: 10),
-        TextField(
-          decoration: const InputDecoration(
-            prefixIcon: Icon(Icons.search),
-            labelText: 'Buscar rubro, sección, módulo o formato',
-            border: OutlineInputBorder(),
+        DropdownButtonFormField<String>(
+          key: ValueKey('published-rubro-$selectedPublishedRubroId'),
+          initialValue: _publishedRubros.any(
+            (row) => row['id']?.toString() == selectedPublishedRubroId,
+          )
+              ? selectedPublishedRubroId
+              : null,
+          decoration: InputDecoration(
+            prefixIcon: const Icon(Icons.business_center_outlined),
+            labelText: 'Rubro',
+            helperText: selectedPublishedRubroId == null
+                ? 'Elija el rubro que desea administrar.'
+                : '${sections.length} ${sections.length == 1 ? 'sección' : 'secciones'} en este rubro',
+            border: const OutlineInputBorder(),
           ),
-          onChanged: (value) => setState(() => publishedSearch = value),
+          items: _publishedRubros
+              .map(
+                (row) => DropdownMenuItem(
+                  value: row['id']?.toString(),
+                  child: Text(
+                    row['nombre']?.toString() ?? 'Rubro',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              )
+              .toList(),
+          onChanged: (value) => setState(() {
+            selectedPublishedRubroId = value;
+            publishedSearch = '';
+            publishedSearchController.clear();
+            _scheduleViewStatePersistence();
+          }),
         ),
         const SizedBox(height: 10),
-        if (visible.isEmpty)
+        TextField(
+          key: ValueKey('published-search-$selectedPublishedRubroId'),
+          controller: publishedSearchController,
+          decoration: const InputDecoration(
+            prefixIcon: Icon(Icons.search),
+            labelText: 'Buscar sección, módulo, formato o tabla',
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (value) {
+            setState(() => publishedSearch = value);
+            _scheduleViewStatePersistence();
+          },
+        ),
+        const SizedBox(height: 10),
+        if (_publishedRubros.isEmpty)
+          const Card(
+            elevation: 0,
+            child: ListTile(
+              leading: Icon(Icons.business_center_outlined),
+              title: Text('Todavía no hay rubros publicados.'),
+            ),
+          )
+        else if (sections.isEmpty)
           const Card(
             elevation: 0,
             child: ListTile(
               leading: Icon(Icons.search_off_outlined),
-              title: Text('No se encontraron configuraciones.'),
+              title: Text('No se encontraron elementos en este rubro.'),
             ),
           )
-        else
-          Card(
-            elevation: 0,
-            clipBehavior: Clip.antiAlias,
-            child: Column(
-              children: [
-                for (var index = 0; index < visible.length; index++) ...[
-                  ListTile(
-                    leading: CircleAvatar(
-                      child: Icon(
-                        _entityIcon(
-                          visible[index]['entidad_tipo']?.toString() ?? '',
-                        ),
-                        size: 20,
-                      ),
-                    ),
-                    title: Text(
-                      visible[index]['nombre']?.toString() ?? 'Sin nombre',
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    subtitle: Text(
-                      '${visible[index]['entidad_tipo'] ?? ''} · ${visible[index]['codigo'] ?? ''} · v${visible[index]['version'] ?? 1}',
-                    ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: actionRunning
-                        ? null
-                        : () => _openPreview(visible[index]),
-                  ),
-                  if (index < visible.length - 1) const Divider(height: 1),
-                ],
-              ],
-            ),
-          ),
-        if (filtered.length > visible.length)
-          Padding(
-            padding: const EdgeInsets.only(top: 8),
-            child: Text(
-              'Se muestran 40 de ${filtered.length}. Escriba un nombre o código para filtrar.',
-              style: const TextStyle(color: Color(0xFF60758A)),
-            ),
+        else if (includeSectionTiles)
+          ...sections.map(
+            (section) => _publishedSectionTile(section, normalizedSearch),
           ),
       ],
     );
   }
 
+  Widget _publishedSectionTile(
+    Map<String, dynamic> section,
+    String query,
+  ) {
+    final sectionId = _originId(section);
+    final allModules = _publishedChildren('MODULO', _originId(section));
+    final visibleModules = query.isEmpty
+        ? allModules
+        : allModules
+            .where((module) => _moduleBranchMatches(module, query))
+            .toList();
+    final active = _publishedDefinition(section)['activo'] != false;
+    final expanded = expandedPublishedSections.contains(sectionId);
+    return Card(
+      elevation: 0,
+      margin: const EdgeInsets.only(bottom: 10),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: const BorderSide(color: Color(0xFFDCE6EC)),
+      ),
+      child: ExpansionTile(
+        key: ValueKey('published-section-$sectionId-${query.isNotEmpty}'),
+        // No retener árboles completos fuera de pantalla. Con búsquedas amplias
+        // maintainState conservaba cientos de tiles y podía dejar el lienzo gris
+        // al volver rápidamente al inicio.
+        maintainState: false,
+        shape: const Border(),
+        collapsedShape: const Border(),
+        onExpansionChanged: (value) => setState(() {
+          if (value) {
+            expandedPublishedSections.add(sectionId);
+          } else {
+            expandedPublishedSections.remove(sectionId);
+          }
+        }),
+        leading: const CircleAvatar(
+          backgroundColor: Color(0xFFDDF3F8),
+          child: Icon(Icons.view_sidebar_outlined, size: 20),
+        ),
+        title: Text(
+          section['nombre']?.toString() ?? 'Sección',
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            color: active ? null : const Color(0xFF77858D),
+          ),
+        ),
+        subtitle: Text(
+          '${active ? 'Sección' : 'Desactivada'} · ${allModules.length} ${allModules.length == 1 ? 'módulo' : 'módulos'}',
+        ),
+        trailing: _visibilityMenu(section, active, expanded),
+        initiallyExpanded: expanded,
+        childrenPadding: const EdgeInsets.fromLTRB(14, 0, 8, 10),
+        children: visibleModules.isEmpty
+            ? const [
+                ListTile(
+                  dense: true,
+                  leading: Icon(Icons.inbox_outlined, size: 19),
+                  title: Text('Esta sección no contiene módulos.'),
+                ),
+              ]
+            : visibleModules
+                .map(
+                  (module) => Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF4F8FA),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFFE2EBEF)),
+                      ),
+                      child: _publishedModuleTile(
+                        module,
+                        query,
+                      ),
+                    ),
+                  ),
+                )
+                .toList(),
+      ),
+    );
+  }
+
+  Widget _publishedModuleTile(
+    Map<String, dynamic> module,
+    String query,
+  ) {
+    final moduleId = _originId(module);
+    final allFormats = _publishedChildren('FORMATO', _originId(module));
+    final visibleFormats = query.isEmpty
+        ? allFormats
+        : allFormats
+            .where((format) => _formatBranchMatches(format, query))
+            .toList();
+    final active = _publishedDefinition(module)['activo'] != false;
+    final expanded = expandedPublishedModules.contains(moduleId);
+    return ExpansionTile(
+      key: ValueKey('published-module-$moduleId-${query.isNotEmpty}'),
+      maintainState: false,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      onExpansionChanged: (value) => setState(() {
+        if (value) {
+          expandedPublishedModules.add(moduleId);
+        } else {
+          expandedPublishedModules.remove(moduleId);
+        }
+      }),
+      leading: const Icon(Icons.grid_view_outlined),
+      title: Text(
+        module['nombre']?.toString() ?? 'Módulo',
+        style: TextStyle(
+          fontWeight: FontWeight.w700,
+          color: active ? null : const Color(0xFF77858D),
+        ),
+      ),
+      subtitle: Text(
+        '${active ? 'Módulo' : 'Desactivado'} · ${allFormats.length} ${allFormats.length == 1 ? 'formato' : 'formatos'}',
+      ),
+      trailing: _visibilityMenu(module, active, expanded),
+      initiallyExpanded: expanded,
+      childrenPadding: const EdgeInsets.only(bottom: 6),
+      children: visibleFormats.isEmpty
+          ? const [
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.only(left: 42, right: 12),
+                leading: Icon(Icons.inbox_outlined, size: 18),
+                title: Text('Este módulo no contiene formatos.'),
+              ),
+            ]
+          : visibleFormats.map(_publishedFormatTile).toList(),
+    );
+  }
+
+  Widget _publishedFormatTile(Map<String, dynamic> format) {
+    final tables = _publishedChildren('TABLA', _originId(format));
+    final directTable =
+        _publishedDefinition(format)['tabla_destino']?.toString().trim();
+    final tableCount = tables.isNotEmpty
+        ? tables.length
+        : (directTable == null || directTable.isEmpty ? 0 : 1);
+    return ListTile(
+      contentPadding: const EdgeInsets.only(left: 44, right: 12),
+      leading: const Icon(Icons.assignment_outlined),
+      title: Text(
+        format['nombre']?.toString() ?? 'Formato',
+        style: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+      subtitle: Text(
+        'Formato · $tableCount ${tableCount == 1 ? 'tabla' : 'tablas'}',
+      ),
+      trailing: const Icon(Icons.chevron_right),
+      onTap: actionRunning ? null : () => _openPreview(format),
+    );
+  }
+
+  Widget _visibilityMenu(
+    Map<String, dynamic> template,
+    bool active,
+    bool expanded,
+  ) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        PopupMenuButton<String>(
+          tooltip: 'Opciones',
+          enabled: !actionRunning,
+          onSelected: (value) {
+            if (value == 'visibility') {
+              _requestVisibilityChange(template, !active);
+            } else if (value == 'edit') {
+              _openPreview(template);
+            }
+          },
+          itemBuilder: (_) => [
+            PopupMenuItem(
+              value: 'visibility',
+              child: Row(
+                children: [
+                  Icon(active
+                      ? Icons.visibility_off_outlined
+                      : Icons.visibility_outlined),
+                  const SizedBox(width: 10),
+                  Text(active ? 'Desactivar' : 'Activar'),
+                ],
+              ),
+            ),
+            const PopupMenuItem(
+              value: 'edit',
+              child: Row(
+                children: [
+                  Icon(Icons.edit_outlined),
+                  SizedBox(width: 10),
+                  Text('Revisar o editar'),
+                ],
+              ),
+            ),
+          ],
+          icon: const Icon(Icons.more_vert),
+        ),
+        AnimatedRotation(
+          turns: expanded ? 0.5 : 0,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          child: const Icon(Icons.expand_more),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _requestVisibilityChange(
+    Map<String, dynamic> template,
+    bool active,
+  ) async {
+    final name = template['nombre']?.toString() ?? 'este elemento';
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(active ? 'Activar $name' : 'Desactivar $name'),
+        content: Text(
+          active
+              ? 'Volverá a estar disponible para los usuarios después de publicar el cambio.'
+              : 'Dejará de mostrarse, pero sus datos y configuración no se borrarán.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: Icon(
+              active
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+            ),
+            label: Text(active ? 'Activar' : 'Desactivar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => actionRunning = true);
+    try {
+      final templateId = template['id']?.toString();
+      if (templateId == null || templateId.isEmpty) {
+        throw StateError('No se encontró la versión publicada.');
+      }
+      final draft = await repository.createDraftFromPublished(templateId);
+      final definition = draft['definicion'] is Map
+          ? Map<String, dynamic>.from(draft['definicion'] as Map)
+          : <String, dynamic>{};
+      definition['activo'] = active;
+      draft['definicion'] = definition;
+      draft['_requested_action'] = active ? 'ACTIVATE' : 'DEACTIVATE';
+      if (!mounted) return;
+      setState(() => actionRunning = false);
+      await _openWizard(template['entidad_tipo']?.toString() ?? '',
+          draft: draft);
+    } catch (exception) {
+      if (!mounted) return;
+      setState(() => actionRunning = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo preparar el cambio: $exception')),
+      );
+    }
+  }
+
   Widget _entityCard({
     required double width,
-    required int step,
+    required IconData icon,
     required String title,
-    required String description,
-    required int count,
-    required bool enabled,
     required VoidCallback onTap,
   }) {
     return SizedBox(
@@ -514,130 +1202,37 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         ),
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
-          onTap: enabled ? onTap : null,
+          onTap: onTap,
           child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 15),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
-                CircleAvatar(
-                  backgroundColor: enabled
-                      ? const Color(0xFFE5F2F5)
-                      : const Color(0xFFF0F1F2),
-                  child: Text(
-                    '$step',
-                    style: TextStyle(
-                      color: enabled ? const Color(0xFF176B87) : Colors.grey,
-                      fontWeight: FontWeight.w800,
-                    ),
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE5F2F5),
+                    borderRadius: BorderRadius.circular(12),
                   ),
+                  child: Icon(icon, color: const Color(0xFF176B87)),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: const TextStyle(
-                          color: Color(0xFF17324D),
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 3),
-                      Text(
-                        description,
-                        style: const TextStyle(
-                            color: Color(0xFF60758A), fontSize: 12),
-                      ),
-                      const SizedBox(height: 6),
-                      Text(
-                        enabled
-                            ? '$count existente(s) · reutilizables'
-                            : 'Disponible en la siguiente etapa',
-                        style: TextStyle(
-                          color:
-                              enabled ? const Color(0xFF176B87) : Colors.grey,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Color(0xFF17324D),
+                    fontSize: 14,
+                    fontWeight: FontWeight.w800,
                   ),
-                ),
-                const SizedBox(width: 6),
-                Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      enabled
-                          ? Icons.arrow_forward_rounded
-                          : Icons.lock_clock_outlined,
-                      color: enabled ? const Color(0xFF176B87) : Colors.grey,
-                    ),
-                    if (enabled)
-                      const Text(
-                        'Crear',
-                        style: TextStyle(
-                          color: Color(0xFF176B87),
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                  ],
                 ),
               ],
             ),
           ),
         ),
       ),
-    );
-  }
-
-  Widget _managementPanel() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text(
-          'Administración',
-          style: TextStyle(
-            color: Color(0xFF17324D),
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Card(
-          margin: EdgeInsets.zero,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-            side: const BorderSide(color: Color(0xFFDCE6EC)),
-          ),
-          child: ListTile(
-            enabled: canPublish,
-            onTap: canPublish ? _openUsersAndPermissions : null,
-            leading: const CircleAvatar(
-              backgroundColor: Color(0xFFE5F2F5),
-              foregroundColor: Color(0xFF176B87),
-              child: Icon(Icons.manage_accounts_outlined),
-            ),
-            title: const Text(
-              'Usuarios, roles y permisos',
-              style: TextStyle(
-                color: Color(0xFF17324D),
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            subtitle: const Text(
-              'Define quién puede ver, crear, editar o eliminar registros. Solo ADMIN.',
-            ),
-            trailing: Icon(
-              canPublish ? Icons.chevron_right : Icons.lock_outline,
-            ),
-          ),
-        ),
-      ],
     );
   }
 
@@ -736,6 +1331,16 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                             actionRunning ? null : () => _publishDraft(draft),
                         icon: const Icon(Icons.publish_outlined),
                         label: const Text('Publicar'),
+                      ),
+                    if (editable)
+                      OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: const Color(0xFFB33B32),
+                        ),
+                        onPressed:
+                            actionRunning ? null : () => _discardDraft(draft),
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('Descartar'),
                       ),
                   ],
                 ),

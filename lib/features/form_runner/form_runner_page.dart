@@ -7,6 +7,7 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:pdf/pdf.dart';
@@ -17,6 +18,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
+import '../../core/widgets/responsive_layout.dart';
 import '../../core/services/dynamic_rules_repository.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/formula_engine.dart';
@@ -67,7 +69,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   bool savingLocal = false;
   bool loadingFields = true;
   Set<String> restrictedFields = <String>{};
-  final Map<String, Map<String, dynamic>> _fieldDefLookup = <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> _fieldDefLookup =
+      <String, Map<String, dynamic>>{};
   final Map<String, String> _campoLookup = <String, String>{};
   Map<String, dynamic>? _wizardMasterPayload;
   String? _wizardMasterIdLocal;
@@ -105,7 +108,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return rows;
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>> _formFieldsByTableCached() async {
+  Future<Map<String, List<Map<String, dynamic>>>>
+      _formFieldsByTableCached() async {
     final cached = _cachedFormFieldsByTable;
     if (cached != null) return cached;
     await _allFormFieldsCached();
@@ -153,17 +157,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final cleanRows = uniqueById.values.toList();
     final currentId = selectedInternalTableId;
-    final selectedStillExists = currentId != null && cleanRows.any((row) => row['id']?.toString() == currentId);
+    final selectedStillExists = currentId != null &&
+        cleanRows.any((row) => row['id']?.toString() == currentId);
     final requestedInitialId = widget.initialFormatTableId?.trim();
-    final requestedInitialExists =
-        requestedInitialId != null && requestedInitialId.isNotEmpty && cleanRows.any((row) => row['id']?.toString() == requestedInitialId);
+    final requestedInitialExists = requestedInitialId != null &&
+        requestedInitialId.isNotEmpty &&
+        cleanRows.any((row) => row['id']?.toString() == requestedInitialId);
 
     await Future.wait(preloadFutures);
 
     if (!mounted) return;
     final preferredInitial = cleanRows.firstWhere(
       (row) => _isHeaderTableRow(row),
-      orElse: () => cleanRows.isNotEmpty ? cleanRows.first : <String, dynamic>{},
+      orElse: () =>
+          cleanRows.isNotEmpty ? cleanRows.first : <String, dynamic>{},
     );
     final preferredInitialId = preferredInitial['id']?.toString();
     setState(() {
@@ -174,14 +181,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               ? requestedInitialId
               : ((preferredInitialId != null && preferredInitialId.isNotEmpty)
                   ? preferredInitialId
-                  : (cleanRows.isNotEmpty ? cleanRows.first['id']?.toString() : null)));
+                  : (cleanRows.isNotEmpty
+                      ? cleanRows.first['id']?.toString()
+                      : null)));
     });
 
     await loadFieldsForCurrentTable();
   }
 
   Future<void> _loadLotesVariedades({bool updateState = true}) async {
-    final rows = _cachedLotesVariedades ?? await local.getAll('local_lotes_variedades', orderBy: 'turno');
+    final rows = _cachedLotesVariedades ??
+        await local.getAll('local_lotes_variedades', orderBy: 'turno');
     _cachedLotesVariedades = rows;
     if (!mounted) return;
     if (updateState) {
@@ -201,9 +211,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
-  Future<void> _loadMatrixRows({bool updateState = true, Set<String>? onlyTables}) async {
-    final wantedRaw = (onlyTables ?? const <String>{}).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
-    final wantedNorm = wantedRaw.map(_normalizarNombreCampo).where((e) => e.isNotEmpty).toSet();
+  Future<void> _loadMatrixRows(
+      {bool updateState = true, Set<String>? onlyTables}) async {
+    final wantedRaw = (onlyTables ?? const <String>{})
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
+    final wantedNorm = wantedRaw
+        .map(_normalizarNombreCampo)
+        .where((e) => e.isNotEmpty)
+        .toSet();
 
     // Si no se especifican tablas, conserva el comportamiento anterior.
     // Si se especifican, evita decodificar todo local_matrix_rows; esto era una
@@ -221,7 +238,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           if (table.isEmpty) continue;
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
-            cached.putIfAbsent(table, () => <Map<String, dynamic>>[]).add(decoded);
+            cached
+                .putIfAbsent(table, () => <Map<String, dynamic>>[])
+                .add(decoded);
           } catch (_) {}
           i++;
           if (i % 250 == 0) await Future<void>.delayed(Duration.zero);
@@ -233,17 +252,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       var decodedCount = 0;
       final foundNorm = <String>{};
       for (final rawTable in wantedRaw) {
-        final rows = await local.where('local_matrix_rows', 'source_table = ?', [rawTable]);
+        final rows = await local
+            .where('local_matrix_rows', 'source_table = ?', [rawTable]);
         for (final row in rows) {
           final table = row['source_table']?.toString() ?? rawTable;
           final raw = row['payload_json']?.toString() ?? '{}';
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
-            grouped.putIfAbsent(table, () => <Map<String, dynamic>>[]).add(decoded);
+            grouped
+                .putIfAbsent(table, () => <Map<String, dynamic>>[])
+                .add(decoded);
             foundNorm.add(_normalizarNombreCampo(table));
           } catch (_) {}
           decodedCount++;
-          if (decodedCount % 250 == 0) await Future<void>.delayed(Duration.zero);
+          if (decodedCount % 250 == 0)
+            await Future<void>.delayed(Duration.zero);
         }
       }
 
@@ -257,10 +280,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           final raw = row['payload_json']?.toString() ?? '{}';
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
-            grouped.putIfAbsent(table, () => <Map<String, dynamic>>[]).add(decoded);
+            grouped
+                .putIfAbsent(table, () => <Map<String, dynamic>>[])
+                .add(decoded);
           } catch (_) {}
           decodedCount++;
-          if (decodedCount % 250 == 0) await Future<void>.delayed(Duration.zero);
+          if (decodedCount % 250 == 0)
+            await Future<void>.delayed(Duration.zero);
         }
       }
     }
@@ -280,7 +306,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     // No cachear catálogos en memoria: el botón Actualizar datos puede cambiar
     // id_campo_dropdown y valores fuente mientras la app sigue abierta.
     _cachedCatalogValues = null;
-    final rows = await local.getAll('local_catalog_values', orderBy: 'catalog_key, value');
+    final rows = await local.getAll('local_catalog_values',
+        orderBy: 'catalog_key, value');
     final grouped = <String, List<String>>{};
     for (final row in rows) {
       final key = row['catalog_key']?.toString() ?? '';
@@ -298,16 +325,25 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   bool _fieldsNeedMatrixRows(List<Map<String, dynamic>> rows) {
     for (final f in rows) {
-      final formula = (f['formula_funcion'] ?? f['formula'] ?? '').toString().toUpperCase();
-      if (formula.contains('BUSCAR(') || formula.contains('LOOKUP(') || formula.contains('LOOKUPR(') || formula.contains('LOOKUPP(')) {
+      final formula =
+          (f['formula_funcion'] ?? f['formula'] ?? '').toString().toUpperCase();
+      if (formula.contains('BUSCAR(') ||
+          formula.contains('LOOKUP(') ||
+          formula.contains('LOOKUPR(') ||
+          formula.contains('LOOKUPP(') ||
+          formula.contains('LISTA(') ||
+          formula.contains('LIST(')) {
         return true;
       }
       final dropdown = (f['id_campo_dropdown'] ?? '').toString().trim();
       // Un dropdown dinámico puede venir como TABLA.COLUMNA, id, [id], CAMPO o [CAMPO].
       // Si el catálogo directo aún no existe, cargamos local_matrix_rows como respaldo.
       if (dropdown.isNotEmpty && !_isLiteralDropdownSource(dropdown)) {
-        final sourceField = _fieldDefByIdentifier(_unwrapBracketReference(dropdown));
-        final catalogKey = sourceField == null ? dropdown : _catalogKeyForSourceField(sourceField);
+        final sourceField =
+            _fieldDefByIdentifier(_unwrapBracketReference(dropdown));
+        final catalogKey = sourceField == null
+            ? dropdown
+            : _catalogKeyForSourceField(sourceField);
         if (!catalogValues.containsKey(catalogKey)) return true;
       }
     }
@@ -318,8 +354,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final out = <String>{};
     for (final f in rows) {
       final formula = (f['formula_funcion'] ?? f['formula'] ?? '').toString();
-      for (final m in RegExp(r'(?:BUSCAR|LOOKUP|LOOKUPR|LOOKUPP)\s*\(\s*([^,;\)]+)', caseSensitive: false).allMatches(formula)) {
-        final table = (m.group(1) ?? '').trim().replaceAll('"', '').replaceAll("'", '');
+      for (final m in RegExp(
+              r'(?:BUSCAR|LOOKUP|LOOKUPR|LOOKUPP|LISTA|LIST)\s*\(\s*([^,;\)]+)',
+              caseSensitive: false)
+          .allMatches(formula)) {
+        final table =
+            (m.group(1) ?? '').trim().replaceAll('"', '').replaceAll("'", '');
         if (table.isNotEmpty) out.add(table);
       }
       final dropdown = (f['id_campo_dropdown'] ?? '').toString().trim();
@@ -355,7 +395,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return s.replaceAll(RegExp(r'^_|_$'), '');
   }
 
-  String _lookupKey(String table, String identifier) => '${_normalizarNombreCampo(table)}|${_normalizarNombreCampo(identifier)}';
+  String _lookupKey(String table, String identifier) =>
+      '${_normalizarNombreCampo(table)}|${_normalizarNombreCampo(identifier)}';
 
   void _rebuildFieldLookupCache(List<Map<String, dynamic>> rows, String table) {
     _fieldDefLookup.clear();
@@ -374,7 +415,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
-  Map<String, dynamic>? _fieldDefByIdentifier(String identifier, {String? table}) {
+  Map<String, dynamic>? _fieldDefByIdentifier(String identifier,
+      {String? table}) {
     final clean = identifier.trim();
     final wanted = _normalizarNombreCampo(clean);
     if (wanted.isEmpty) return null;
@@ -387,12 +429,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     Map<String, dynamic>? fallback;
     for (final field in fieldDefsById.values) {
       final fieldTable = field['tabla_destino']?.toString() ?? '';
-      final sameTable = currentTable.trim().isEmpty || _normalizarNombreCampo(fieldTable) == _normalizarNombreCampo(currentTable);
+      final sameTable = currentTable.trim().isEmpty ||
+          _normalizarNombreCampo(fieldTable) ==
+              _normalizarNombreCampo(currentTable);
       final matches = [
         field['id'],
         field['campo'],
         field['etiqueta'],
-      ].any((value) => _normalizarNombreCampo(value?.toString() ?? '') == wanted);
+      ].any(
+          (value) => _normalizarNombreCampo(value?.toString() ?? '') == wanted);
       if (!matches) continue;
       if (sameTable) return field;
       fallback ??= field;
@@ -414,7 +459,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       _normalizarNombreCampo(campo),
       if (etiqueta != null) _normalizarNombreCampo(etiqueta),
     };
-    return valores.any((c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
+    return valores.any(
+        (c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
   }
 
   bool _isVariedad(String campo, [String? etiqueta]) {
@@ -437,32 +483,48 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return out;
   }
 
-  String _fieldKey(String table, String campo) => '${_normalizarNombreCampo(table)}_${_normalizarNombreCampo(campo)}';
+  String _fieldKey(String table, String campo) =>
+      '${_normalizarNombreCampo(table)}_${_normalizarNombreCampo(campo)}';
 
   static const Map<String, String> _dropdownCatalogByField = {
-    'ALM_REGISTRO_CONTROL_GESTION_DE_ENVASES_A_NOMBRE_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_CALIBRACION_PHMETRO_CODIGO': 'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO',
-    'RF_REGISTRO_CALIBRACION_PHMETRO_C_DIGO': 'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO',
+    'ALM_REGISTRO_CONTROL_GESTION_DE_ENVASES_A_NOMBRE_JEFATURA':
+        'MATRIZ_JEFATURAS.JEFATURA',
+    'RF_REGISTRO_CALIBRACION_PHMETRO_CODIGO':
+        'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO',
+    'RF_REGISTRO_CALIBRACION_PHMETRO_C_DIGO':
+        'MATRIZ_EQUIPOS_DE_MEDICION.CODIGO',
     'RF_REGISTRO_CALIBRACION_PHMETRO_ESTADO': 'MATRIZ_ESTADO_DE_EQUIPOS.ESTADO',
-    'RF_REGISTRO_CALIBRACION_PHMETRO_FRECUENCIA': 'MATRIZ_FRECUENCIA_DE_ACTIVIDADES.FRECUENCIA',
+    'RF_REGISTRO_CALIBRACION_PHMETRO_FRECUENCIA':
+        'MATRIZ_FRECUENCIA_DE_ACTIVIDADES.FRECUENCIA',
     'RF_REGISTRO_CALIBRACION_PHMETRO_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_CAUDALIMETROS_CASETA_SUPERVISOR': 'MATRIZ_SUPERVISORES.SUPERVISOR',
+    'RF_REGISTRO_CAUDALIMETROS_CASETA_SUPERVISOR':
+        'MATRIZ_SUPERVISORES.SUPERVISOR',
     'RF_REGISTRO_CAUDALIMETROS_CASETA_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
     'RF_REGISTRO_HIDROMETROS_POZO_SUPERVISOR': 'MATRIZ_SUPERVISORES.SUPERVISOR',
     'RF_REGISTRO_HIDROMETROS_POZO_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_HIDROMETROS_USO_OPERACIONES_SUPERVISOR': 'MATRIZ_SUPERVISORES.SUPERVISOR',
-    'RF_REGISTRO_HIDROMETROS_USO_OPERACIONES_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_LIMPIEZA_TANQUES_DEPOSITOS_AGU_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_LIMPIEZA_TANQUES_RESERVORIOS_C_SUPERVISADO_POR': 'MATRIZ_SUPERVISORES.SUPERVISOR',
-    'RF_REGISTRO_LIMPIEZA_TANQUES_RESERVORIOS_C_JEFATURA': 'MATRIZ_JEFATURAS.JEFATURA',
-    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_RESPONSABLE_DE_LA_SUPERVISION': 'MATRIZ_SUPERVISORES.SUPERVISOR',
-    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_RESPONSABLE_DE_LA_SUPERVISI_N': 'MATRIZ_SUPERVISORES.SUPERVISOR',
-    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_JEFE_DE_OPERACIONES': 'MATRIZ_JEFATURAS.JEFATURA',
+    'RF_REGISTRO_HIDROMETROS_USO_OPERACIONES_SUPERVISOR':
+        'MATRIZ_SUPERVISORES.SUPERVISOR',
+    'RF_REGISTRO_HIDROMETROS_USO_OPERACIONES_JEFATURA':
+        'MATRIZ_JEFATURAS.JEFATURA',
+    'RF_REGISTRO_LIMPIEZA_TANQUES_DEPOSITOS_AGU_JEFATURA':
+        'MATRIZ_JEFATURAS.JEFATURA',
+    'RF_REGISTRO_LIMPIEZA_TANQUES_RESERVORIOS_C_SUPERVISADO_POR':
+        'MATRIZ_SUPERVISORES.SUPERVISOR',
+    'RF_REGISTRO_LIMPIEZA_TANQUES_RESERVORIOS_C_JEFATURA':
+        'MATRIZ_JEFATURAS.JEFATURA',
+    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_RESPONSABLE_DE_LA_SUPERVISION':
+        'MATRIZ_SUPERVISORES.SUPERVISOR',
+    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_RESPONSABLE_DE_LA_SUPERVISI_N':
+        'MATRIZ_SUPERVISORES.SUPERVISOR',
+    'RF_REGISTRO_MMTO_CALIBRACION_AREARIEGO_JEFE_DE_OPERACIONES':
+        'MATRIZ_JEFATURAS.JEFATURA',
   };
 
   static const Map<String, String> _multiCatalogByField = {
-    'RF_REGISTRO_CALIBRACION_PHMETRO_MATERIALES': 'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION.MATERIALES',
-    'RF_REGISTRO_LIMPIEZA_TANQUES_DEPOSITOS_AGU_MATERIALES': 'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES.MATERIALES',
+    'RF_REGISTRO_CALIBRACION_PHMETRO_MATERIALES':
+        'MATRIZ_MATERIALES_CALIBRACION_EQUIPOS_DE_MEDICION.MATERIALES',
+    'RF_REGISTRO_LIMPIEZA_TANQUES_DEPOSITOS_AGU_MATERIALES':
+        'MATRIZ_MATERIALES_PARA_LIMPIEZA_AMBIENTES.MATERIALES',
   };
 
   String? _catalogForField(Map<String, dynamic> field, {required bool multi}) {
@@ -496,7 +558,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         }
       }
       final text = value?.toString().trim() ?? '';
-      if (text.isEmpty || text.toUpperCase() == 'NULL' || seen.contains(text)) continue;
+      if (text.isEmpty || text.toUpperCase() == 'NULL' || seen.contains(text))
+        continue;
       seen.add(text);
       out.add(text);
     }
@@ -507,12 +570,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   void _recalculateDerivedFields() {
     final table = _normalizarNombreCampo(tableDestino ?? '');
     if (table == 'RF_REGISTRO_CAUDALIMETROS_CASETA') {
-      final inicio = double.tryParse((controllers['INICIO']?.text ?? '').replaceAll(',', '.'));
-      final fin = double.tryParse((controllers['FINAL']?.text ?? '').replaceAll(',', '.'));
+      final inicio = double.tryParse(
+          (controllers['INICIO']?.text ?? '').replaceAll(',', '.'));
+      final fin = double.tryParse(
+          (controllers['FINAL']?.text ?? '').replaceAll(',', '.'));
       final target = controllers['M3 TOTALES'];
       if (inicio != null && fin != null && target != null) {
         final result = fin - inicio;
-        target.text = result.toStringAsFixed(result.truncateToDouble() == result ? 0 : 2);
+        target.text =
+            result.toStringAsFixed(result.truncateToDouble() == result ? 0 : 2);
       }
     }
 
@@ -521,13 +587,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       TextEditingController? fechaRelativa;
       for (final entry in controllers.entries) {
         final name = _normalizarNombreCampo(entry.key);
-        if (name == 'FECHA_DE_EVALUACION' || name == 'FECHA_EVALUACION') fechaEvaluacion = entry.value;
+        if (name == 'FECHA_DE_EVALUACION' || name == 'FECHA_EVALUACION')
+          fechaEvaluacion = entry.value;
         if (name == 'FECHA_RELATIVA') fechaRelativa = entry.value;
       }
       if (fechaEvaluacion != null && fechaRelativa != null) {
         final parsed = DateTime.tryParse(fechaEvaluacion.text.trim());
         if (parsed != null) {
-          fechaRelativa.text = parsed.subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+          fechaRelativa.text = parsed
+              .subtract(const Duration(days: 1))
+              .toIso8601String()
+              .substring(0, 10);
         }
       }
     }
@@ -536,7 +606,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   void _setVariedadFromTurno(String? turno) {
     if (turno == null || turno.trim().isEmpty) return;
     final t = turno.trim();
-    final match = lotesVariedades.where((e) => e['turno']?.toString().trim() == t).toList();
+    final match = lotesVariedades
+        .where((e) => e['turno']?.toString().trim() == t)
+        .toList();
     if (match.isEmpty) return;
     final variedad = match.first['variedad']?.toString().trim() ?? '';
     for (final field in fields) {
@@ -548,7 +620,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _formFieldsForCandidateTablesFast(List<String> candidateTables) async {
+  Future<List<Map<String, dynamic>>> _formFieldsForCandidateTablesFast(
+      List<String> candidateTables) async {
     // Leer desde SQLite primero. La matriz puede haber sido reemplazada por
     // Actualizar datos mientras el proceso sigue vivo; usar el cache estático aquí
     // deja campos viejos en memoria.
@@ -586,7 +659,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   bool get _hasReactiveCalculations {
     if (_formulaFields.isNotEmpty) return true;
     final table = _normalizarNombreCampo(tableDestino ?? '');
-    return table == 'RF_REGISTRO_CAUDALIMETROS_CASETA' || table == 'RF_REGISTRO_DRENAJE_MACETA_CAMPO';
+    return table == 'RF_REGISTRO_CAUDALIMETROS_CASETA' ||
+        table == 'RF_REGISTRO_DRENAJE_MACETA_CAMPO';
   }
 
   void _scheduleRecalculationIfNeeded() {
@@ -611,8 +685,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final candidateTables = <String>[
       table,
-      if (_cleanNullableText(widget.format['tabla_destino']) != null) _cleanNullableText(widget.format['tabla_destino'])!,
-      ...internalTables.map((e) => _cleanNullableText(e['tabla_destino'])).whereType<String>(),
+      if (_cleanNullableText(widget.format['tabla_destino']) != null)
+        _cleanNullableText(widget.format['tabla_destino'])!,
+      ...internalTables
+          .map((e) => _cleanNullableText(e['tabla_destino']))
+          .whereType<String>(),
     ];
 
     final legacyRows = await _formFieldsForCandidateTablesFast(candidateTables);
@@ -634,12 +711,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final neededMatrixTables = _matrixTablesNeeded(rows);
     final missingMatrixTables = neededMatrixTables.where((table) {
       final wanted = _normalizarNombreCampo(table);
-      return matrixRowsByTable.keys.every((cached) => _normalizarNombreCampo(cached) != wanted);
+      return matrixRowsByTable.keys
+          .every((cached) => _normalizarNombreCampo(cached) != wanted);
     }).toSet();
-    if (_fieldsNeedMatrixRows(rows) && (matrixRowsByTable.isEmpty || missingMatrixTables.isNotEmpty)) {
+    if (_fieldsNeedMatrixRows(rows) &&
+        (matrixRowsByTable.isEmpty || missingMatrixTables.isNotEmpty)) {
       await _loadMatrixRows(
         updateState: false,
-        onlyTables: matrixRowsByTable.isEmpty ? neededMatrixTables : missingMatrixTables,
+        onlyTables: matrixRowsByTable.isEmpty
+            ? neededMatrixTables
+            : missingMatrixTables,
       );
     }
 
@@ -660,8 +741,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (campo.isEmpty) continue;
       final initialText = _initialValueForField(f, initial);
       final initialValue = initial[campo];
-      if (tipo == 'boolean_int' || uiType == 'boolean_int' || uiType == 'checkbox' || uiType == 'switch') {
-        dropdownValues[campo] = initialValue == null ? null : (_asBool(initialValue) ? 1 : 0);
+      if (tipo == 'boolean_int' ||
+          uiType == 'boolean_int' ||
+          uiType == 'checkbox' ||
+          uiType == 'switch') {
+        dropdownValues[campo] =
+            initialValue == null ? null : (_asBool(initialValue) ? 1 : 0);
       } else if (uiType == 'signature' || tipo == 'signature') {
         signatureValues[campo] = null;
       } else if (uiType == 'photo' || tipo == 'photo') {
@@ -697,7 +782,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
-  Map<String, dynamic>? _firstInternalTableWhere(bool Function(Map<String, dynamic>) test) {
+  Map<String, dynamic>? _firstInternalTableWhere(
+      bool Function(Map<String, dynamic>) test) {
     for (final row in internalTables) {
       if (test(row)) return row;
     }
@@ -707,15 +793,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   bool _isHeaderTableRow(Map<String, dynamic>? row) {
     if (row == null) return false;
     final mode = _normalizarNombreCampo(row['modo_captura']?.toString() ?? '');
-    final relation = _normalizarNombreCampo(row['tipo_relacion']?.toString() ?? '');
-    return _asBool(row['es_cabecera']) || mode == 'CABECERA' || relation == 'MAESTRO' || relation == 'CABECERA';
+    final relation =
+        _normalizarNombreCampo(row['tipo_relacion']?.toString() ?? '');
+    return _asBool(row['es_cabecera']) ||
+        mode == 'CABECERA' ||
+        relation == 'MAESTRO' ||
+        relation == 'CABECERA';
   }
 
   bool _isDetailTableRow(Map<String, dynamic>? row) {
     if (row == null) return false;
     final mode = _normalizarNombreCampo(row['modo_captura']?.toString() ?? '');
-    final relation = _normalizarNombreCampo(row['tipo_relacion']?.toString() ?? '');
-    return _asBool(row['es_detalle']) || mode == 'WIZARD_ITERADOR' || relation == 'DETALLE';
+    final relation =
+        _normalizarNombreCampo(row['tipo_relacion']?.toString() ?? '');
+    return _asBool(row['es_detalle']) ||
+        mode == 'WIZARD_ITERADOR' ||
+        relation == 'DETALLE';
   }
 
   Map<String, dynamic>? get _currentFormatTableConfig => selectedInternalTable;
@@ -727,11 +820,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   bool _fieldBelongsToCurrentCapture(Map<String, dynamic> field) {
-    final group = _normalizarNombreCampo(field['grupo_captura']?.toString() ?? '');
+    final group =
+        _normalizarNombreCampo(field['grupo_captura']?.toString() ?? '');
     if (group.isEmpty || group == 'NULL') return true;
     final current = _currentFormatTableConfig;
-    if (_isHeaderTableRow(current)) return group == 'CABECERA' || group == 'MAESTRO' || group == 'HEADER';
-    if (_isDetailTableRow(current)) return group == 'DETALLE' || group == 'MUESTRA' || group == 'DETAIL';
+    if (_isHeaderTableRow(current))
+      return group == 'CABECERA' || group == 'MAESTRO' || group == 'HEADER';
+    if (_isDetailTableRow(current))
+      return group == 'DETALLE' || group == 'MUESTRA' || group == 'DETAIL';
     return true;
   }
 
@@ -751,13 +847,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return _firstInternalTableWhere((row) {
       if (!_isDetailTableRow(row)) return false;
       final parent = _cleanNullableText(row['tabla_padre']);
-      return parent == null || headerTable == null || _normalizarNombreCampo(parent) == _normalizarNombreCampo(headerTable);
+      return parent == null ||
+          headerTable == null ||
+          _normalizarNombreCampo(parent) == _normalizarNombreCampo(headerTable);
     });
   }
 
   List<String> _copyFieldsFromParent(Map<String, dynamic>? detailRow) {
     final raw = detailRow?['copiar_campos_desde_padre']?.toString() ?? '';
-    return raw.split(RegExp(r'[,;|]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+    return raw
+        .split(RegExp(r'[,;|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
   }
 
   int? _intFromValue(dynamic value) {
@@ -769,13 +871,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   bool _isAutoFilledDetailField(String campo) {
     final detail = _currentFormatTableConfig;
-    if (!_isDetailTableRow(detail) || _wizardMasterPayload == null) return false;
+    if (!_isDetailTableRow(detail) || _wizardMasterPayload == null)
+      return false;
     final normalized = _normalizarNombreCampo(campo);
     final fk = _cleanNullableText(detail?['campo_fk_hijo']);
     final iter = _cleanNullableText(detail?['campo_iterador']);
     if (fk != null && _normalizarNombreCampo(fk) == normalized) return true;
     if (iter != null && _normalizarNombreCampo(iter) == normalized) return true;
-    return _copyFieldsFromParent(detail).any((c) => _normalizarNombreCampo(c) == normalized);
+    return _copyFieldsFromParent(detail)
+        .any((c) => _normalizarNombreCampo(c) == normalized);
   }
 
   void _applyMasterDefaultsToDetail() {
@@ -798,7 +902,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     final fk = _cleanNullableText(detail?['campo_fk_hijo']);
-    if (fk != null && controllers.containsKey(fk) && (_wizardMasterIdLocal ?? '').isNotEmpty) {
+    if (fk != null &&
+        controllers.containsKey(fk) &&
+        (_wizardMasterIdLocal ?? '').isNotEmpty) {
       controllers[fk]!.text = _wizardMasterIdLocal!;
     }
   }
@@ -806,12 +912,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   void _clearDetailControllersForNextIteration(Map<String, dynamic> detail) {
     final autoFields = <String>{
       ..._copyFieldsFromParent(detail).map(_normalizarNombreCampo),
-      if (_cleanNullableText(detail['campo_fk_hijo']) != null) _normalizarNombreCampo(_cleanNullableText(detail['campo_fk_hijo'])!),
-      if (_cleanNullableText(detail['campo_iterador']) != null) _normalizarNombreCampo(_cleanNullableText(detail['campo_iterador'])!),
+      if (_cleanNullableText(detail['campo_fk_hijo']) != null)
+        _normalizarNombreCampo(_cleanNullableText(detail['campo_fk_hijo'])!),
+      if (_cleanNullableText(detail['campo_iterador']) != null)
+        _normalizarNombreCampo(_cleanNullableText(detail['campo_iterador'])!),
       'ID_LOCAL',
     };
     for (final entry in controllers.entries) {
-      if (!autoFields.contains(_normalizarNombreCampo(entry.key))) entry.value.clear();
+      if (!autoFields.contains(_normalizarNombreCampo(entry.key)))
+        entry.value.clear();
     }
     dropdownValues.clear();
     multiSelectValues.clear();
@@ -823,7 +932,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   String? _cleanNullableText(dynamic value) {
     if (value == null) return null;
     final s = value.toString().trim();
-    if (s.isEmpty || s.toUpperCase() == 'NULL' || s.toUpperCase() == 'EMPTY') return null;
+    if (s.isEmpty || s.toUpperCase() == 'NULL' || s.toUpperCase() == 'EMPTY')
+      return null;
     return s;
   }
 
@@ -909,20 +1019,30 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   List<String> _jsonStringList(dynamic value) {
     if (value == null) return const <String>[];
-    if (value is List) return value.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    if (value is List)
+      return value
+          .map((e) => e.toString().trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
     final raw = value.toString().trim();
     if (raw.isEmpty || raw.toLowerCase() == 'null') return const <String>[];
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is List) return decoded.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      if (decoded is List)
+        return decoded
+            .map((e) => e.toString().trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
     } catch (_) {}
     var cleaned = raw;
-    if (cleaned.startsWith('[') && cleaned.endsWith(']')) cleaned = cleaned.substring(1, cleaned.length - 1);
+    if (cleaned.startsWith('[') && cleaned.endsWith(']'))
+      cleaned = cleaned.substring(1, cleaned.length - 1);
     return cleaned
         .split(RegExp(r'[,;|]'))
         .map((e) => e.trim())
         .map((e) {
-          if ((e.startsWith('"') && e.endsWith('"')) || (e.startsWith("'") && e.endsWith("'"))) {
+          if ((e.startsWith('"') && e.endsWith('"')) ||
+              (e.startsWith("'") && e.endsWith("'"))) {
             return e.substring(1, e.length - 1).trim();
           }
           return e;
@@ -931,17 +1051,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         .toList();
   }
 
-  bool _sameLoose(dynamic a, dynamic b) => _normalizarNombreCampo(_txt(a)) == _normalizarNombreCampo(_txt(b));
+  bool _sameLoose(dynamic a, dynamic b) =>
+      _normalizarNombreCampo(_txt(a)) == _normalizarNombreCampo(_txt(b));
 
   Future<Set<String>> _loadRestrictedFieldsForCurrentUser() async {
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? await LocalSession().cachedUserId();
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await LocalSession().cachedUserId();
     if (userId == null || userId.trim().isEmpty) return <String>{};
-    final permissions = await local.where('local_permissions', 'user_id = ?', [userId.trim()]);
+    final permissions =
+        await local.where('local_permissions', 'user_id = ?', [userId.trim()]);
     final table = tableDestino ?? '';
     final values = <String>{};
     for (final p in permissions) {
-      final moduleOk = _txt(p['modulo']).isEmpty || _sameLoose(p['modulo'], widget.moduleId);
-      final formatOk = _txt(p['formato']).isEmpty || _sameLoose(p['formato'], widget.format['id']);
+      final moduleOk =
+          _txt(p['modulo']).isEmpty || _sameLoose(p['modulo'], widget.moduleId);
+      final formatOk = _txt(p['formato']).isEmpty ||
+          _sameLoose(p['formato'], widget.format['id']);
       if (!moduleOk || !formatOk) continue;
       for (final c in _jsonStringList(p['campos_restringidos'])) {
         final campo = _campoByIdentifier(c, table: table);
@@ -965,11 +1090,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return _normalizeTipo(field['tipo']?.toString());
   }
 
-  bool _isEditable(Map<String, dynamic> field) => _asBool(field['editable'], defaultValue: true);
-  bool _isVisible(Map<String, dynamic> field) => _asBool(field['visible'], defaultValue: true);
+  bool _isEditable(Map<String, dynamic> field) =>
+      _asBool(field['editable'], defaultValue: true);
+  bool _isVisible(Map<String, dynamic> field) =>
+      _asBool(field['visible'], defaultValue: true);
 
   FocusNode _focusNodeFor(String campo) {
-    return focusNodes.putIfAbsent(campo, () => FocusNode(debugLabel: 'field_$campo'));
+    return focusNodes.putIfAbsent(
+        campo, () => FocusNode(debugLabel: 'field_$campo'));
   }
 
   Color? _parseMatrixColor(dynamic value) {
@@ -1001,25 +1129,44 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       'transparent': Colors.transparent,
     };
     if (names.containsKey(text)) return names[text];
-    final rgb = RegExp(r'^rgba?\s*\(\s*(\d{1,3})\s*[,;]\s*(\d{1,3})\s*[,;]\s*(\d{1,3})(?:\s*[,;]\s*([0-9.]+))?\s*\)$').firstMatch(text);
+    final rgb = RegExp(
+            r'^rgba?\s*\(\s*(\d{1,3})\s*[,;]\s*(\d{1,3})\s*[,;]\s*(\d{1,3})(?:\s*[,;]\s*([0-9.]+))?\s*\)$')
+        .firstMatch(text);
     if (rgb != null) {
       int clamp(String v) => (int.tryParse(v) ?? 0).clamp(0, 255).toInt();
       final alphaText = rgb.group(4);
-      final alpha = alphaText == null ? 255 : ((double.tryParse(alphaText) ?? 1).clamp(0, 1) * 255).round();
-      return Color.fromARGB(alpha, clamp(rgb.group(1)!), clamp(rgb.group(2)!), clamp(rgb.group(3)!));
+      final alpha = alphaText == null
+          ? 255
+          : ((double.tryParse(alphaText) ?? 1).clamp(0, 1) * 255).round();
+      return Color.fromARGB(alpha, clamp(rgb.group(1)!), clamp(rgb.group(2)!),
+          clamp(rgb.group(3)!));
     }
     text = text.replaceAll('#', '').replaceAll('0x', '');
-    if (RegExp(r'^[0-9a-f]{6}$', caseSensitive: false).hasMatch(text)) return Color(int.parse('ff$text', radix: 16));
-    if (RegExp(r'^[0-9a-f]{8}$', caseSensitive: false).hasMatch(text)) return Color(int.parse(text, radix: 16));
+    if (RegExp(r'^[0-9a-f]{6}$', caseSensitive: false).hasMatch(text))
+      return Color(int.parse('ff$text', radix: 16));
+    if (RegExp(r'^[0-9a-f]{8}$', caseSensitive: false).hasMatch(text))
+      return Color(int.parse(text, radix: 16));
     return null;
   }
 
-  bool _conditionalFormatApplies(Map<String, dynamic> field) {
-    final raw =
-        _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
-    if (_isNullLike(raw)) return false;
+  bool _conditionalFormatApplies(
+    Map<String, dynamic> field, {
+    dynamic conditionValue,
+    bool emptyMeansApply = false,
+  }) {
+    final raw = conditionValue ??
+        _fieldMetaValue(field, [
+          'formato_condicional_campo',
+          'formato condicional campo',
+          'condicion_formato',
+          'condición formato',
+          'formato_condicional'
+        ]);
+    if (_isNullLike(raw)) return emptyMeansApply;
     var condition = raw.toString().trim();
-    if (condition.isEmpty || condition.toUpperCase() == 'NULL') return false;
+    if (condition.isEmpty || condition.toUpperCase() == 'NULL') {
+      return emptyMeansApply;
+    }
 
     final campo = field['campo']?.toString().trim() ?? '';
     if (campo.isEmpty) return false;
@@ -1041,29 +1188,41 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (call != null && call.start == 0 && call.end == expr.length) {
       final name = _normalizeFormulaFunctionName(call.name);
       if ((name == 'IF' || name == 'SI') && call.args.length >= 3) {
-        final selected = _evalConditionalFormatCondition(call.args[0]) ? call.args[1] : call.args[2];
+        final selected = _evalConditionalFormatCondition(call.args[0])
+            ? call.args[1]
+            : call.args[2];
         final value = _evalLocalFormula(selected);
         if (value is bool) return value;
         final numValue = _tryFormulaDouble(value);
         if (numValue != null) return numValue != 0;
         final text = value?.toString().trim().toUpperCase() ?? '';
-        return text == 'TRUE' || text == 'VERDADERO' || text == 'SI' || text == 'SÍ';
+        return text == 'TRUE' ||
+            text == 'VERDADERO' ||
+            text == 'SI' ||
+            text == 'SÍ';
       }
     }
 
     final orIndex = _indexOfTopLevelLogical(expr, ['||', ' OR ', ' O ']);
     if (orIndex != null) {
-      return _evalConditionalFormatCondition(expr.substring(0, orIndex.start)) || _evalConditionalFormatCondition(expr.substring(orIndex.end));
+      return _evalConditionalFormatCondition(
+              expr.substring(0, orIndex.start)) ||
+          _evalConditionalFormatCondition(expr.substring(orIndex.end));
     }
 
     final andIndex = _indexOfTopLevelLogical(expr, ['&&', ' AND ', ' Y ']);
     if (andIndex != null) {
-      return _evalConditionalFormatCondition(expr.substring(0, andIndex.start)) && _evalConditionalFormatCondition(expr.substring(andIndex.end));
+      return _evalConditionalFormatCondition(
+              expr.substring(0, andIndex.start)) &&
+          _evalConditionalFormatCondition(expr.substring(andIndex.end));
     }
 
-    if (expr.startsWith('!')) return !_evalConditionalFormatCondition(expr.substring(1));
-    if (expr.toUpperCase().startsWith('NOT ')) return !_evalConditionalFormatCondition(expr.substring(4));
-    if (expr.toUpperCase().startsWith('NO ')) return !_evalConditionalFormatCondition(expr.substring(3));
+    if (expr.startsWith('!'))
+      return !_evalConditionalFormatCondition(expr.substring(1));
+    if (expr.toUpperCase().startsWith('NOT '))
+      return !_evalConditionalFormatCondition(expr.substring(4));
+    if (expr.toUpperCase().startsWith('NO '))
+      return !_evalConditionalFormatCondition(expr.substring(3));
 
     return _evalFormulaCondition(expr);
   }
@@ -1100,11 +1259,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
-  bool _hasConditionalFormatConfig(Map<String, dynamic> field) {
-    final condition =
-        _fieldMetaValue(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
-    if (_isNullLike(condition)) return false;
-    return condition.toString().trim().isNotEmpty;
+  double? _fieldFontSize(Map<String, dynamic> field) {
+    final raw = _fieldMetaValue(field, [
+      'tamanio_letra',
+      'tamano_letra',
+      'tamaño_letra',
+      'font_size',
+    ]);
+    if (_isNullLike(raw)) return null;
+    final value = double.tryParse(raw.toString().trim());
+    if (value == null || value < 8 || value > 72) return null;
+    return value;
   }
 
   Widget _styledFieldWidget(Map<String, dynamic> field) {
@@ -1114,26 +1279,87 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     // destruir y recrear el editor nativo mientras se escribe, provocando que el
     // cursor salte a otro campo. Si el campo tiene regla de formato, mantenemos
     // siempre la misma estructura visual y solo cambiamos colores.
-    if (!_hasConditionalFormatConfig(field)) return child;
+    final legacyCondition = _fieldMetaValue(field, [
+      'formato_condicional_campo',
+      'formato condicional campo',
+      'condicion_formato',
+      'condición formato',
+      'formato_condicional'
+    ]);
+    dynamic styleCondition(List<String> names) {
+      final own = _fieldMetaValue(field, names);
+      return _isNullLike(own) ? legacyCondition : own;
+    }
 
-    final applies = _conditionalFormatApplies(field);
-    final textColor = applies ? _parseMatrixColor(_fieldMetaValue(field, ['color_texto', 'color texto', 'texto_color'])) : null;
-    final bgColor = applies ? _parseMatrixColor(_fieldMetaValue(field, ['color_fondo', 'color fondo', 'fondo_color'])) : null;
-    final borderColor = applies ? _parseMatrixColor(_fieldMetaValue(field, ['color_borde', 'color borde', 'borde_color'])) : null;
+    final textColor = _conditionalFormatApplies(
+      field,
+      conditionValue:
+          styleCondition(['condicion_color_texto', 'condicion color texto']),
+      emptyMeansApply: true,
+    )
+        ? _parseMatrixColor(_fieldMetaValue(
+            field, ['color_texto', 'color texto', 'texto_color']))
+        : null;
+    final bgColor = _conditionalFormatApplies(
+      field,
+      conditionValue:
+          styleCondition(['condicion_color_fondo', 'condicion color fondo']),
+      emptyMeansApply: true,
+    )
+        ? _parseMatrixColor(_fieldMetaValue(
+            field, ['color_fondo', 'color fondo', 'fondo_color']))
+        : null;
+    final borderColor = _conditionalFormatApplies(
+      field,
+      conditionValue:
+          styleCondition(['condicion_color_borde', 'condicion color borde']),
+      emptyMeansApply: true,
+    )
+        ? _parseMatrixColor(_fieldMetaValue(
+            field, ['color_borde', 'color borde', 'borde_color']))
+        : null;
+    final fontSize = _fieldFontSize(field);
+
+    if (textColor == null &&
+        bgColor == null &&
+        borderColor == null &&
+        fontSize == null) {
+      return child;
+    }
 
     final baseTheme = Theme.of(context);
+    final baseBodySize = baseTheme.textTheme.bodyMedium?.fontSize ?? 14;
+    final fontSizeFactor =
+        fontSize == null ? 1.0 : (fontSize / baseBodySize).clamp(0.5, 4.0);
     final effectiveBorderColor = borderColor ?? baseTheme.colorScheme.outline;
-    final border = OutlineInputBorder(borderSide: BorderSide(color: effectiveBorderColor, width: borderColor == null ? 1 : 1.8));
+    final border = OutlineInputBorder(
+        borderSide: BorderSide(
+            color: effectiveBorderColor, width: borderColor == null ? 1 : 1.8));
 
     final themedChild = Theme(
       data: baseTheme.copyWith(
-        textTheme: textColor == null ? baseTheme.textTheme : baseTheme.textTheme.apply(bodyColor: textColor, displayColor: textColor),
+        textTheme: baseTheme.textTheme.apply(
+          bodyColor: textColor,
+          displayColor: textColor,
+          fontSizeFactor: fontSizeFactor,
+        ),
         inputDecorationTheme: baseTheme.inputDecorationTheme.copyWith(
-          filled: bgColor != null ? true : baseTheme.inputDecorationTheme.filled,
+          filled:
+              bgColor != null ? true : baseTheme.inputDecorationTheme.filled,
           fillColor: bgColor ?? baseTheme.inputDecorationTheme.fillColor,
-          labelStyle: textColor == null ? baseTheme.inputDecorationTheme.labelStyle : TextStyle(color: textColor),
-          floatingLabelStyle: textColor == null ? baseTheme.inputDecorationTheme.floatingLabelStyle : TextStyle(color: textColor, fontWeight: FontWeight.w700),
-          helperStyle: textColor == null ? baseTheme.inputDecorationTheme.helperStyle : TextStyle(color: textColor.withOpacity(0.85)),
+          labelStyle:
+              (baseTheme.inputDecorationTheme.labelStyle ?? const TextStyle())
+                  .copyWith(color: textColor, fontSize: fontSize),
+          floatingLabelStyle:
+              (baseTheme.inputDecorationTheme.floatingLabelStyle ??
+                      const TextStyle())
+                  .copyWith(
+                      color: textColor,
+                      fontSize: fontSize,
+                      fontWeight: FontWeight.w700),
+          helperStyle: textColor == null
+              ? baseTheme.inputDecorationTheme.helperStyle
+              : TextStyle(color: textColor.withOpacity(0.85)),
           enabledBorder: border,
           focusedBorder: border,
           disabledBorder: border,
@@ -1141,12 +1367,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         checkboxTheme: textColor == null
             ? baseTheme.checkboxTheme
             : baseTheme.checkboxTheme.copyWith(
-                checkColor: MaterialStateProperty.all(bgColor ?? baseTheme.colorScheme.surface),
-                fillColor: MaterialStateProperty.resolveWith((states) => states.contains(MaterialState.selected) ? textColor : null),
+                checkColor: MaterialStateProperty.all(
+                    bgColor ?? baseTheme.colorScheme.surface),
+                fillColor: MaterialStateProperty.resolveWith((states) =>
+                    states.contains(MaterialState.selected) ? textColor : null),
               ),
       ),
       child: DefaultTextStyle.merge(
-        style: TextStyle(color: textColor),
+        style: TextStyle(color: textColor, fontSize: fontSize),
         child: IconTheme.merge(
           data: IconThemeData(color: textColor),
           child: child,
@@ -1162,7 +1390,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: BorderRadius.circular(6),
-        border: borderColor == null ? null : Border.all(color: borderColor, width: 1.8),
+        border: borderColor == null
+            ? null
+            : Border.all(color: borderColor, width: 1.8),
       ),
       child: themedChild,
     );
@@ -1172,8 +1402,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final out = <int, List<String>>{};
     final seen = <String>{};
     for (final field in fields) {
-      final textRaw = _fieldMetaValue(field, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo']);
-      final rowRaw = _fieldMetaValue(field, ['fila_sub_titulo', 'fila sub titulo', 'fila_subtitulo', 'fila subtitulo']);
+      final textRaw = _fieldMetaValue(
+          field, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo']);
+      final rowRaw = _fieldMetaValue(field, [
+        'fila_sub_titulo',
+        'fila sub titulo',
+        'fila_subtitulo',
+        'fila subtitulo'
+      ]);
       if (_isNullLike(textRaw) || _isNullLike(rowRaw)) continue;
       final text = textRaw.toString().trim();
       final row = int.tryParse(rowRaw.toString().trim());
@@ -1184,22 +1420,109 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return out;
   }
 
-  Widget _subtitleWidget(String text) {
+  EdgeInsets _matrixPadding(dynamic raw) {
+    if (_isNullLike(raw)) {
+      return const EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+    }
+    final values = raw
+        .toString()
+        .split(RegExp(r'[,; ]+'))
+        .where((value) => value.trim().isNotEmpty)
+        .map((value) => double.tryParse(value.trim()) ?? 0)
+        .toList(growable: false);
+    if (values.length == 1) return EdgeInsets.all(values.first);
+    if (values.length == 2) {
+      return EdgeInsets.symmetric(
+          horizontal: values.first, vertical: values[1]);
+    }
+    if (values.length >= 4) {
+      return EdgeInsets.fromLTRB(values[0], values[1], values[2], values[3]);
+    }
+    return const EdgeInsets.symmetric(horizontal: 12, vertical: 10);
+  }
+
+  Alignment _matrixTextAlignment(dynamic raw) {
+    final normalized = raw?.toString().trim().toLowerCase() ?? '';
+    if (normalized == 'derecha' || normalized == 'right') {
+      return Alignment.centerRight;
+    }
+    if (normalized == 'centro' ||
+        normalized == 'center' ||
+        normalized == 'centrado') {
+      return Alignment.center;
+    }
+    return Alignment.centerLeft;
+  }
+
+  Widget _subtitleWidget(String text, [Map<String, dynamic>? field]) {
+    final alignment = field == null
+        ? Alignment.centerLeft
+        : _matrixTextAlignment(_fieldMetaValue(field, [
+            'subtitulo_alineacion',
+            'subtitulo alineacion',
+          ]));
+    final fontSize = field == null
+        ? null
+        : double.tryParse(_fieldMetaValue(field, [
+              'subtitulo_tamanio_letra',
+              'subtitulo_tamano_letra',
+            ])?.toString() ??
+            '');
+    final textColor = field == null
+        ? null
+        : _parseMatrixColor(
+            _fieldMetaValue(field, ['subtitulo_color', 'subtitulo color']));
+    final padding = field == null
+        ? const EdgeInsets.symmetric(horizontal: 12, vertical: 10)
+        : _matrixPadding(
+            _fieldMetaValue(field, ['subtitulo_padding', 'subtitulo padding']));
     return Container(
       width: double.infinity,
       margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      padding: padding,
+      alignment: alignment,
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(0.45),
+        color: Theme.of(context)
+            .colorScheme
+            .surfaceContainerHighest
+            .withOpacity(0.45),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(text, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)),
+      child: Text(text,
+          style: Theme.of(context).textTheme.titleMedium?.copyWith(
+              fontWeight: FontWeight.w700,
+              color: textColor,
+              fontSize: fontSize)),
+    );
+  }
+
+  Widget _fieldWithSubtitle(Map<String, dynamic> field) {
+    final raw = _fieldMetaValue(
+        field, ['sub_titulo', 'sub titulo', 'subtítulo', 'subtitulo']);
+    final legacyRow = _fieldMetaValue(field, [
+      'fila_sub_titulo',
+      'fila sub titulo',
+      'fila_subtitulo',
+      'fila subtitulo'
+    ]);
+    final text = _isNullLike(raw) ? '' : raw.toString().trim();
+    if (text.isEmpty || !_isNullLike(legacyRow)) {
+      return _styledFieldWidget(field);
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _subtitleWidget(text, field),
+        _styledFieldWidget(field),
+      ],
     );
   }
 
   int _photoLimitFromMatrix() {
     var total = 0;
-    for (final field in _photoFieldsForCurrentTable(includeWithoutLimit: false)) {
+    for (final field
+        in _photoFieldsForCurrentTable(includeWithoutLimit: false)) {
       total += _photoSlotsForField(field);
     }
     return total;
@@ -1222,11 +1545,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   int _photoFieldOrder(String campo) {
-    final match = RegExp(r'(?:FOTO|PHOTO)[^0-9]*([0-9]+)', caseSensitive: false).firstMatch(campo.trim());
+    final match = RegExp(r'(?:FOTO|PHOTO)[^0-9]*([0-9]+)', caseSensitive: false)
+        .firstMatch(campo.trim());
     return int.tryParse(match?.group(1) ?? '') ?? 999999;
   }
 
   int _photoSlotsForField(Map<String, dynamic> field) {
+    final campo = field['campo']?.toString() ?? '';
+    if (_isPhotoFieldName(campo)) return 1;
     final raw = field['numero_fotos'];
     final value = int.tryParse(raw?.toString().trim() ?? '') ?? 0;
     return value <= 0 ? 1 : value;
@@ -1234,14 +1560,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   String _photoGroupName(Map<String, dynamic> field) {
     final configured = field['lista_destino_photo']?.toString().trim() ?? '';
-    if (configured.isNotEmpty && configured.toLowerCase() != 'null') return configured;
+    if (configured.isNotEmpty && configured.toLowerCase() != 'null')
+      return configured;
     final etiqueta = field['etiqueta']?.toString().trim() ?? '';
-    if (etiqueta.isNotEmpty && etiqueta.toLowerCase() != 'null') return etiqueta;
+    if (etiqueta.isNotEmpty && etiqueta.toLowerCase() != 'null')
+      return etiqueta;
     return field['campo']?.toString().trim() ?? 'Foto';
   }
 
   int _photoListOrder(Map<String, dynamic> field) {
-    final raw = field['orden_lista_photo'] ?? field['orden lista photo'] ?? field['ordenListaPhoto'];
+    final raw = field['orden_lista_photo'] ??
+        field['orden lista photo'] ??
+        field['ordenListaPhoto'];
     final parsed = int.tryParse(raw?.toString().trim() ?? '');
     if (parsed != null) return parsed;
     final orden = int.tryParse(field['orden']?.toString().trim() ?? '');
@@ -1249,15 +1579,27 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return _photoFieldOrder(field['campo']?.toString() ?? '');
   }
 
-  List<Map<String, dynamic>> _photoFieldsForCurrentTable({bool includeWithoutLimit = true}) {
+  List<Map<String, dynamic>> _photoFieldsForCurrentTable(
+      {bool includeWithoutLimit = true}) {
+    final hasNumberedPhotoColumns = fields.any((field) =>
+        _isConfiguredPhotoField(field) &&
+        _isPhotoFieldName(field['campo']?.toString() ?? ''));
     final list = fields.where((field) {
       final campo = field['campo']?.toString() ?? '';
       final tipo = _normalizeTipo(field['tipo']?.toString());
       final uiType = _uiType(field);
-      final nFotos = int.tryParse(field['numero_fotos']?.toString().trim() ?? '') ?? 0;
-      final isPhoto = campo.isNotEmpty && (tipo == 'photo' || uiType == 'photo');
+      final nFotos =
+          int.tryParse(field['numero_fotos']?.toString().trim() ?? '') ?? 0;
+      final isPhoto =
+          campo.isNotEmpty && (tipo == 'photo' || uiType == 'photo');
       if (!isPhoto) return false;
-      return includeWithoutLimit || nFotos > 0 || uiType == 'photo' || tipo == 'photo';
+      if (hasNumberedPhotoColumns && nFotos > 0 && !_isPhotoFieldName(campo)) {
+        return false;
+      }
+      return includeWithoutLimit ||
+          nFotos > 0 ||
+          uiType == 'photo' ||
+          tipo == 'photo';
     }).toList();
     list.sort((a, b) {
       final oa = _photoListOrder(a);
@@ -1268,7 +1610,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final gb = _photoGroupName(b).toUpperCase();
       final g = ga.compareTo(gb);
       if (g != 0) return g;
-      return _photoFieldOrder(a['campo']?.toString() ?? '').compareTo(_photoFieldOrder(b['campo']?.toString() ?? ''));
+      return _photoFieldOrder(a['campo']?.toString() ?? '')
+          .compareTo(_photoFieldOrder(b['campo']?.toString() ?? ''));
     });
     return list;
   }
@@ -1281,8 +1624,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
     final entries = groups.entries.toList()
       ..sort((a, b) {
-        final oa = a.value.map(_photoListOrder).fold<int>(999999, (prev, v) => v < prev ? v : prev);
-        final ob = b.value.map(_photoListOrder).fold<int>(999999, (prev, v) => v < prev ? v : prev);
+        final oa = a.value
+            .map(_photoListOrder)
+            .fold<int>(999999, (prev, v) => v < prev ? v : prev);
+        final ob = b.value
+            .map(_photoListOrder)
+            .fold<int>(999999, (prev, v) => v < prev ? v : prev);
         final o = oa.compareTo(ob);
         if (o != 0) return o;
         return a.key.toUpperCase().compareTo(b.key.toUpperCase());
@@ -1348,7 +1695,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final text = value.toString().trim();
     if (text.isEmpty) return false;
     final upper = text.toUpperCase();
-    if (upper == '0' || upper == 'FALSE' || upper == 'FALSO' || upper == 'NO' || upper == 'NULL') return false;
+    if (upper == '0' ||
+        upper == 'FALSE' ||
+        upper == 'FALSO' ||
+        upper == 'NO' ||
+        upper == 'NULL') return false;
     return true;
   }
 
@@ -1363,8 +1714,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final formula = field['formula_funcion']?.toString().trim() ?? '';
     if (formula.isEmpty || formula.toLowerCase() == 'null') return null;
 
-    final deps = _parseBracketFieldList(field['photo_depende_de']?.toString() ?? '');
-    final labels = deps.map(_fieldLabelByIdentifier).where((e) => e.trim().isNotEmpty).toList();
+    final deps =
+        _parseBracketFieldList(field['photo_depende_de']?.toString() ?? '');
+    final labels = deps
+        .map(_fieldLabelByIdentifier)
+        .where((e) => e.trim().isNotEmpty)
+        .toList();
 
     try {
       final ok = _evalFormulaCondition(formula);
@@ -1377,12 +1732,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               missing.add(_fieldLabelByIdentifier(dep));
             }
           }
-          if (missing.isNotEmpty) return 'Completa los campos: ${missing.join(', ')}';
+          if (missing.isNotEmpty)
+            return 'Completa los campos: ${missing.join(', ')}';
         }
-        return labels.isEmpty ? 'No se cumple la condición para tomar esta foto.' : 'Completa los campos: ${labels.join(', ')}';
+        return labels.isEmpty
+            ? 'No se cumple la condición para tomar esta foto.'
+            : 'Completa los campos: ${labels.join(', ')}';
       }
     } catch (_) {
-      return labels.isEmpty ? 'No se pudo validar la condición de la foto.' : 'Completa los campos: ${labels.join(', ')}';
+      return labels.isEmpty
+          ? 'No se pudo validar la condición de la foto.'
+          : 'Completa los campos: ${labels.join(', ')}';
     }
     return null;
   }
@@ -1397,7 +1757,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         content: Text(message),
         actions: [
           TextButton(
-            onPressed: () => Navigator.of(dialogContext, rootNavigator: true).pop(),
+            onPressed: () =>
+                Navigator.of(dialogContext, rootNavigator: true).pop(),
             child: const Text('Entendido'),
           ),
         ],
@@ -1424,7 +1785,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     FocusScope.of(context).unfocus();
     setState(() => capturingPhoto = true);
     try {
-      final file = await _imagePicker.pickImage(source: ImageSource.camera, imageQuality: 55, maxWidth: 1024, maxHeight: 1024);
+      final file = await _imagePicker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 55,
+          maxWidth: 1024,
+          maxHeight: 1024);
       if (file == null || !mounted) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
@@ -1435,13 +1800,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir la cámara: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la cámara: $e')));
     } finally {
       if (mounted) setState(() => capturingPhoto = false);
     }
   }
 
-  Future<void> _captureNextPhotoInGroup(List<Map<String, dynamic>> photoFields) async {
+  Future<void> _captureNextPhotoInGroup(
+      List<Map<String, dynamic>> photoFields) async {
     if (photoFields.isEmpty) return;
     final targetField = photoFields.firstWhere(
       (f) => !_hasPhotoInField(f['campo']?.toString() ?? ''),
@@ -1452,10 +1819,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   Widget _photoTile(Map<String, dynamic> field, VoidCallback refreshSheet) {
     final campo = field['campo']?.toString() ?? '';
-    final etiqueta = field['etiqueta']?.toString().trim().isNotEmpty == true ? field['etiqueta'].toString().trim() : campo;
+    final etiqueta = field['etiqueta']?.toString().trim().isNotEmpty == true
+        ? field['etiqueta'].toString().trim()
+        : campo;
     final bytes = photoValues[campo] ?? _photoBytesFromController(campo);
     final raw = controllers[campo]?.text.trim() ?? '';
-    final hasRemoteImage = bytes == null && (raw.startsWith('http') || EvidenceStorage.isStorageUri(raw));
+    final hasRemoteImage = bytes == null &&
+        (raw.startsWith('http') || EvidenceStorage.isStorageUri(raw));
     return SizedBox(
       width: 112,
       child: Column(
@@ -1475,15 +1845,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: bytes != null
-                  ? ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(bytes, fit: BoxFit.cover))
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(bytes, fit: BoxFit.cover))
                   : hasRemoteImage
                       ? ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: FutureBuilder<String>(
                             future: EvidenceStorage.signedUrlForValue(raw),
                             builder: (context, snapshot) {
-                              if (!snapshot.hasData) return const Center(child: CircularProgressIndicator(strokeWidth: 2));
-                              return Image.network(snapshot.data!, fit: BoxFit.cover);
+                              if (!snapshot.hasData)
+                                return const Center(
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2));
+                              return Image.network(snapshot.data!,
+                                  fit: BoxFit.cover);
                             },
                           ),
                         )
@@ -1491,7 +1867,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             ),
           ),
           const SizedBox(height: 4),
-          Text(etiqueta, maxLines: 2, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center, style: const TextStyle(fontSize: 11)),
+          Text(etiqueta,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 11)),
           if (_hasPhotoInField(campo))
             TextButton(
               onPressed: () {
@@ -1508,14 +1888,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     );
   }
 
-  void _openPhotoGroupSheet(String groupName, List<Map<String, dynamic>> photoFields) {
+  void _openPhotoGroupSheet(
+      String groupName, List<Map<String, dynamic>> photoFields) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       builder: (_) {
         return StatefulBuilder(
           builder: (sheetContext, sheetSetState) {
-            final completed = photoFields.where((f) => _hasPhotoInField(f['campo']?.toString() ?? '')).length;
+            final completed = photoFields
+                .where((f) => _hasPhotoInField(f['campo']?.toString() ?? ''))
+                .length;
             return SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -1523,14 +1906,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Text(groupName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(groupName,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.bold, fontSize: 16)),
                     const SizedBox(height: 4),
                     Text('Fotos capturadas ($completed/${photoFields.length})'),
                     const SizedBox(height: 12),
                     Wrap(
                       spacing: 10,
                       runSpacing: 10,
-                      children: photoFields.map((field) => _photoTile(field, () => sheetSetState(() {}))).toList(),
+                      children: photoFields
+                          .map((field) =>
+                              _photoTile(field, () => sheetSetState(() {})))
+                          .toList(),
                     ),
                     const SizedBox(height: 12),
                     Row(
@@ -1568,7 +1956,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final groups = _photoGroupsForCurrentTable();
     if (groups.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Configura campos con tipo_ui=photo en la matriz de campos.')),
+        const SnackBar(
+            content: Text(
+                'Configura campos con tipo_ui=photo en la matriz de campos.')),
       );
       return;
     }
@@ -1587,18 +1977,27 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                   children: [
                     Text(
                       'Fotos capturadas (${_capturedPhotoCount()}/${_photoLimitFromMatrix()})',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      style: const TextStyle(
+                          fontWeight: FontWeight.bold, fontSize: 16),
                     ),
                     const SizedBox(height: 12),
                     ...groups.entries.map((entry) {
-                      final completed = entry.value.where((f) => _hasPhotoInField(f['campo']?.toString() ?? '')).length;
+                      final completed = entry.value
+                          .where((f) =>
+                              _hasPhotoInField(f['campo']?.toString() ?? ''))
+                          .length;
                       return Padding(
                         padding: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8), side: const BorderSide(color: Colors.black12)),
-                          leading: Icon(completed >= entry.value.length ? Icons.check_circle : Icons.photo_camera),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                              side: const BorderSide(color: Colors.black12)),
+                          leading: Icon(completed >= entry.value.length
+                              ? Icons.check_circle
+                              : Icons.photo_camera),
                           title: Text(entry.key),
-                          subtitle: Text('$completed/${entry.value.length} foto(s)'),
+                          subtitle:
+                              Text('$completed/${entry.value.length} foto(s)'),
                           trailing: const Icon(Icons.chevron_right),
                           onTap: () {
                             Navigator.pop(sheetContext);
@@ -1668,7 +2067,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
     final normalizedKeys = keys.map(_normalizarNombreCampo).toSet();
     for (final entry in field.entries) {
-      if (normalizedKeys.contains(_normalizarNombreCampo(entry.key)) && !_isNullLike(entry.value)) {
+      if (normalizedKeys.contains(_normalizarNombreCampo(entry.key)) &&
+          !_isNullLike(entry.value)) {
         return entry.value;
       }
     }
@@ -1676,14 +2076,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   int? _maxCharacters(Map<String, dynamic> field) {
-    final raw = _fieldMetaValue(field, ['num_caracteres', 'num caracteres', 'max_caracteres', 'max caracteres']);
+    final raw = _fieldMetaValue(field, [
+      'num_caracteres',
+      'num caracteres',
+      'max_caracteres',
+      'max caracteres'
+    ]);
     if (_isNullLike(raw)) return null;
     final parsed = int.tryParse(raw.toString().trim());
     if (parsed == null || parsed <= 0) return null;
     return parsed;
   }
 
-  List<TextInputFormatter> _inputFormattersForField(Map<String, dynamic> field) {
+  List<TextInputFormatter> _inputFormattersForField(
+      Map<String, dynamic> field) {
     final formatters = <TextInputFormatter>[];
     final maxChars = _maxCharacters(field);
 
@@ -1693,7 +2099,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       formatters.add(TextInputFormatter.withFunction((oldValue, newValue) {
         final text = newValue.text;
         if (text.isEmpty || text == '-') return newValue;
-        final pattern = decimal ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$') : RegExp(r'^-?\d*$');
+        final pattern = decimal
+            ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$')
+            : RegExp(r'^-?\d*$');
         return pattern.hasMatch(text) ? newValue : oldValue;
       }));
     }
@@ -1705,7 +2113,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return formatters;
   }
 
-  DateTime _safeDatePickerInitialDate(DateTime value, DateTime minDate, DateTime maxDate) {
+  DateTime _safeDatePickerInitialDate(
+      DateTime value, DateTime minDate, DateTime maxDate) {
     final date = DateTime(value.year, value.month, value.day);
     if (date.isBefore(minDate)) return minDate;
     if (date.isAfter(maxDate)) return maxDate;
@@ -1713,11 +2122,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   String? _rangeErrorForField(Map<String, dynamic> field, String rawValue) {
-    final tipo = _fieldMetaValue(field, ['tipo'])?.toString().trim().toLowerCase() ?? '';
-    final uiType = _fieldMetaValue(field, ['tipo_ui', 'tipo ui'])?.toString().trim().toLowerCase() ?? '';
-    if (tipo == 'date' || uiType == 'date' || tipo == 'fecha' || uiType == 'fecha') return null;
+    final tipo =
+        _fieldMetaValue(field, ['tipo'])?.toString().trim().toLowerCase() ?? '';
+    final uiType = _fieldMetaValue(field, ['tipo_ui', 'tipo ui'])
+            ?.toString()
+            .trim()
+            .toLowerCase() ??
+        '';
+    if (tipo == 'date' ||
+        uiType == 'date' ||
+        tipo == 'fecha' ||
+        uiType == 'fecha') return null;
 
-    final ruleRaw = _fieldMetaValue(field, ['rango_valor', 'rango valor', 'rango', 'validacion_rango']);
+    final ruleRaw = _fieldMetaValue(
+        field, ['rango_valor', 'rango valor', 'rango', 'validacion_rango']);
     if (_isNullLike(ruleRaw) || rawValue.trim().isEmpty) return null;
 
     final ruleOriginal = ruleRaw.toString().trim();
@@ -1725,7 +2143,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final value = double.tryParse(rawValue.trim().replaceAll(',', '.'));
     if (value == null) return 'Debe ser un número válido';
 
-    double? parseNum(String text) => double.tryParse(text.trim().replaceAll(',', '.'));
+    double? parseNum(String text) =>
+        double.tryParse(text.trim().replaceAll(',', '.'));
 
     // Formatos de rango inclusivo admitidos:
     // 10<>20, 10..20, 10:20, [10,20], [10;20], entre 10 y 20
@@ -1734,7 +2153,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       RegExp(r'^\s*(-?\d+(?:\.\d+)?)\s*\.\.\s*(-?\d+(?:\.\d+)?)\s*$'),
       RegExp(r'^\s*(-?\d+(?:\.\d+)?)\s*:\s*(-?\d+(?:\.\d+)?)\s*$'),
       RegExp(r'^\s*\[\s*(-?\d+(?:\.\d+)?)\s*[;]\s*(-?\d+(?:\.\d+)?)\s*\]\s*$'),
-      RegExp(r'^\s*ENTRE\s+(-?\d+(?:\.\d+)?)\s+Y\s+(-?\d+(?:\.\d+)?)\s*$', caseSensitive: false),
+      RegExp(r'^\s*ENTRE\s+(-?\d+(?:\.\d+)?)\s+Y\s+(-?\d+(?:\.\d+)?)\s*$',
+          caseSensitive: false),
     ];
 
     for (final pattern in betweenPatterns) {
@@ -1745,24 +2165,29 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (min == null || max == null) return null;
       final lo = math.min(min, max);
       final hi = math.max(min, max);
-      if (value < lo || value > hi) return 'Debe estar entre ${_compactNumberText(lo)} y ${_compactNumberText(hi)}';
+      if (value < lo || value > hi)
+        return 'Debe estar entre ${_compactNumberText(lo)} y ${_compactNumberText(hi)}';
       return null;
     }
 
     // Caso [10,20] necesita leerse antes de reemplazar coma decimal. Se evalúa sobre el texto original.
-    final bracketComma = RegExp(r'^\s*\[\s*(-?\d+(?:[\.,]\d+)?)\s*,\s*(-?\d+(?:[\.,]\d+)?)\s*\]\s*$').firstMatch(ruleOriginal);
+    final bracketComma = RegExp(
+            r'^\s*\[\s*(-?\d+(?:[\.,]\d+)?)\s*,\s*(-?\d+(?:[\.,]\d+)?)\s*\]\s*$')
+        .firstMatch(ruleOriginal);
     if (bracketComma != null) {
       final min = parseNum(bracketComma.group(1)!);
       final max = parseNum(bracketComma.group(2)!);
       if (min != null && max != null) {
         final lo = math.min(min, max);
         final hi = math.max(min, max);
-        if (value < lo || value > hi) return 'Debe estar entre ${_compactNumberText(lo)} y ${_compactNumberText(hi)}';
+        if (value < lo || value > hi)
+          return 'Debe estar entre ${_compactNumberText(lo)} y ${_compactNumberText(hi)}';
         return null;
       }
     }
 
-    final cmp = RegExp(r'^\s*(>=|<=|!=|=|>|<)\s*(-?\d+(?:\.\d+)?)\s*$').firstMatch(rule);
+    final cmp = RegExp(r'^\s*(>=|<=|!=|=|>|<)\s*(-?\d+(?:\.\d+)?)\s*$')
+        .firstMatch(rule);
     if (cmp != null) {
       final op = cmp.group(1)!;
       final ref = double.parse(cmp.group(2)!);
@@ -1791,10 +2216,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     // Lista exacta de valores permitidos: 0|1|2 o IN(0;1;2)
-    final inText =
-        ruleOriginal.toUpperCase().startsWith('IN(') && ruleOriginal.endsWith(')') ? ruleOriginal.substring(3, ruleOriginal.length - 1) : ruleOriginal;
+    final inText = ruleOriginal.toUpperCase().startsWith('IN(') &&
+            ruleOriginal.endsWith(')')
+        ? ruleOriginal.substring(3, ruleOriginal.length - 1)
+        : ruleOriginal;
     if (inText.contains('|') || ruleOriginal.toUpperCase().startsWith('IN(')) {
-      final allowed = inText.split(RegExp(r'[|;]')).map(parseNum).whereType<double>().toList();
+      final allowed = inText
+          .split(RegExp(r'[|;]'))
+          .map(parseNum)
+          .whereType<double>()
+          .toList();
       if (allowed.isNotEmpty && !allowed.contains(value)) {
         return 'Debe ser uno de estos valores: ${allowed.map(_compactNumberText).join(', ')}';
       }
@@ -1806,7 +2237,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   String _compactNumberText(double number) {
     if (number.isNaN || number.isInfinite) return '';
     if (number.truncateToDouble() == number) return number.toStringAsFixed(0);
-    return number.toStringAsFixed(8).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+    return number
+        .toStringAsFixed(8)
+        .replaceFirst(RegExp(r'0+$'), '')
+        .replaceFirst(RegExp(r'\.$'), '');
   }
 
   String _formatNumberText(dynamic value, Map<String, dynamic> field) {
@@ -1818,7 +2252,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return number.toStringAsFixed(_numeroDecimales(field));
   }
 
-  String _formatFormulaResultForField(dynamic value, Map<String, dynamic> field) {
+  String _formatFormulaResultForField(
+      dynamic value, Map<String, dynamic> field) {
     final raw = value?.toString().trim() ?? '';
     if (raw.isEmpty) return '';
     final tipo = _normalizeTipo(field['tipo']?.toString());
@@ -1833,7 +2268,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       return raw;
     }
     if (tipo == 'date' || uiType == 'date') return raw;
-    if (tipo == 'datetime' || tipo == 'timestamp' || uiType == 'datetime' || uiType == 'timestamp') return raw;
+    if (tipo == 'datetime' ||
+        tipo == 'timestamp' ||
+        uiType == 'datetime' ||
+        uiType == 'timestamp') return raw;
     if (tipo == 'percent' ||
         uiType == 'percent' ||
         tipo == 'number' ||
@@ -1868,7 +2306,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     // [a,b,c] o [a;b;c] es una lista manual.
     // [uuid-del-campo] / [CAMPO] / [Etiqueta] debe funcionar como referencia dinámica.
     final content = _unwrapBracketReference(text);
-    return content.contains(',') || content.contains(';') || content.contains('|');
+    return content.contains(',') ||
+        content.contains(';') ||
+        content.contains('|');
   }
 
   List<String>? _literalDropdownOptions(Map<String, dynamic> field) {
@@ -1908,7 +2348,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return _catalogKeyForSourceField(sourceField);
   }
 
-  String _initialValueForField(Map<String, dynamic> field, Map<String, dynamic> initial) {
+  String _initialValueForField(
+      Map<String, dynamic> field, Map<String, dynamic> initial) {
     final campo = field['campo']?.toString() ?? '';
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
@@ -1927,13 +2368,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
     }
     if (existing != null) {
-      if (tipo == 'number' || uiType == 'number') return _formatNumberText(existing, field);
+      if (tipo == 'number' || uiType == 'number')
+        return _formatNumberText(existing, field);
       return existing.toString();
     }
 
     final defaultValue = field['valor_default']?.toString().trim() ?? '';
     if (defaultValue.isNotEmpty && defaultValue.toUpperCase() != 'NULL') {
-      if (tipo == 'number' || tipo == 'numeric' || tipo == 'integer' || uiType == 'number' || uiType == 'numeric' || uiType == 'integer') {
+      if (tipo == 'number' ||
+          tipo == 'numeric' ||
+          tipo == 'integer' ||
+          uiType == 'number' ||
+          uiType == 'numeric' ||
+          uiType == 'integer') {
         return _formatNumberText(defaultValue, field);
       }
       return defaultValue;
@@ -1945,13 +2392,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return '';
   }
 
-  String? _campoById(String id) => _fieldDefByIdentifier(id)?['campo']?.toString();
+  String? _campoById(String id) =>
+      _fieldDefByIdentifier(id)?['campo']?.toString();
 
   String _valueTextByFieldId(String id) {
     final campo = _campoByIdentifier(id);
-    if (controllers.containsKey(campo)) return controllers[campo]?.text.trim() ?? '';
-    if (dropdownValues.containsKey(campo)) return dropdownValues[campo]?.toString() ?? '';
-    if (multiSelectValues.containsKey(campo)) return (multiSelectValues[campo] ?? <String>{}).join(', ');
+    if (controllers.containsKey(campo))
+      return controllers[campo]?.text.trim() ?? '';
+    if (dropdownValues.containsKey(campo))
+      return dropdownValues[campo]?.toString() ?? '';
+    if (multiSelectValues.containsKey(campo))
+      return (multiSelectValues[campo] ?? <String>{}).join(', ');
     return '';
   }
 
@@ -1964,21 +2415,27 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   String _runLookupFormula(String formula) {
-    final match = RegExp(r'^\s*LOOKU[PR]\s*\((.*)\)\s*$', caseSensitive: false).firstMatch(formula);
+    final match = RegExp(r'^\s*LOOKU[PR]\s*\((.*)\)\s*$', caseSensitive: false)
+        .firstMatch(formula);
     if (match == null) return '';
-    final args = match.group(1)!.split(RegExp(r'[,;]')).map((e) => e.trim()).toList();
+    final args =
+        match.group(1)!.split(RegExp(r'[,;]')).map((e) => e.trim()).toList();
     if (args.length < 4) return '';
     final sourceTable = args[0];
     final searchColumn = _campoByIdentifier(args[1], table: sourceTable);
     final searchToken = args[2];
     final returnColumn = _campoByIdentifier(args[3], table: sourceTable);
     final idMatch = RegExp(r'\{\{([^}]+)\}\}').firstMatch(searchToken);
-    final searchValue = idMatch == null ? searchToken : _valueTextByFieldId(idMatch.group(1)!.trim());
+    final searchValue = idMatch == null
+        ? searchToken
+        : _valueTextByFieldId(idMatch.group(1)!.trim());
     if (searchValue.trim().isEmpty) return '';
 
-    final rows = matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
+    final rows =
+        matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
     for (final row in rows) {
-      final candidate = _valueByColumnName(row, searchColumn)?.toString().trim() ?? '';
+      final candidate =
+          _valueByColumnName(row, searchColumn)?.toString().trim() ?? '';
       if (candidate == searchValue.trim()) {
         return _valueByColumnName(row, returnColumn)?.toString().trim() ?? '';
       }
@@ -1989,7 +2446,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   int _isoWeek(DateTime date) {
     final thursday = date.add(Duration(days: 3 - ((date.weekday + 6) % 7)));
     final firstThursday = DateTime(thursday.year, 1, 4);
-    return 1 + thursday.difference(firstThursday.add(Duration(days: 3 - ((firstThursday.weekday + 6) % 7)))).inDays ~/ 7;
+    return 1 +
+        thursday
+                .difference(firstThursday
+                    .add(Duration(days: 3 - ((firstThursday.weekday + 6) % 7))))
+                .inDays ~/
+            7;
   }
 
   String _runFormula(String formula) {
@@ -2015,9 +2477,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         final key = campo.toString().trim();
         final resolvedCampo = _campoByIdentifier(key);
         for (final candidate in [resolvedCampo, key]) {
-          if (controllers.containsKey(candidate)) return controllers[candidate]?.text.trim() ?? '';
-          if (dropdownValues.containsKey(candidate)) return dropdownValues[candidate];
-          if (multiSelectValues.containsKey(candidate)) return (multiSelectValues[candidate] ?? <String>{}).join(', ');
+          if (controllers.containsKey(candidate))
+            return controllers[candidate]?.text.trim() ?? '';
+          if (dropdownValues.containsKey(candidate))
+            return dropdownValues[candidate];
+          if (multiSelectValues.containsKey(candidate))
+            return (multiSelectValues[candidate] ?? <String>{}).join(', ');
         }
         return _valueTextByFieldId(key);
       },
@@ -2031,7 +2496,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final v = value.toDouble();
       if (v.isNaN || v.isInfinite) return '';
       if (v.truncateToDouble() == v) return v.toStringAsFixed(0);
-      return v.toStringAsFixed(10).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+      return v
+          .toStringAsFixed(10)
+          .replaceFirst(RegExp(r'0+$'), '')
+          .replaceFirst(RegExp(r'\.$'), '');
     }
     return value.toString();
   }
@@ -2044,27 +2512,34 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (upperLiteral == 'TRUE' || upperLiteral == 'VERDADERO') return true;
     if (upperLiteral == 'FALSE' || upperLiteral == 'FALSO') return false;
     if (_isNumericFormulaLiteral(expr)) return _toFormulaDouble(expr);
-    if (_isFormulaFieldRef(expr)) return _valueByFormulaIdentifier(expr.substring(1, expr.length - 1));
+    if (_isFormulaFieldRef(expr))
+      return _valueByFormulaIdentifier(expr.substring(1, expr.length - 1));
 
     final call = _readFormulaCall(expr);
     if (call != null && call.start == 0 && call.end == expr.length) {
       final name = _normalizeFormulaFunctionName(call.name);
       if (name == 'IF' || name == 'SI') {
         if (call.args.length < 3) return '';
-        return _evalFormulaCondition(call.args[0]) ? _evalLocalFormula(call.args[1]) : _evalLocalFormula(call.args[2]);
+        return _evalFormulaCondition(call.args[0])
+            ? _evalLocalFormula(call.args[1])
+            : _evalLocalFormula(call.args[2]);
       }
       if (name == 'ES_VACIO' || name == 'VACIO') {
         if (call.args.isEmpty) return true;
-        return (_evalLocalFormula(call.args.first)?.toString().trim() ?? '').isEmpty;
+        return (_evalLocalFormula(call.args.first)?.toString().trim() ?? '')
+            .isEmpty;
       }
       if (name == 'NO_ES_VACIO' || name == 'NOVACIO') {
         if (call.args.isEmpty) return false;
-        return (_evalLocalFormula(call.args.first)?.toString().trim() ?? '').isNotEmpty;
+        return (_evalLocalFormula(call.args.first)?.toString().trim() ?? '')
+            .isNotEmpty;
       }
       if (name == 'CONTIENE' || name == 'CONTAINS') {
         if (call.args.length < 2) return false;
-        final text = _evalLocalFormula(call.args[0])?.toString().toUpperCase() ?? '';
-        final needle = _evalLocalFormula(call.args[1])?.toString().toUpperCase() ?? '';
+        final text =
+            _evalLocalFormula(call.args[0])?.toString().toUpperCase() ?? '';
+        final needle =
+            _evalLocalFormula(call.args[1])?.toString().toUpperCase() ?? '';
         return text.contains(needle);
       }
       if (name == 'RESTA') {
@@ -2073,16 +2548,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           final firstDate = _tryParseLocalFormulaDate(values[0]);
           final secondDate = _tryParseLocalFormulaDate(values[1]);
           if (firstDate != null && secondDate != null) {
-            return _dateOnlyLocal(firstDate).difference(_dateOnlyLocal(secondDate)).inDays;
+            return _dateOnlyLocal(firstDate)
+                .difference(_dateOnlyLocal(secondDate))
+                .inDays;
           }
         }
         if (values.isEmpty) return 0.0;
-        return values.skip(1).fold<double>(_toFormulaDouble(values.first), (a, b) => a - _toFormulaDouble(b));
+        return values.skip(1).fold<double>(
+            _toFormulaDouble(values.first), (a, b) => a - _toFormulaDouble(b));
       }
       if (name == 'RESTA_TIEMPOS') {
         if (call.args.length < 2) return '';
-        final start = _formulaTimeMinutes(_evalLocalFormula(call.args[0]), fallbackToken: call.args[0]);
-        final end = _formulaTimeMinutes(_evalLocalFormula(call.args[1]), fallbackToken: call.args[1]);
+        final start = _formulaTimeMinutes(_evalLocalFormula(call.args[0]),
+            fallbackToken: call.args[0]);
+        final end = _formulaTimeMinutes(_evalLocalFormula(call.args[1]),
+            fallbackToken: call.args[1]);
         if (start == null || end == null) return '';
         var diff = end - start;
         if (diff < 0) diff += 24 * 60;
@@ -2090,17 +2570,23 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
       if (name == 'FECHAS_TRANSCURRIDAS') {
         if (call.args.length < 2) return '';
-        final startDate = _tryParseLocalFormulaDate(_evalLocalFormula(call.args[0]));
-        final endDate = _tryParseLocalFormulaDate(_evalLocalFormula(call.args[1]));
+        final startDate =
+            _tryParseLocalFormulaDate(_evalLocalFormula(call.args[0]));
+        final endDate =
+            _tryParseLocalFormulaDate(_evalLocalFormula(call.args[1]));
         if (startDate == null || endDate == null) return '';
-        return _dateOnlyLocal(endDate).difference(_dateOnlyLocal(startDate)).inDays;
+        return _dateOnlyLocal(endDate)
+            .difference(_dateOnlyLocal(startDate))
+            .inDays;
       }
       if (name == 'SUMAR_DIAS') {
         if (call.args.length < 2) return '';
-        final baseDate = _tryParseLocalFormulaDate(_evalLocalFormula(call.args[0]));
+        final baseDate =
+            _tryParseLocalFormulaDate(_evalLocalFormula(call.args[0]));
         if (baseDate == null) return '';
         final days = _toFormulaDouble(_evalLocalFormula(call.args[1])).round();
-        return _formatLocalFormulaDate(_dateOnlyLocal(baseDate).add(Duration(days: days)));
+        return _formatLocalFormulaDate(
+            _dateOnlyLocal(baseDate).add(Duration(days: days)));
       }
       if (name == 'HORA_ACTUAL' || name == 'AHORA_HORA') {
         return _formatLocalFormulaTime(DateTime.now());
@@ -2108,7 +2594,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (name == 'FECHA_ACTUAL' || name == 'HOY') {
         return _formatLocalFormulaDate(DateTime.now());
       }
-      if (name == 'FECHA_HORA_ACTUAL' || name == 'FECHAHORA_ACTUAL' || name == 'AHORA') {
+      if (name == 'FECHA_HORA_ACTUAL' ||
+          name == 'FECHAHORA_ACTUAL' ||
+          name == 'AHORA') {
         return _formatLocalFormulaDateTime(DateTime.now());
       }
       if (name == 'NUM' || name == 'NUMERO' || name == 'VALOR') {
@@ -2118,7 +2606,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (name == 'ROUND' || name == 'REDONDEAR') {
         if (call.args.isEmpty) return 0.0;
         final value = _toFormulaDouble(_evalLocalFormula(call.args[0]));
-        final decimals = call.args.length > 1 ? _toFormulaDouble(_evalLocalFormula(call.args[1])).round() : 0;
+        final decimals = call.args.length > 1
+            ? _toFormulaDouble(_evalLocalFormula(call.args[1])).round()
+            : 0;
         return double.parse(value.toStringAsFixed(decimals));
       }
       if (name == 'ABS' || name == 'ABSOLUTO') {
@@ -2127,9 +2617,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
       if (name == 'INT' || name == 'ENTERO') {
         if (call.args.isEmpty) return 0.0;
-        return _toFormulaDouble(_evalLocalFormula(call.args.first)).floorToDouble();
+        return _toFormulaDouble(_evalLocalFormula(call.args.first))
+            .floorToDouble();
       }
-      if (name == 'BUSCAR' || name == 'LOOKUP' || name == 'LOOKUPR' || name == 'LOOKUPP') {
+      if (name == 'BUSCAR' ||
+          name == 'LOOKUP' ||
+          name == 'LOOKUPR' ||
+          name == 'LOOKUPP' ||
+          name == 'LISTA') {
         return null; // usa FormulaEngine, que ya maneja BUSCAR con matrices externas.
       }
       return null;
@@ -2202,19 +2697,27 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final call = _findFirstLocalFormulaCall(out);
       if (call == null) break;
       final name = _normalizeFormulaFunctionName(call.name);
-      if (name == 'BUSCAR' || name == 'LOOKUP' || name == 'LOOKUPR' || name == 'LOOKUPP') {
+      if (name == 'BUSCAR' ||
+          name == 'LOOKUP' ||
+          name == 'LOOKUPR' ||
+          name == 'LOOKUPP' ||
+          name == 'LISTA') {
         return out;
       }
       final value = _evalLocalFormula(out.substring(call.start, call.end));
       final numeric = _tryFormulaDouble(value);
       if (numeric == null) return out;
-      out = out.substring(0, call.start) + numeric.toString() + out.substring(call.end);
+      out = out.substring(0, call.start) +
+          numeric.toString() +
+          out.substring(call.end);
     }
     out = out.replaceAllMapped(RegExp(r'\[([^\]]+)\]'), (m) {
-      return _toFormulaDouble(_valueByFormulaIdentifier(m.group(1) ?? '')).toString();
+      return _toFormulaDouble(_valueByFormulaIdentifier(m.group(1) ?? ''))
+          .toString();
     });
     out = out.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (m) {
-      return _toFormulaDouble(_valueByFormulaIdentifier(m.group(1) ?? '')).toString();
+      return _toFormulaDouble(_valueByFormulaIdentifier(m.group(1) ?? ''))
+          .toString();
     });
     return out;
   }
@@ -2228,17 +2731,23 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final etiqueta = def?['etiqueta']?.toString().trim() ?? '';
     if (etiqueta.isNotEmpty) candidates.add(etiqueta);
     for (final candidate in candidates) {
-      if (controllers.containsKey(candidate)) return controllers[candidate]?.text.trim() ?? '';
-      if (dropdownValues.containsKey(candidate)) return dropdownValues[candidate]?.toString() ?? '';
-      if (multiSelectValues.containsKey(candidate)) return (multiSelectValues[candidate] ?? <String>{}).join(', ');
+      if (controllers.containsKey(candidate))
+        return controllers[candidate]?.text.trim() ?? '';
+      if (dropdownValues.containsKey(candidate))
+        return dropdownValues[candidate]?.toString() ?? '';
+      if (multiSelectValues.containsKey(candidate))
+        return (multiSelectValues[candidate] ?? <String>{}).join(', ');
     }
     return _valueTextByFieldId(key);
   }
 
-  bool _isFormulaFieldRef(String expr) => expr.startsWith('[') && expr.endsWith(']') && expr.indexOf('[', 1) == -1;
+  bool _isFormulaFieldRef(String expr) =>
+      expr.startsWith('[') && expr.endsWith(']') && expr.indexOf('[', 1) == -1;
 
   bool _isQuotedFormulaText(String expr) {
-    return expr.length >= 2 && ((expr.startsWith("'") && expr.endsWith("'")) || (expr.startsWith('"') && expr.endsWith('"')));
+    return expr.length >= 2 &&
+        ((expr.startsWith("'") && expr.endsWith("'")) ||
+            (expr.startsWith('"') && expr.endsWith('"')));
   }
 
   String _unquoteFormulaText(String expr) => expr.substring(1, expr.length - 1);
@@ -2269,9 +2778,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
     final iso = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})').firstMatch(text);
     if (iso != null) {
-      return DateTime.tryParse('${iso.group(1)!}-${iso.group(2)!.padLeft(2, '0')}-${iso.group(3)!.padLeft(2, '0')}');
+      return DateTime.tryParse(
+          '${iso.group(1)!}-${iso.group(2)!.padLeft(2, '0')}-${iso.group(3)!.padLeft(2, '0')}');
     }
-    final slash = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(text);
+    final slash =
+        RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(text);
     if (slash != null) {
       final d = int.tryParse(slash.group(1)!);
       final m = int.tryParse(slash.group(2)!);
@@ -2283,7 +2794,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return DateTime.tryParse(text);
   }
 
-  DateTime _dateOnlyLocal(DateTime date) => DateTime(date.year, date.month, date.day);
+  DateTime _dateOnlyLocal(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
 
   String _formatLocalFormulaDate(DateTime date) {
     final y = date.year.toString().padLeft(4, '0');
@@ -2334,7 +2846,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if ('*/+'.contains(c)) return true;
       if (c == '-') {
         final prev = i > 0 ? expr[i - 1] : '';
-        if (i > 0 && prev.trim().isNotEmpty && prev != '(' && prev != ';' && prev != ',') return true;
+        if (i > 0 &&
+            prev.trim().isNotEmpty &&
+            prev != '(' &&
+            prev != ';' &&
+            prev != ',') return true;
       }
     }
     return _findFirstLocalFormulaCall(expr) != null;
@@ -2348,15 +2864,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     for (var text in candidates) {
       text = text.trim();
       if (text.isEmpty || text.toUpperCase() == 'NULL') continue;
-      if ((text.startsWith('[') && text.endsWith(']')) || (text.startsWith('{{') && text.endsWith('}}'))) {
-        text = text.startsWith('{{') ? text.substring(2, text.length - 2) : text.substring(1, text.length - 1);
+      if ((text.startsWith('[') && text.endsWith(']')) ||
+          (text.startsWith('{{') && text.endsWith('}}'))) {
+        text = text.startsWith('{{')
+            ? text.substring(2, text.length - 2)
+            : text.substring(1, text.length - 1);
       }
       text = text.trim();
-      final match = RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?$', caseSensitive: false).firstMatch(text);
+      final match =
+          RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?$', caseSensitive: false)
+              .firstMatch(text);
       if (match == null) continue;
       final h = int.tryParse(match.group(1)!);
       final m = int.tryParse(match.group(2)!);
-      if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) continue;
+      if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59)
+        continue;
       return h * 60 + m;
     }
     return null;
@@ -2407,6 +2929,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         return 'ENTERO';
       case 'BUSCAR':
         return 'BUSCAR';
+      case 'LISTA':
+      case 'LIST':
+        return 'LISTA';
       case 'RESTA':
         return 'RESTA';
       case 'RESTATIEMPO':
@@ -2461,7 +2986,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   _LocalFormulaCall? _readFormulaCall(String expr) {
-    final match = RegExp(r'^\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]+)\s*\(').firstMatch(expr);
+    final match =
+        RegExp(r'^\s*([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]+)\s*\(').firstMatch(expr);
     if (match == null) return null;
     final open = expr.indexOf('(', match.end - 1);
     final close = _findFormulaClosingParen(expr, open);
@@ -2501,12 +3027,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
       if (square > 0 || c != '(') continue;
       var j = i - 1;
-      while (j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) j--;
+      while (j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j]))
+        j--;
       final name = expr.substring(j + 1, i).trim();
       if (name.isEmpty) continue;
       final close = _findFormulaClosingParen(expr, i);
       if (close < 0) continue;
-      return _LocalFormulaCall(name: name, args: _splitFormulaArgs(expr.substring(i + 1, close)), start: j + 1, end: close + 1);
+      return _LocalFormulaCall(
+          name: name,
+          args: _splitFormulaArgs(expr.substring(i + 1, close)),
+          start: j + 1,
+          end: close + 1);
     }
     return null;
   }
@@ -2612,10 +3143,94 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return -1;
   }
 
+  bool _isListFormulaField(Map<String, dynamic> field) {
+    final kind = field['formula_tipo']?.toString().trim().toUpperCase() ?? '';
+    final formula =
+        field['formula_funcion']?.toString().trim().toUpperCase() ?? '';
+    return kind == 'LISTA' ||
+        formula.startsWith('LISTA(') ||
+        formula.startsWith('LIST(');
+  }
+
+  String _formulaListToken(dynamic raw) {
+    final text = raw?.toString().trim() ?? '';
+    if (_isQuotedFormulaText(text)) return _unquoteFormulaText(text);
+    return text;
+  }
+
+  List<String> _formulaListOptions(Map<String, dynamic> field) {
+    var sourceTable = field['formula_tabla_origen']?.toString().trim() ?? '';
+    var valueField = field['formula_campo_valor']?.toString().trim() ?? '';
+    var filterField = field['formula_campo_condicion']?.toString().trim() ?? '';
+    var filterValue = field['formula_valor_condicion']?.toString().trim() ?? '';
+    final formula = field['formula_funcion']?.toString().trim() ?? '';
+    final call = _readFormulaCall(formula);
+    if (call != null && call.args.length >= 2) {
+      if (sourceTable.isEmpty) sourceTable = _formulaListToken(call.args[0]);
+      if (valueField.isEmpty) valueField = _formulaListToken(call.args[1]);
+      if (filterField.isEmpty && call.args.length >= 3) {
+        filterField = _formulaListToken(call.args[2]);
+      }
+      if (filterValue.isEmpty && call.args.length >= 4) {
+        filterValue = call.args[3].trim();
+      }
+    }
+    if (sourceTable.isEmpty || valueField.isEmpty) {
+      return const <String>[];
+    }
+
+    List<Map<String, dynamic>> rows =
+        matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
+    if (rows.isEmpty) {
+      final wanted = _normalizarNombreCampo(sourceTable);
+      for (final entry in matrixRowsByTable.entries) {
+        if (_normalizarNombreCampo(entry.key) == wanted) {
+          rows = entry.value;
+          break;
+        }
+      }
+    }
+
+    dynamic expected;
+    if (filterValue.startsWith('[') && filterValue.endsWith(']')) {
+      expected = _valueByFormulaIdentifier(
+          filterValue.substring(1, filterValue.length - 1));
+    } else {
+      final reference = RegExp(r'^\{\{([^}]+)\}\}$').firstMatch(filterValue);
+      expected = reference == null
+          ? _formulaListToken(filterValue)
+          : _valueTextByFieldId(reference.group(1)!.trim());
+    }
+    final expectedText = expected?.toString().trim() ?? '';
+    final actualValueField = _campoByIdentifier(valueField, table: sourceTable);
+    final actualFilterField = filterField.isEmpty
+        ? ''
+        : _campoByIdentifier(filterField, table: sourceTable);
+    final seen = <String>{};
+    final options = <String>[];
+    for (final row in rows) {
+      if (actualFilterField.isNotEmpty) {
+        final candidate =
+            _valueByColumnName(row, actualFilterField)?.toString().trim() ?? '';
+        if (candidate.toUpperCase() != expectedText.toUpperCase()) continue;
+      }
+      final value =
+          _valueByColumnName(row, actualValueField)?.toString().trim() ?? '';
+      if (value.isEmpty || value.toUpperCase() == 'NULL' || !seen.add(value)) {
+        continue;
+      }
+      options.add(value);
+    }
+    options.sort();
+    return options;
+  }
+
   List<Map<String, dynamic>> get _formulaFields => fields.where((field) {
         final uiType = _uiType(field);
         final formula = field['formula_funcion']?.toString().trim() ?? '';
-        return (uiType == 'formula' || uiType == 'lookup') && formula.isNotEmpty;
+        return (uiType == 'formula' || uiType == 'lookup') &&
+            formula.isNotEmpty &&
+            !_isListFormulaField(field);
       }).toList(growable: false);
 
   void _recalculateMatrixDrivenFields() {
@@ -2663,11 +3278,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final normalizedCampo = campo.toLowerCase();
     if (normalizedCampo == 'id_local') return idLocal;
 
-    final configuredPrefix = (field['id_generador']?.toString() ?? '').trim().toUpperCase();
+    final configuredPrefix =
+        (field['id_generador']?.toString() ?? '').trim().toUpperCase();
     final prefix = configuredPrefix.isEmpty ? 'REGI' : configuredPrefix;
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
     final rnd = math.Random.secure();
-    final suffix = List.generate(16, (_) => chars[rnd.nextInt(chars.length)]).join();
+    final suffix =
+        List.generate(16, (_) => chars[rnd.nextInt(chars.length)]).join();
     return '$prefix$suffix';
   }
 
@@ -2678,13 +3295,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     if (tipo == 'hidden_id' || uiType == 'hidden_id') {
       final existing = controllers[campo]?.text.trim() ?? '';
-      return existing.isNotEmpty ? existing : _generateHiddenIdValue(field, idLocal);
+      return existing.isNotEmpty
+          ? existing
+          : _generateHiddenIdValue(field, idLocal);
     }
     if (tipo == 'hidden' || uiType == 'hidden') {
       final existing = controllers[campo]?.text.trim() ?? '';
       return existing.isNotEmpty ? existing : null;
     }
-    if (tipo == 'boolean_int' || uiType == 'boolean_int' || uiType == 'checkbox' || uiType == 'switch') return dropdownValues[campo] ?? 0;
+    if (tipo == 'boolean_int' ||
+        uiType == 'boolean_int' ||
+        uiType == 'checkbox' ||
+        uiType == 'switch') return dropdownValues[campo] ?? 0;
     if (tipo == 'signature' || uiType == 'signature') {
       final bytes = signatureValues[campo];
       return bytes == null ? null : _signatureDataUrl(bytes);
@@ -2747,7 +3369,117 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return true;
   }
 
+  bool _formatCapabilityEnabled(String capability) {
+    final normalized = capability.trim().toLowerCase();
+    final aliases = <String>{
+      normalized,
+      if (normalized == 'geolocation') 'geolocalizacion',
+      if (normalized == 'approvals') 'aprobaciones',
+      if (normalized == 'workflow') 'flujo',
+    };
+    final direct = widget.format['${normalized}_enabled'];
+    if (direct != null && _asBool(direct)) return true;
+    dynamic raw = widget.format['capacidades'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {}
+    }
+    if (raw is Map) {
+      for (final entry in raw.entries) {
+        if (aliases.contains(entry.key.toString().trim().toLowerCase())) {
+          return _asBool(entry.value);
+        }
+      }
+    }
+    return false;
+  }
+
+  String _gpsPayloadKey(List<String> candidates, String fallback) {
+    final wanted = candidates.map(_normalizarNombreCampo).toSet();
+    for (final field in fields) {
+      final campo = field['campo']?.toString().trim() ?? '';
+      if (campo.isNotEmpty && wanted.contains(_normalizarNombreCampo(campo))) {
+        return campo;
+      }
+    }
+    return fallback;
+  }
+
+  Future<bool> _captureRequiredGeolocation(Map<String, dynamic> payload) async {
+    if (!_formatCapabilityEnabled('geolocation')) return true;
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Activa la ubicación del equipo para guardar este registro.'),
+        ));
+        return false;
+      }
+
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        if (!mounted) return false;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'Este formato requiere permiso de ubicación para guardar el registro.'),
+        ));
+        return false;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+      payload[_gpsPayloadKey(['LATITUD', 'LATITUDE'], 'LATITUD')] =
+          position.latitude;
+      payload[_gpsPayloadKey(['LONGITUD', 'LONGITUDE'], 'LONGITUD')] =
+          position.longitude;
+      payload[_gpsPayloadKey(['PRECISION_GPS', 'PRECISION GPS', 'ACCURACY'],
+          'PRECISION_GPS')] = position.accuracy;
+      payload[_gpsPayloadKey(
+              ['FECHA_GPS', 'FECHA GPS', 'GPS_AT'], 'FECHA_GPS')] =
+          position.timestamp.toIso8601String();
+      return true;
+    } catch (error) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(
+            'No se pudo obtener la ubicación. Revisa el GPS e inténtalo nuevamente: $error'),
+      ));
+      return false;
+    }
+  }
+
+  List<String> _configuredWorkflowStates() {
+    dynamic raw = widget.format['flujo_estados'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {}
+    }
+    if (raw is! List) return const <String>[];
+    return raw
+        .map((state) => state is Map
+            ? (state['codigo'] ?? state['nombre'])?.toString().trim() ?? ''
+            : state?.toString().trim() ?? '')
+        .where((state) => state.isNotEmpty)
+        .toList(growable: false);
+  }
+
   String _estadoRegistroForPayload(Map<String, dynamic> payload) {
+    if (_formatCapabilityEnabled('workflow')) {
+      final states = _configuredWorkflowStates();
+      return states.isEmpty ? 'BORRADOR' : states.first;
+    }
     if (restrictedFields.isNotEmpty) return 'PENDIENTE';
 
     var hasRequiredMissing = false;
@@ -2764,7 +3496,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (tipo == 'hidden_id' || tipo == 'hidden') continue;
       final isSignature = tipo == 'signature' || uiType == 'signature';
       final required = _asBool(f['requerido']);
-      if (required && !_valuePresentForCampo(payload, campo)) hasRequiredMissing = true;
+      if (required && !_valuePresentForCampo(payload, campo))
+        hasRequiredMissing = true;
       if (isSignature) {
         hasSignature = true;
         if (!_valuePresentForCampo(payload, campo)) signaturesComplete = false;
@@ -2776,7 +3509,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return 'COMPLETO';
   }
 
-  bool get _isPersonalPlanillaForm => (tableDestino ?? '').trim().toUpperCase() == 'GH-REGISTRO_PERSONAL_PLANILLA';
+  bool get _isPersonalPlanillaForm =>
+      (tableDestino ?? '').trim().toUpperCase() ==
+      'GH-REGISTRO_PERSONAL_PLANILLA';
 
   String _payloadText(Map<String, dynamic> payload, List<String> keys) {
     for (final k in keys) {
@@ -2790,9 +3525,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return '';
   }
 
-  Future<void> _generateLocalPhotocheckFromPayload(Map<String, dynamic> payload) async {
+  Future<void> _generateLocalPhotocheckFromPayload(
+      Map<String, dynamic> payload) async {
     final dni = _payloadText(payload, ['DNI', 'DOCUMENTO']);
-    final nombre = _payloadText(payload, ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
+    final nombre = _payloadText(payload,
+        ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
     final puesto = _payloadText(payload, ['PUESTO', 'CARGO']);
     final area = _payloadText(payload, ['AREA', 'ÁREA']);
     final fotoData = _payloadText(payload, ['FOTO']);
@@ -2810,33 +3547,59 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           width: 170,
           height: 255,
           padding: const pw.EdgeInsets.all(8),
-          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey700), borderRadius: pw.BorderRadius.circular(8)),
+          decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.grey700),
+              borderRadius: pw.BorderRadius.circular(8)),
           child: pw.Column(
             mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
             children: [
-              pw.Text('ZUMAC', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+              pw.Text('ZUMAC',
+                  style: pw.TextStyle(
+                      fontSize: 10, fontWeight: pw.FontWeight.bold)),
               pw.Container(
                   width: 74,
                   height: 82,
-                  decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.grey500)),
+                  decoration: pw.BoxDecoration(
+                      border: pw.Border.all(color: PdfColors.grey500)),
                   child: fotoBytes != null
-                      ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover)
-                      : pw.Center(child: pw.Text('SIN FOTO', style: const pw.TextStyle(fontSize: 8)))),
+                      ? pw.Image(pw.MemoryImage(fotoBytes),
+                          fit: pw.BoxFit.cover)
+                      : pw.Center(
+                          child: pw.Text('SIN FOTO',
+                              style: const pw.TextStyle(fontSize: 8)))),
               pw.Text(nombre.isEmpty ? 'SIN NOMBRE' : nombre,
-                  textAlign: pw.TextAlign.center, maxLines: 2, style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                  textAlign: pw.TextAlign.center,
+                  maxLines: 2,
+                  style: pw.TextStyle(
+                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
               pw.Text('DNI: $dni', style: const pw.TextStyle(fontSize: 8)),
-              if (puesto.isNotEmpty) pw.Text(puesto, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
-              if (area.isNotEmpty) pw.Text(area, textAlign: pw.TextAlign.center, style: const pw.TextStyle(fontSize: 7)),
-              pw.BarcodeWidget(barcode: pw.Barcode.qrCode(), data: dni.isNotEmpty ? dni : (payload['id_local']?.toString() ?? ''), width: 54, height: 54),
+              if (puesto.isNotEmpty)
+                pw.Text(puesto,
+                    textAlign: pw.TextAlign.center,
+                    style: const pw.TextStyle(fontSize: 7)),
+              if (area.isNotEmpty)
+                pw.Text(area,
+                    textAlign: pw.TextAlign.center,
+                    style: const pw.TextStyle(fontSize: 7)),
+              pw.BarcodeWidget(
+                  barcode: pw.Barcode.qrCode(),
+                  data: dni.isNotEmpty
+                      ? dni
+                      : (payload['id_local']?.toString() ?? ''),
+                  width: 54,
+                  height: 54),
             ],
           ),
         ),
       ),
     ));
-    final dir = Directory('${Platform.environment['USERPROFILE'] ?? Directory.current.path}\\Downloads');
+    final dir = Directory(
+        '${Platform.environment['USERPROFILE'] ?? Directory.current.path}\\Downloads');
     if (!await dir.exists()) await dir.create(recursive: true);
-    final stamp = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\\.]'), '-');
-    final file = File('${dir.path}\\photocheck_${dni.isEmpty ? stamp : dni}_$stamp.pdf');
+    final stamp =
+        DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\\.]'), '-');
+    final file =
+        File('${dir.path}\\photocheck_${dni.isEmpty ? stamp : dni}_$stamp.pdf');
     await file.writeAsBytes(await pdf.save(), flush: true);
     await OpenFilex.open(file.path);
   }
@@ -2845,10 +3608,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (savingLocal || capturingPhoto) return;
     FocusScope.of(context).unfocus();
     final cachedUserId = await LocalSession().cachedUserId();
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
+    final userId =
+        Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay usuario local disponible. Ingresa una vez con internet.')),
+        const SnackBar(
+            content: Text(
+                'No hay usuario local disponible. Ingresa una vez con internet.')),
       );
       return;
     }
@@ -2856,14 +3622,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final table = tableDestino;
     if (table == null || table.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Este formato no tiene tabla destino configurada.')),
+        const SnackBar(
+            content: Text('Este formato no tiene tabla destino configurada.')),
       );
       return;
     }
 
     if (fields.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No hay campos configurados para esta tabla. Actualiza matrices.')),
+        const SnackBar(
+            content: Text(
+                'No hay campos configurados para esta tabla. Actualiza matrices.')),
       );
       return;
     }
@@ -2875,8 +3644,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           title: const Text('Guardar personal'),
           content: const Text('Desea guardar sin generar photochek?'),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
-            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Aceptar')),
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Aceptar')),
           ],
         ),
       );
@@ -2893,31 +3666,44 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       // Para fotos, requerido=true debe cumplirse aunque el campo no se pinte como
       // TextField normal. En APPGT las fotos suelen mostrarse por el botón/cámara
       // agrupada, por eso antes se omitían al depender de _isVisible().
-      if (!requerido || tipo == 'hidden_id' || tipo == 'hidden' || _isRestrictedField(f) || _isAutoFilledDetailField(campo)) continue;
+      if (!requerido ||
+          tipo == 'hidden_id' ||
+          tipo == 'hidden' ||
+          _isRestrictedField(f) ||
+          _isAutoFilledDetailField(campo)) continue;
       if (!_isVisible(f) && !isPhotoRequiredField) continue;
 
-      if (tipo == 'boolean_int' || uiType == 'boolean_int' || uiType == 'checkbox' || uiType == 'switch') {
+      if (tipo == 'boolean_int' ||
+          uiType == 'boolean_int' ||
+          uiType == 'checkbox' ||
+          uiType == 'switch') {
         if (dropdownValues[campo] == null) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falta completar: ${f['etiqueta'] ?? campo}')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Falta completar: ${f['etiqueta'] ?? campo}')));
           return;
         }
       } else if (tipo == 'signature' || uiType == 'signature') {
         if (signatureValues[campo] == null) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falta firmar: ${f['etiqueta'] ?? campo}')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Falta firmar: ${f['etiqueta'] ?? campo}')));
           return;
         }
       } else if (isPhotoRequiredField) {
-        if (photoValues[campo] == null && (controllers[campo]?.text.trim() ?? '').isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falta foto: ${f['etiqueta'] ?? campo}')));
+        if (photoValues[campo] == null &&
+            (controllers[campo]?.text.trim() ?? '').isEmpty) {
+          ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Falta foto: ${f['etiqueta'] ?? campo}')));
           return;
         }
       } else if (uiType == 'multiselect') {
         if ((multiSelectValues[campo] ?? <String>{}).isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falta seleccionar: ${f['etiqueta'] ?? campo}')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('Falta seleccionar: ${f['etiqueta'] ?? campo}')));
           return;
         }
       } else if ((controllers[campo]?.text.trim() ?? '').isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Falta completar: ${f['etiqueta'] ?? campo}')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            content: Text('Falta completar: ${f['etiqueta'] ?? campo}')));
         return;
       }
     }
@@ -2932,7 +3718,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final tipo = _normalizeTipo(f['tipo']?.toString());
       final uiType = _uiType(f);
       if (tipo == 'photo' || uiType == 'photo') continue;
-      final error = _rangeErrorForField(f, controllers[campo]?.text.trim() ?? '');
+      final error =
+          _rangeErrorForField(f, controllers[campo]?.text.trim() ?? '');
       if (error != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('${f['etiqueta'] ?? campo}: $error')),
@@ -2942,6 +3729,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     final idLocal = widget.editIdLocal ?? uuid.v4();
+    for (final field in fields) {
+      final campo = field['campo']?.toString().trim() ?? '';
+      final tipo = _normalizeTipo(field['tipo']?.toString());
+      final uiType = _uiType(field);
+      final prefix = field['id_generador']?.toString().trim() ?? '';
+      if (campo.isEmpty ||
+          prefix.isEmpty ||
+          (tipo != 'hidden_id' && uiType != 'hidden_id')) {
+        continue;
+      }
+      final controller =
+          controllers.putIfAbsent(campo, () => TextEditingController());
+      if (controller.text.trim().isEmpty) {
+        controller.text = await local.nextIncrementalIdentifier(
+          table: table,
+          field: campo,
+          prefix: prefix,
+        );
+      }
+    }
     final payload = <String, dynamic>{
       'id_local': idLocal,
     };
@@ -2964,10 +3771,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
       final iterField = _cleanNullableText(currentConfig?['campo_iterador']);
       if (iterField != null) {
-        payload[iterField] = _wizardCurrentIteration ?? _intFromValue(payload[iterField]) ?? _intFromValue(currentConfig?['iterador_desde']) ?? 1;
+        payload[iterField] = _wizardCurrentIteration ??
+            _intFromValue(payload[iterField]) ??
+            _intFromValue(currentConfig?['iterador_desde']) ??
+            1;
       }
     }
 
+    if (!await _captureRequiredGeolocation(payload)) return;
+    if (_formatCapabilityEnabled('approvals')) {
+      payload[_gpsPayloadKey(['ESTADO_APROBACION', 'ESTADO APROBACION'],
+          'ESTADO_APROBACION')] ??= 'PENDIENTE';
+    }
     payload['estado_registro'] = _estadoRegistroForPayload(payload);
 
     if (widget.editIdLocal != null && widget.editIdLocal!.isNotEmpty) {
@@ -2991,7 +3806,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => savingLocal = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo guardar localmente: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar localmente: $e')));
       return;
     }
 
@@ -3002,7 +3818,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (_isHeaderTableRow(currentConfig) && detailForHeader != null) {
       _wizardMasterPayload = Map<String, dynamic>.from(payload);
       _wizardMasterIdLocal = idLocal;
-      _wizardCurrentIteration = _intFromValue(detailForHeader['iterador_desde']) ?? 1;
+      _wizardCurrentIteration =
+          _intFromValue(detailForHeader['iterador_desde']) ?? 1;
       final nextId = detailForHeader['id']?.toString();
       if (nextId != null && nextId.isNotEmpty) {
         setState(() => selectedInternalTableId = nextId);
@@ -3010,21 +3827,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cabecera guardada. Ahora registra las muestras.')),
+        const SnackBar(
+            content: Text('Cabecera guardada. Ahora registra las muestras.')),
       );
       return;
     }
 
     if (_isDetailTableRow(currentConfig) && _wizardMasterPayload != null) {
       final hasta = _intFromValue(currentConfig?['iterador_hasta']);
-      final actual = _wizardCurrentIteration ?? _intFromValue(currentConfig?['iterador_desde']) ?? 1;
+      final actual = _wizardCurrentIteration ??
+          _intFromValue(currentConfig?['iterador_desde']) ??
+          1;
       if (hasta != null && actual < hasta) {
         setState(() {
           _wizardCurrentIteration = actual + 1;
           _clearDetailControllersForNextIteration(currentConfig!);
         });
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Muestra $actual guardada. Continúa con muestra ${actual + 1}.')),
+          SnackBar(
+              content: Text(
+                  'Muestra $actual guardada. Continúa con muestra ${actual + 1}.')),
         );
         return;
       }
@@ -3035,7 +3857,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Registro guardado localmente para $table.')),
+      const SnackBar(content: Text('Registro guardado localmente.')),
     );
 
     Navigator.of(context).pushAndRemoveUntil(
@@ -3072,7 +3894,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   Set<String> _parseMultiSelectText(String raw) {
     if (raw.trim().isEmpty) return <String>{};
-    return raw.split(RegExp(r'[|,;]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+    return raw
+        .split(RegExp(r'[|,;]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet();
   }
 
   void _syncMultiSelectController(String campo) {
@@ -3102,16 +3928,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         context: context,
         builder: (dialogContext) {
           var filtered = List<String>.from(uniqueOptions);
-          void applyFilter(String query, void Function(void Function()) setLocalState) {
+          void applyFilter(
+              String query, void Function(void Function()) setLocalState) {
             final q = query.trim().toLowerCase();
             setLocalState(() {
-              filtered = q.isEmpty ? List<String>.from(uniqueOptions) : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
+              filtered = q.isEmpty
+                  ? List<String>.from(uniqueOptions)
+                  : uniqueOptions
+                      .where((e) => e.toLowerCase().contains(q))
+                      .toList();
             });
           }
 
           return AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
             title: Row(
               children: [
                 const CircleAvatar(
@@ -3169,24 +4001,33 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                                   padding: const EdgeInsets.only(bottom: 5),
                                   child: ListTile(
                                     dense: true,
-                                    tileColor: selected ? const Color(0xFFDDF1F4) : Colors.white,
+                                    tileColor: selected
+                                        ? const Color(0xFFDDF1F4)
+                                        : Colors.white,
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                       side: BorderSide(
-                                        color: selected ? const Color(0xFF176B87) : const Color(0xFFD6E4E8),
+                                        color: selected
+                                            ? const Color(0xFF176B87)
+                                            : const Color(0xFFD6E4E8),
                                       ),
                                     ),
                                     leading: Icon(
-                                      selected ? Icons.check_circle : Icons.circle_outlined,
+                                      selected
+                                          ? Icons.check_circle
+                                          : Icons.circle_outlined,
                                       color: const Color(0xFF176B87),
                                     ),
                                     title: Text(
                                       option,
                                       style: TextStyle(
-                                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                                        fontWeight: selected
+                                            ? FontWeight.w700
+                                            : FontWeight.w500,
                                       ),
                                     ),
-                                    onTap: () => Navigator.pop(dialogContext, option),
+                                    onTap: () =>
+                                        Navigator.pop(dialogContext, option),
                                   ),
                                 );
                               },
@@ -3197,8 +4038,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-              TextButton(onPressed: () => Navigator.pop(dialogContext, ''), child: const Text('Limpiar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, ''),
+                  child: const Text('Limpiar')),
             ],
           );
         },
@@ -3240,13 +4085,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           labelText: requerido ? '$etiqueta *' : etiqueta,
           border: const OutlineInputBorder(),
           prefixIcon: const Icon(Icons.list_alt_outlined),
-          suffixIcon: Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
-          helperText: options.isEmpty ? 'Sin opciones configuradas o descargadas.' : null,
+          suffixIcon:
+              Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
+          helperText: options.isEmpty
+              ? 'Sin opciones configuradas o descargadas.'
+              : null,
         ),
         child: Row(
           children: [
             if (hasValidValue) ...[
-              const Icon(Icons.check_circle, size: 17, color: Color(0xFF17806D)),
+              const Icon(Icons.check_circle,
+                  size: 17, color: Color(0xFF17806D)),
               const SizedBox(width: 7),
             ],
             Expanded(
@@ -3254,7 +4103,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 hasValidValue ? current : 'Seleccione o busque...',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: TextStyle(color: hasValidValue ? null : Colors.grey[600]),
+                style:
+                    TextStyle(color: hasValidValue ? null : Colors.grey[600]),
               ),
             ),
           ],
@@ -3285,7 +4135,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: const Color(0xFFF4F8F7),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
           title: Row(
             children: [
               const CircleAvatar(
@@ -3321,18 +4172,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                       padding: const EdgeInsets.only(bottom: 5),
                       child: CheckboxListTile(
                         activeColor: const Color(0xFF0D5F78),
-                        tileColor: checked ? const Color(0xFFDDF1F4) : Colors.white,
+                        tileColor:
+                            checked ? const Color(0xFFDDF1F4) : Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
                           side: BorderSide(
-                            color: checked ? const Color(0xFF176B87) : const Color(0xFFD6E4E8),
+                            color: checked
+                                ? const Color(0xFF176B87)
+                                : const Color(0xFFD6E4E8),
                           ),
                         ),
                         value: checked,
                         title: Text(
                           option,
                           style: TextStyle(
-                            fontWeight: checked ? FontWeight.w700 : FontWeight.w500,
+                            fontWeight:
+                                checked ? FontWeight.w700 : FontWeight.w500,
                           ),
                         ),
                         dense: true,
@@ -3354,9 +4209,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-            TextButton(onPressed: () => Navigator.pop(context, <String>{}), child: const Text('Limpiar')),
-            FilledButton(onPressed: () => Navigator.pop(context, temp), child: const Text('Aplicar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, <String>{}),
+                child: const Text('Limpiar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, temp),
+                child: const Text('Aplicar')),
           ],
         ),
       );
@@ -3379,9 +4240,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
           border: const OutlineInputBorder(),
-          helperText: helperText ?? (options.isEmpty ? 'No hay valores disponibles.' : 'Toca para seleccionar uno o varios valores'),
+          helperText: helperText ??
+              (options.isEmpty
+                  ? 'No hay valores disponibles.'
+                  : 'Toca para seleccionar uno o varios valores'),
           prefixIcon: const Icon(Icons.checklist_rounded),
-          suffixIcon: Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
+          suffixIcon:
+              Icon(editable ? Icons.unfold_more_rounded : Icons.lock_outline),
         ),
         child: orderedSelected.isEmpty
             ? Text('Seleccionar...', style: TextStyle(color: Colors.grey[600]))
@@ -3411,8 +4276,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   int? _gridNumber(Map<String, dynamic> field, String key) {
     final raw = key == 'grid_fila'
-        ? _fieldMetaValue(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid'])
-        : _fieldMetaValue(field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
+        ? _fieldMetaValue(
+            field, ['grid_fila', 'grid fila', 'fila', 'fila_grid'])
+        : _fieldMetaValue(
+            field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
     if (raw == null) return null;
     final text = raw.toString().trim();
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
@@ -3425,7 +4292,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
     final campo = field['campo']?.toString() ?? '';
-    return _isVisible(field) && !_isAutoFilledDetailField(campo) && tipo != 'hidden_id' && tipo != 'hidden' && uiType != 'hidden_id' && uiType != 'hidden';
+    return _isVisible(field) &&
+        !_isAutoFilledDetailField(campo) &&
+        tipo != 'hidden_id' &&
+        tipo != 'hidden' &&
+        uiType != 'hidden_id' &&
+        uiType != 'hidden';
   }
 
   int _fieldOrderNumber(Map<String, dynamic> field) {
@@ -3450,7 +4322,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final subtitles = _subtitleRows();
     final rows = <Widget>[];
-    for (final entry in rowBuckets.entries.toList()..sort((a, b) => a.key.compareTo(b.key))) {
+    for (final entry in rowBuckets.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key))) {
       final rowSubtitles = subtitles[entry.key] ?? const <String>[];
       for (final subtitle in rowSubtitles) {
         rows.add(_subtitleWidget(subtitle));
@@ -3473,7 +4346,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             const spacing = 12.0;
             final availableColumns = math.max(
               1,
-              ((constraints.maxWidth + spacing) / (minimumFieldWidth + spacing)).floor(),
+              ((constraints.maxWidth + spacing) / (minimumFieldWidth + spacing))
+                  .floor(),
             );
             final columnCount = math.min(rowFields.length, availableColumns);
 
@@ -3481,14 +4355,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               return Column(
                 children: [
                   for (final field in rowFields) ...[
-                    KeyedSubtree(key: ValueKey("field_${field['campo']}"), child: _styledFieldWidget(field)),
+                    KeyedSubtree(
+                        key: ValueKey("field_${field['campo']}"),
+                        child: _fieldWithSubtitle(field)),
                     const SizedBox(height: 12),
                   ],
                 ],
               );
             }
 
-            final fieldWidth = (constraints.maxWidth - (spacing * (columnCount - 1))) / columnCount;
+            final fieldWidth =
+                (constraints.maxWidth - (spacing * (columnCount - 1))) /
+                    columnCount;
             return Wrap(
               spacing: spacing,
               runSpacing: spacing,
@@ -3498,7 +4376,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                     width: fieldWidth,
                     child: KeyedSubtree(
                       key: ValueKey("field_${field['campo']}"),
-                      child: _styledFieldWidget(field),
+                      child: _fieldWithSubtitle(field),
                     ),
                   ),
               ],
@@ -3514,7 +4392,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   bool _isScannerUi(String uiType) {
     final t = uiType.trim().toLowerCase();
-    return t == 'qr_scan' || t == 'barcode_scan' || t == 'dni_scan' || t == 'scanner' || t == 'scan';
+    return t == 'qr_scan' ||
+        t == 'barcode_scan' ||
+        t == 'dni_scan' ||
+        t == 'scanner' ||
+        t == 'scan';
   }
 
   String _onlyDigits(String value) => value.replaceAll(RegExp(r'[^0-9]'), '');
@@ -3559,10 +4441,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return value;
   }
 
-  dynamic _rowValueByCandidates(Map<String, dynamic> row, List<String> candidates) {
+  dynamic _rowValueByCandidates(
+      Map<String, dynamic> row, List<String> candidates) {
     final normalized = candidates.map(_normalizarNombreCampo).toSet();
     for (final entry in row.entries) {
-      if (normalized.contains(_normalizarNombreCampo(entry.key))) return entry.value;
+      if (normalized.contains(_normalizarNombreCampo(entry.key)))
+        return entry.value;
     }
     return null;
   }
@@ -3578,24 +4462,40 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     ];
 
     for (final tableName in tableNames) {
-      final rows = await local.where('local_matrix_rows', 'source_table = ?', [tableName]);
+      final rows = await local
+          .where('local_matrix_rows', 'source_table = ?', [tableName]);
       for (final row in rows) {
         try {
-          final payload = jsonDecode(row['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-          final eliminado = (_rowValueByCandidates(payload, ['eliminado', 'ELIMINADO'])?.toString().toLowerCase() ?? '') == 'true';
-          final activoRaw = _rowValueByCandidates(payload, ['activo', 'ACTIVO']);
-          final activo = activoRaw == null || activoRaw.toString().toLowerCase() != 'false';
+          final payload = jsonDecode(row['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>;
+          final eliminado =
+              (_rowValueByCandidates(payload, ['eliminado', 'ELIMINADO'])
+                          ?.toString()
+                          .toLowerCase() ??
+                      '') ==
+                  'true';
+          final activoRaw =
+              _rowValueByCandidates(payload, ['activo', 'ACTIVO']);
+          final activo = activoRaw == null ||
+              activoRaw.toString().toLowerCase() != 'false';
           if (eliminado || !activo) continue;
 
           final candidates = [
             _rowValueByCandidates(payload, ['QR_PERSONAL', 'qr_personal']),
-            _rowValueByCandidates(payload, ['CODIGO_PERSONAL', 'codigo_personal']),
-            _rowValueByCandidates(payload, ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO']),
+            _rowValueByCandidates(
+                payload, ['CODIGO_PERSONAL', 'codigo_personal']),
+            _rowValueByCandidates(payload,
+                ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO']),
             _rowValueByCandidates(payload, ['id_local', 'ID_LOCAL']),
-          ].map((e) => e?.toString().trim() ?? '').where((e) => e.isNotEmpty).toList();
+          ]
+              .map((e) => e?.toString().trim() ?? '')
+              .where((e) => e.isNotEmpty)
+              .toList();
 
           for (final candidate in candidates) {
-            if (candidate == code || candidate == scannedRaw.trim() || _onlyDigits(candidate) == _onlyDigits(code)) {
+            if (candidate == code ||
+                candidate == scannedRaw.trim() ||
+                _onlyDigits(candidate) == _onlyDigits(code)) {
               return payload;
             }
           }
@@ -3605,7 +4505,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
-  void _setFirstExistingController(List<String> candidates, dynamic value, {bool overwrite = true}) {
+  void _setFirstExistingController(List<String> candidates, dynamic value,
+      {bool overwrite = true}) {
     final text = value?.toString().trim() ?? '';
     if (text.isEmpty) return;
     final wanted = candidates.map(_normalizarNombreCampo).toSet();
@@ -3628,13 +4529,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (worker == null) {
       setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Código escaneado: $code. Trabajador no encontrado en GH-REGISTRO_PERSONAL_PLANILLA.')),
+        SnackBar(
+            content: Text(
+                'Código escaneado: $code. Trabajador no encontrado en el registro de personal.')),
       );
       _scheduleRecalculationIfNeeded();
       return;
     }
 
-    final dni = _rowValueByCandidates(worker, ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO']);
+    final dni = _rowValueByCandidates(
+        worker, ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO']);
     final nombre = _rowValueByCandidates(worker, [
       'APELLIDOS Y NOMBRES',
       'APELLIDOS_NOMBRES',
@@ -3646,15 +4550,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final puesto = _rowValueByCandidates(worker, ['PUESTO', 'CARGO']);
     final area = _rowValueByCandidates(worker, ['AREA', 'ÁREA']);
     final empresa = _rowValueByCandidates(worker, ['EMPRESA', 'PLANILLA']);
-    final foto = _rowValueByCandidates(worker, ['FOTO', 'PHOTO_URL', 'FOTO_URL']);
+    final foto =
+        _rowValueByCandidates(worker, ['FOTO', 'PHOTO_URL', 'FOTO_URL']);
 
     setState(() {
-      _setFirstExistingController(['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO'], dni ?? code);
-      _setFirstExistingController(['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE COMPLETO', 'NOMBRE_COMPLETO', 'NOMBRE', 'NOMBRES'], nombre);
+      _setFirstExistingController(
+          ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO', 'NUMERO_DOCUMENTO'],
+          dni ?? code);
+      _setFirstExistingController([
+        'APELLIDOS Y NOMBRES',
+        'APELLIDOS_NOMBRES',
+        'NOMBRE COMPLETO',
+        'NOMBRE_COMPLETO',
+        'NOMBRE',
+        'NOMBRES'
+      ], nombre);
       _setFirstExistingController(['PUESTO', 'CARGO'], puesto);
       _setFirstExistingController(['AREA', 'ÁREA'], area);
       _setFirstExistingController(['EMPRESA', 'PLANILLA'], empresa);
-      _setFirstExistingController(['FOTO', 'PHOTO_URL', 'FOTO_URL'], foto, overwrite: false);
+      _setFirstExistingController(['FOTO', 'PHOTO_URL', 'FOTO_URL'], foto,
+          overwrite: false);
 
       final now = DateTime.now();
       final yyyy = now.year.toString().padLeft(4, '0');
@@ -3662,14 +4577,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final dd = now.day.toString().padLeft(2, '0');
       final hh = now.hour.toString().padLeft(2, '0');
       final mi = now.minute.toString().padLeft(2, '0');
-      _setFirstExistingController(['FECHA', 'FECHA_INGRESO'], '$yyyy-$mm-$dd', overwrite: false);
-      _setFirstExistingController(['HORA', 'HORA_INGRESO'], '$hh:$mi', overwrite: false);
+      _setFirstExistingController(['FECHA', 'FECHA_INGRESO'], '$yyyy-$mm-$dd',
+          overwrite: false);
+      _setFirstExistingController(['HORA', 'HORA_INGRESO'], '$hh:$mi',
+          overwrite: false);
     });
 
     _recalculateDerivedFields();
     _recalculateMatrixDrivenFields();
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Trabajador cargado: ${(nombre ?? dni ?? code).toString()}')),
+      SnackBar(
+          content: Text(
+              'Trabajador cargado: ${(nombre ?? dni ?? code).toString()}')),
     );
   }
 
@@ -3697,7 +4616,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       decoration: InputDecoration(
         labelText: requerido ? '$etiqueta *' : etiqueta,
         border: const OutlineInputBorder(),
-        helperText: 'Escanea con cámara o con el botón físico del PDA. El lector HID escribe aquí y confirma con Enter.',
+        helperText:
+            'Escanea con cámara o con el botón físico del PDA. El lector HID escribe aquí y confirma con Enter.',
         suffixIcon: IconButton(
           tooltip: 'Escanear QR / código de barras',
           onPressed: editable ? () => _openCameraScanner(campo) : null,
@@ -3723,9 +4643,30 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final requerido = _asBool(field['requerido']);
     final editable = _isEditable(field);
 
-    if (!_isVisible(field) || tipo == 'hidden_id' || tipo == 'hidden' || _isRestrictedField(field)) return const SizedBox.shrink();
+    if (!_isVisible(field) ||
+        tipo == 'hidden_id' ||
+        tipo == 'hidden' ||
+        _isRestrictedField(field)) return const SizedBox.shrink();
 
     if (_isScannerUi(uiType)) return _scannerFieldWidget(field);
+
+    if (uiType == 'formula' && _isListFormulaField(field)) {
+      final options = _formulaListOptions(field);
+      if (options.isEmpty) {
+        return TextField(
+          controller: controllers[campo],
+          focusNode: _focusNodeFor(campo),
+          readOnly: true,
+          decoration: InputDecoration(
+            labelText: requerido ? '$etiqueta *' : etiqueta,
+            border: const OutlineInputBorder(),
+            helperText:
+                'Sin valores disponibles para la condición configurada.',
+          ),
+        );
+      }
+      return _buildSearchableDropdownField(field: field, options: options);
+    }
 
     if (uiType == 'multiselect') {
       final literalOptions = _literalDropdownOptions(field);
@@ -3733,7 +4674,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         return _buildMultiSelectField(
           field: field,
           options: literalOptions,
-          helperText: literalOptions.isEmpty ? 'Lista manual vacía en id_campo_dropdown.' : null,
+          helperText: literalOptions.isEmpty
+              ? 'Lista manual vacía en id_campo_dropdown.'
+              : null,
         );
       }
 
@@ -3743,12 +4686,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         return _buildMultiSelectField(
           field: field,
           options: options,
-          helperText: options.isEmpty ? 'Sin valores locales. Presiona Actualizar con internet.' : null,
+          helperText: options.isEmpty
+              ? 'Sin valores locales. Presiona Actualizar con internet.'
+              : null,
         );
       }
     }
 
-    final literalDropdownOptions = uiType == 'dropdown' ? _literalDropdownOptions(field) : null;
+    final literalDropdownOptions =
+        uiType == 'dropdown' ? _literalDropdownOptions(field) : null;
     if (literalDropdownOptions != null) {
       if (literalDropdownOptions.isEmpty) {
         return TextField(
@@ -3762,10 +4708,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           ),
         );
       }
-      return _buildSearchableDropdownField(field: field, options: literalDropdownOptions);
+      return _buildSearchableDropdownField(
+          field: field, options: literalDropdownOptions);
     }
 
-    final dynamicDropdownCatalog = uiType == 'dropdown' ? _dynamicDropdownCatalog(field) : null;
+    final dynamicDropdownCatalog =
+        uiType == 'dropdown' ? _dynamicDropdownCatalog(field) : null;
     if (dynamicDropdownCatalog != null) {
       final options = _optionsForCatalog(dynamicDropdownCatalog);
       if (options.isEmpty) {
@@ -3776,7 +4724,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
             border: const OutlineInputBorder(),
-            helperText: 'Sin valores locales. Presiona Actualizar con internet.',
+            helperText:
+                'Sin valores locales. Presiona Actualizar con internet.',
           ),
         );
       }
@@ -3787,7 +4736,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (_isTurnoOrLote(campo, etiqueta) && turnosDisponibles.isNotEmpty) {
       final value = controllers[campo]?.text.trim();
       return DropdownButtonFormField<String>(
-        value: (value != null && value.isNotEmpty && turnosDisponibles.contains(value)) ? value : null,
+        value: (value != null &&
+                value.isNotEmpty &&
+                turnosDisponibles.contains(value))
+            ? value
+            : null,
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
           border: const OutlineInputBorder(),
@@ -3836,7 +4789,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
             border: const OutlineInputBorder(),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -3886,7 +4840,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     if (uiType == 'rating') {
       final raw = controllers[campo]?.text.trim() ?? '';
-      final value = (double.tryParse(raw.replaceAll(',', '.')) ?? 0).clamp(0, 5).toDouble();
+      final value = (double.tryParse(raw.replaceAll(',', '.')) ?? 0)
+          .clamp(0, 5)
+          .toDouble();
       return InputDecorator(
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
@@ -3916,7 +4872,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final minValue = 0.0;
       final maxValue = 100.0;
       final raw = controllers[campo]?.text.trim() ?? '';
-      final value = (double.tryParse(raw.replaceAll(',', '.')) ?? minValue).clamp(minValue, maxValue).toDouble();
+      final value = (double.tryParse(raw.replaceAll(',', '.')) ?? minValue)
+          .clamp(minValue, maxValue)
+          .toDouble();
       return InputDecorator(
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
@@ -3948,7 +4906,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (tipo == 'photo' || uiType == 'photo') {
       final bytes = photoValues[campo] ?? _photoBytesFromController(campo);
       final raw = controllers[campo]?.text.trim() ?? '';
-      final hasRemoteImage = bytes == null && (raw.startsWith('http') || EvidenceStorage.isStorageUri(raw));
+      final hasRemoteImage = bytes == null &&
+          (raw.startsWith('http') || EvidenceStorage.isStorageUri(raw));
       return InputDecorator(
         decoration: InputDecoration(
           labelText: requerido ? '$etiqueta *' : etiqueta,
@@ -3965,13 +4924,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: bytes != null
-                  ? ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.memory(bytes, fit: BoxFit.cover))
-                  : Center(child: Text(hasRemoteImage ? 'Foto existente guardada' : 'Sin foto capturada')),
+                  ? ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.memory(bytes, fit: BoxFit.cover))
+                  : Center(
+                      child: Text(hasRemoteImage
+                          ? 'Foto existente guardada'
+                          : 'Sin foto capturada')),
             ),
             OutlinedButton.icon(
               onPressed: editable ? () => _capturePhotoForField(campo) : null,
               icon: const Icon(Icons.photo_camera),
-              label: Text(_hasPhotoInField(campo) ? 'Volver a tomar foto' : 'Tomar foto'),
+              label: Text(_hasPhotoInField(campo)
+                  ? 'Volver a tomar foto'
+                  : 'Tomar foto'),
             ),
           ],
         ),
@@ -4016,7 +4982,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                   border: Border.all(color: Colors.black26),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Image.memory(signatureValues[campo]!, fit: BoxFit.contain),
+                child:
+                    Image.memory(signatureValues[campo]!, fit: BoxFit.contain),
               )
             else
               const Padding(
@@ -4033,7 +5000,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       );
     }
 
-    if (tipo == 'calculated' || tipo == 'readonly' || uiType == 'formula' || uiType == 'lookup') {
+    if (tipo == 'calculated' ||
+        tipo == 'readonly' ||
+        uiType == 'formula' ||
+        uiType == 'lookup') {
       return TextField(
         controller: controllers[campo],
         focusNode: _focusNodeFor(campo),
@@ -4048,11 +5018,16 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return TextField(
       controller: controllers[campo],
       focusNode: _focusNodeFor(campo),
-      readOnly: !editable || tipo == 'date' || uiType == 'date' || tipo == 'time' || uiType == 'time',
+      readOnly: !editable ||
+          tipo == 'date' ||
+          uiType == 'date' ||
+          tipo == 'time' ||
+          uiType == 'time',
       minLines: (tipo == 'multiline' || uiType == 'multiline') ? 3 : 1,
       maxLines: (tipo == 'multiline' || uiType == 'multiline') ? 5 : 1,
       keyboardType: _isNumberField(field) || uiType == 'percent'
-          ? TextInputType.numberWithOptions(decimal: _allowsDecimal(field), signed: true)
+          ? TextInputType.numberWithOptions(
+              decimal: _allowsDecimal(field), signed: true)
           : uiType == 'email'
               ? TextInputType.emailAddress
               : uiType == 'phone'
@@ -4066,14 +5041,23 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         border: const OutlineInputBorder(),
         suffixIcon: (tipo == 'date' || uiType == 'date')
             ? const Icon(Icons.calendar_month)
-            : ((tipo == 'time' || uiType == 'time') ? const Icon(Icons.schedule) : null),
-        errorText: _rangeErrorForField(field, controllers[campo]?.text.trim() ?? ''),
+            : ((tipo == 'time' || uiType == 'time')
+                ? const Icon(Icons.schedule)
+                : null),
+        errorText:
+            _rangeErrorForField(field, controllers[campo]?.text.trim() ?? ''),
       ),
       onChanged: (_) {
         _scheduleRecalculationIfNeeded();
         // El formato_condicional_campo debe reaccionar mientras se escribe.
-        if (fields.any((f) => !_isNullLike(
-            _fieldMetaValue(f, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional'])))) {
+        if (fields.any(_isListFormulaField) ||
+            fields.any((f) => !_isNullLike(_fieldMetaValue(f, [
+                  'formato_condicional_campo',
+                  'formato condicional campo',
+                  'condicion_formato',
+                  'condición formato',
+                  'formato_condicional'
+                ])))) {
           setState(() {});
         }
       },
@@ -4082,8 +5066,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               final now = DateTime.now();
               final minDate = DateTime(1900);
               final maxDate = DateTime(now.year + 20);
-              final current = DateTime.tryParse(controllers[campo]?.text.trim() ?? '');
-              final safeInitialDate = _safeDatePickerInitialDate(current ?? now, minDate, maxDate);
+              final current =
+                  DateTime.tryParse(controllers[campo]?.text.trim() ?? '');
+              final safeInitialDate =
+                  _safeDatePickerInitialDate(current ?? now, minDate, maxDate);
               final picked = await showDatePicker(
                 context: context,
                 firstDate: minDate,
@@ -4092,7 +5078,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               );
               if (picked != null) {
                 setState(() {
-                  controllers[campo]?.text = picked.toIso8601String().substring(0, 10);
+                  controllers[campo]?.text =
+                      picked.toIso8601String().substring(0, 10);
                   _recalculateDerivedFields();
                   _recalculateMatrixDrivenFields();
                 });
@@ -4100,7 +5087,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             }
           : (tipo == 'time' || uiType == 'time')
               ? () async {
-                  final picked = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+                  final picked = await showTimePicker(
+                      context: context, initialTime: TimeOfDay.now());
                   if (picked != null) {
                     setState(() {
                       final hh = picked.hour.toString().padLeft(2, '0');
@@ -4123,14 +5111,14 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       backgroundColor: const Color(0xFFF4F8F7),
       appBar: AppBar(
         toolbarHeight: 52,
-        backgroundColor: Colors.transparent,
+        backgroundColor: const Color(0xFF0F5265),
         foregroundColor: Colors.white,
         elevation: 0,
         titleSpacing: 2,
         flexibleSpace: const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [Color(0xFF0F5265), Color(0xFF17809A)],
+              colors: [Color(0xFF0B4050), Color(0xFF0D5F78)],
             ),
           ),
         ),
@@ -4159,66 +5147,91 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
-        children: [
-          if (useWizard) ...[
-            Card(
-              child: ListTile(
-                leading: Icon(_isHeaderTableRow(_currentFormatTableConfig) ? Icons.assignment_outlined : Icons.format_list_numbered),
-                title: Text(_isHeaderTableRow(_currentFormatTableConfig) ? 'Datos generales' : 'Registro de muestra'),
-                subtitle: Text(_isHeaderTableRow(_currentFormatTableConfig)
-                    ? 'Guarda la cabecera para continuar con las muestras.'
-                    : 'Muestra ${_wizardCurrentIteration ?? _intFromValue(_currentFormatTableConfig?["iterador_desde"]) ?? 1} de ${_intFromValue(_currentFormatTableConfig?["iterador_hasta"]) ?? "?"}'),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final contentWidth = math.min(
+            ZumacResponsiveLimits.form,
+            constraints.maxWidth,
+          );
+          return Align(
+            alignment: Alignment.topCenter,
+            child: SizedBox(
+              width: contentWidth,
+              height: constraints.maxHeight,
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 16),
+                children: [
+                  if (useWizard) ...[
+                    Card(
+                      child: ListTile(
+                        leading: Icon(
+                            _isHeaderTableRow(_currentFormatTableConfig)
+                                ? Icons.assignment_outlined
+                                : Icons.format_list_numbered),
+                        title: Text(_isHeaderTableRow(_currentFormatTableConfig)
+                            ? 'Datos generales'
+                            : 'Registro de muestra'),
+                        subtitle: Text(_isHeaderTableRow(
+                                _currentFormatTableConfig)
+                            ? 'Guarda la cabecera para continuar con las muestras.'
+                            : 'Muestra ${_wizardCurrentIteration ?? _intFromValue(_currentFormatTableConfig?["iterador_desde"]) ?? 1} de ${_intFromValue(_currentFormatTableConfig?["iterador_hasta"]) ?? "?"}'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ] else if (hasManyTables) ...[
+                    DropdownButtonFormField<String>(
+                      value: selectedInternalTableId,
+                      decoration: const InputDecoration(
+                        labelText: 'Seleccione proceso',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: internalTables.map((row) {
+                        final id = row['id']?.toString() ?? '';
+                        final name = row['nombre']?.toString() ?? id;
+                        return DropdownMenuItem<String>(
+                          value: id,
+                          child: Text(name),
+                        );
+                      }).toList(),
+                      onChanged: (value) async {
+                        setState(() => selectedInternalTableId = value);
+                        await loadFieldsForCurrentTable();
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (!useWizard &&
+                      _isDetailTableRow(_currentFormatTableConfig) &&
+                      _wizardCurrentIteration != null) ...[
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.format_list_numbered),
+                        title: Text('Muestra ${_wizardCurrentIteration}'),
+                        subtitle: const Text(
+                            'Los datos de cabecera se copiarán automáticamente.'),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  if (loadingFields)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 32),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (fields.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text(
+                          'No hay campos configurados para esta tabla. Presiona Actualizar matrices.'),
+                    )
+                  else
+                    ..._buildFieldRows(),
+                  const SizedBox(height: 80),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-          ] else if (hasManyTables) ...[
-            DropdownButtonFormField<String>(
-              value: selectedInternalTableId,
-              decoration: const InputDecoration(
-                labelText: 'Seleccione proceso',
-                border: OutlineInputBorder(),
-              ),
-              items: internalTables.map((row) {
-                final id = row['id']?.toString() ?? '';
-                final name = row['nombre']?.toString() ?? id;
-                return DropdownMenuItem<String>(
-                  value: id,
-                  child: Text(name),
-                );
-              }).toList(),
-              onChanged: (value) async {
-                setState(() => selectedInternalTableId = value);
-                await loadFieldsForCurrentTable();
-              },
-            ),
-            const SizedBox(height: 16),
-          ],
-          if (!useWizard && _isDetailTableRow(_currentFormatTableConfig) && _wizardCurrentIteration != null) ...[
-            Card(
-              child: ListTile(
-                leading: const Icon(Icons.format_list_numbered),
-                title: Text('Muestra ${_wizardCurrentIteration}'),
-                subtitle: const Text('Los datos de cabecera se copiarán automáticamente.'),
-              ),
-            ),
-            const SizedBox(height: 16),
-          ],
-          if (loadingFields)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 32),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else if (fields.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 24),
-              child: Text('No hay campos configurados para esta tabla. Presiona Actualizar matrices.'),
-            )
-          else
-            ..._buildFieldRows(),
-          const SizedBox(height: 80),
-        ],
+          );
+        },
       ),
       floatingActionButton: Row(
         mainAxisSize: MainAxisSize.min,
@@ -4233,8 +5246,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                     title: const Text('Photocheck'),
                     content: const Text('Generar photochek?'),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
-                      FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: const Text('Aceptar')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(dialogContext, false),
+                          child: const Text('Cancelar')),
+                      FilledButton(
+                          onPressed: () => Navigator.pop(dialogContext, true),
+                          child: const Text('Aceptar')),
                     ],
                   ),
                 );
@@ -4265,7 +5282,11 @@ class _LocalFormulaCall {
   final int start;
   final int end;
 
-  _LocalFormulaCall({required this.name, required this.args, required this.start, required this.end});
+  _LocalFormulaCall(
+      {required this.name,
+      required this.args,
+      required this.start,
+      required this.end});
 }
 
 class _StrictMathParser {
@@ -4539,16 +5560,20 @@ class _SignatureDialogState extends State<SignatureDialog> {
                 onPanStart: (details) {
                   final box = context.findRenderObject() as RenderBox;
                   final local = box.globalToLocal(details.globalPosition);
-                  setState(() => points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
+                  setState(() =>
+                      points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
                 },
                 onPanUpdate: (details) {
                   final box = context.findRenderObject() as RenderBox;
                   final local = box.globalToLocal(details.globalPosition);
-                  setState(() => points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
+                  setState(() =>
+                      points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
                 },
                 onPanEnd: (_) => setState(() => points.add(null)),
                 child: CustomPaint(
-                  painter: _SignaturePainter(points, scaleX: constraints.maxWidth / 900.0, scaleY: constraints.maxHeight / 360.0),
+                  painter: _SignaturePainter(points,
+                      scaleX: constraints.maxWidth / 900.0,
+                      scaleY: constraints.maxHeight / 360.0),
                   child: const SizedBox.expand(),
                 ),
               );
@@ -4558,7 +5583,9 @@ class _SignatureDialogState extends State<SignatureDialog> {
       ),
       actions: [
         TextButton(onPressed: _clear, child: const Text('Limpiar')),
-        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
+        TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancelar')),
         FilledButton(onPressed: _accept, child: const Text('Aceptar')),
       ],
     );
@@ -4584,7 +5611,8 @@ class _SignaturePainter extends CustomPainter {
       final p1 = points[i];
       final p2 = points[i + 1];
       if (p1 != null && p2 != null) {
-        canvas.drawLine(Offset(p1.dx * scaleX, p1.dy * scaleY), Offset(p2.dx * scaleX, p2.dy * scaleY), paint);
+        canvas.drawLine(Offset(p1.dx * scaleX, p1.dy * scaleY),
+            Offset(p2.dx * scaleX, p2.dy * scaleY), paint);
       }
     }
   }

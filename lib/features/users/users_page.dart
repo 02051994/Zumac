@@ -106,21 +106,21 @@ class _UsersPageState extends State<UsersPage> {
       try {
         remoteModules = await _selectRemoteRows(table: 'MATRIZ_MODULOS_APPGT');
       } catch (e) {
-        warnings.add('No se pudieron cargar módulos desde Supabase: ${SyncService().friendlyError(e)}');
+        warnings.add('No se pudieron cargar los módulos: ${SyncService().friendlyError(e)}');
         remoteModules = await local.getAll('local_modules', orderBy: 'orden');
       }
 
       try {
         remoteFormats = await _selectRemoteRows(table: 'MATRIZ_FORMATOS_APPGT');
       } catch (e) {
-        warnings.add('No se pudieron cargar formatos desde Supabase: ${SyncService().friendlyError(e)}');
+        warnings.add('No se pudieron cargar los formatos: ${SyncService().friendlyError(e)}');
         remoteFormats = await local.getAll('local_formats', orderBy: 'orden');
       }
 
       try {
         remoteSections = await _selectRemoteRows(table: 'MATRIZ_SECCIONES_APPGT');
       } catch (e) {
-        warnings.add('No se pudieron cargar secciones desde Supabase: ${SyncService().friendlyError(e)}');
+        warnings.add('No se pudieron cargar las secciones: ${SyncService().friendlyError(e)}');
         remoteSections = await local.getAll('local_sections', orderBy: 'orden');
       }
 
@@ -650,14 +650,12 @@ class _UsersPageState extends State<UsersPage> {
                   child: ExpansionTile(
                     tilePadding: const EdgeInsets.symmetric(horizontal: 12),
                     title: Text('${module['nombre']}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
-                    subtitle: Text('${module['id']}', style: const TextStyle(fontSize: 11)),
                     children: [
                       for (final format in _formatsFor(module['id']?.toString() ?? ''))
                         CheckboxListTile(
                           dense: true,
                           value: selectedFormats.contains(_permissionKey(module['id'], format['id'])),
                           title: Text('${format['nombre']}', style: const TextStyle(fontSize: 13)),
-                          subtitle: Text('${format['id']}', style: const TextStyle(fontSize: 11)),
                           onChanged: selectedUserId == null
                               ? null
                               : (value) {

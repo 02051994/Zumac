@@ -1,11 +1,11 @@
 {
-    "name": "appgt_offline_subtables",
-    "short_name": "appgt_offline_subtables",
+    "name": "Zumac",
+    "short_name": "Zumac",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "Zumac",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

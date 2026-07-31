@@ -47,7 +47,8 @@ Future<void> _showAppGtAlert(
           Expanded(
             child: Text(
               title,
-              style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
+              style: theme.textTheme.titleLarge
+                  ?.copyWith(fontWeight: FontWeight.w800),
             ),
           ),
         ],
@@ -61,7 +62,8 @@ Future<void> _showAppGtAlert(
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF31552F),
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onPressed: () => Navigator.of(dialogContext).pop(),
           child: const Text('Aceptar'),
@@ -71,7 +73,8 @@ Future<void> _showAppGtAlert(
   );
 }
 
-Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> missing) async {
+Future<bool> _showMissingAttendanceAlert(
+    BuildContext context, List<String> missing) async {
   await SystemSound.play(SystemSoundType.alert);
   if (!context.mounted) return false;
   final theme = Theme.of(context);
@@ -90,10 +93,14 @@ Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> miss
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: const Color(0xFF9CB693)),
             ),
-            child: const Icon(Icons.person_off_rounded, color: Color(0xFF31552F)),
+            child:
+                const Icon(Icons.person_off_rounded, color: Color(0xFF31552F)),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Text('Hay personal sin asistencia', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
+          Expanded(
+              child: Text('Hay personal sin asistencia',
+                  style: theme.textTheme.titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800))),
         ],
       ),
       content: Text(
@@ -107,7 +114,8 @@ Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> miss
               context: dialogContext,
               barrierDismissible: false,
               builder: (detailContext) => AlertDialog(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(18)),
                 title: const Text('Personal sin asistencia'),
                 content: SizedBox(
                   width: 420,
@@ -126,7 +134,9 @@ Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> miss
                 ),
                 actions: [
                   FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: const Color(0xFF31552F), foregroundColor: Colors.white),
+                    style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF31552F),
+                        foregroundColor: Colors.white),
                     onPressed: () => Navigator.of(detailContext).pop(),
                     child: const Text('Aceptar'),
                   ),
@@ -140,7 +150,8 @@ Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> miss
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF31552F),
             foregroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
           onPressed: () => Navigator.of(dialogContext).pop('omit'),
           child: const Text('Omitir'),
@@ -151,8 +162,8 @@ Future<bool> _showMissingAttendanceAlert(BuildContext context, List<String> miss
   return result == 'omit';
 }
 
-
-DateTime _safeDatePickerInitialDate(DateTime value, DateTime minDate, DateTime maxDate) {
+DateTime _safeDatePickerInitialDate(
+    DateTime value, DateTime minDate, DateTime maxDate) {
   final date = DateTime(value.year, value.month, value.day);
   if (date.isBefore(minDate)) return minDate;
   if (date.isAfter(maxDate)) return maxDate;
@@ -203,7 +214,9 @@ class SpecialFormRouterPage extends StatelessWidget {
         onSavedAndExit: onSavedAndExit,
       );
     }
-    if (tipo == 'asistencia_personal' || tipo == 'asistencia_qr' || tipo == 'asistencia_movilidad') {
+    if (tipo == 'asistencia_personal' ||
+        tipo == 'asistencia_qr' ||
+        tipo == 'asistencia_movilidad') {
       return AsistenciaPersonalSpecialPage(
         moduleId: moduleId,
         format: format,
@@ -213,7 +226,9 @@ class SpecialFormRouterPage extends StatelessWidget {
         onSavedAndExit: onSavedAndExit,
       );
     }
-    if (tipo == 'tareo_personal' || tipo == 'tareo_qr' || (format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
+    if (tipo == 'tareo_personal' ||
+        tipo == 'tareo_qr' ||
+        (format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
       return TareoPersonalSpecialPage(
         moduleId: moduleId,
         format: format,
@@ -233,16 +248,30 @@ class SpecialFormRouterPage extends StatelessWidget {
         onSavedAndExit: onSavedAndExit,
       );
     }
-    return FormRunnerPage(moduleId: moduleId, format: format, initialPayload: initialPayload, editIdLocal: editIdLocal);
+    return FormRunnerPage(
+        moduleId: moduleId,
+        format: format,
+        initialPayload: initialPayload,
+        editIdLocal: editIdLocal);
   }
 }
 
-
 String _specialNorm(String v) {
   var s = v.trim().toUpperCase();
-  const map = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'};
+  const map = {
+    'Á': 'A',
+    'É': 'E',
+    'Í': 'I',
+    'Ó': 'O',
+    'Ú': 'U',
+    'Ü': 'U',
+    'Ñ': 'N'
+  };
   map.forEach((k, value) => s = s.replaceAll(k, value));
-  return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+  return s
+      .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+      .replaceAll(RegExp(r'_+'), '_')
+      .replaceAll(RegExp(r'^_|_$'), '');
 }
 
 bool _specialAsBool(dynamic value, {bool defaultValue = false}) {
@@ -251,11 +280,18 @@ bool _specialAsBool(dynamic value, {bool defaultValue = false}) {
   if (value is num) return value != 0;
   final text = value.toString().trim().toLowerCase();
   if (text.isEmpty || text == 'null') return defaultValue;
-  return text == '1' || text == 'true' || text == 'si' || text == 'sí' || text == 'yes' || text == 'x';
+  return text == '1' ||
+      text == 'true' ||
+      text == 'si' ||
+      text == 'sí' ||
+      text == 'yes' ||
+      text == 'x';
 }
 
-String _specialDateIso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-String _specialTimeHm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+String _specialDateIso(DateTime d) =>
+    '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+String _specialTimeHm(DateTime d) =>
+    '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
 
 class _SpecialMatrixHeader {
   final LocalDb local;
@@ -266,25 +302,35 @@ class _SpecialMatrixHeader {
   bool loading = true;
 
   _SpecialMatrixHeader(this.local, this.tableName, {List<String>? onlyFields})
-      : onlyNormalizedFields = onlyFields == null ? null : onlyFields.map(_specialNorm).toSet();
+      : onlyNormalizedFields =
+            onlyFields == null ? null : onlyFields.map(_specialNorm).toSet();
 
   Future<void> load({Map<String, dynamic>? initialPayload}) async {
     final rows = await local.where(
       'local_form_fields',
       'tabla_destino = ?',
       [tableName],
-      orderBy: 'coalesce(grid_fila, orden, 999), coalesce(grid_columna, 1), coalesce(orden, 999)',
+      orderBy:
+          'coalesce(grid_fila, orden, 999), coalesce(grid_columna, 1), coalesce(orden, 999)',
     );
-    fields = rows.where((row) {
-      final campo = row['campo']?.toString() ?? '';
-      if (campo.trim().isEmpty) return false;
-      if (!_specialAsBool(row['activo'], defaultValue: true)) return false;
-      if (!_specialAsBool(row['visible'], defaultValue: true)) return false;
-      if (onlyNormalizedFields != null && !onlyNormalizedFields!.contains(_specialNorm(campo))) return false;
-      final tipo = row['tipo']?.toString().trim().toLowerCase() ?? '';
-      final ui = row['tipo_ui']?.toString().trim().toLowerCase() ?? '';
-      return tipo != 'hidden' && tipo != 'hidden_id' && ui != 'hidden' && ui != 'hidden_id';
-    }).map((e) => Map<String, dynamic>.from(e)).toList();
+    fields = rows
+        .where((row) {
+          final campo = row['campo']?.toString() ?? '';
+          if (campo.trim().isEmpty) return false;
+          if (!_specialAsBool(row['activo'], defaultValue: true)) return false;
+          if (!_specialAsBool(row['visible'], defaultValue: true)) return false;
+          if (onlyNormalizedFields != null &&
+              !onlyNormalizedFields!.contains(_specialNorm(campo)))
+            return false;
+          final tipo = row['tipo']?.toString().trim().toLowerCase() ?? '';
+          final ui = row['tipo_ui']?.toString().trim().toLowerCase() ?? '';
+          return tipo != 'hidden' &&
+              tipo != 'hidden_id' &&
+              ui != 'hidden' &&
+              ui != 'hidden_id';
+        })
+        .map((e) => Map<String, dynamic>.from(e))
+        .toList();
 
     for (final c in controllers.values) {
       c.dispose();
@@ -292,7 +338,9 @@ class _SpecialMatrixHeader {
     controllers.clear();
     for (final field in fields) {
       final campo = field['campo']?.toString() ?? '';
-      controllers[campo] = TextEditingController(text: _initialValue(field, initialPayload ?? const <String, dynamic>{}));
+      controllers[campo] = TextEditingController(
+          text: _initialValue(
+              field, initialPayload ?? const <String, dynamic>{}));
     }
     await _recalculateFormulaControllers();
     loading = false;
@@ -315,10 +363,14 @@ class _SpecialMatrixHeader {
     final text = formula.trim();
     final upper = text.toUpperCase();
     final now = DateTime.now();
-    if (upper.contains('FECHA_ACTUAL') || upper.contains('HOY()') || upper == 'HOY') return _specialDateIso(now);
+    if (upper.contains('FECHA_ACTUAL') ||
+        upper.contains('HOY()') ||
+        upper == 'HOY') return _specialDateIso(now);
     if (upper.contains('HORA_ACTUAL')) return _specialTimeHm(now);
 
-    final match = RegExp(r'^(?:BUSCAR|LOOKUP|LOOKUPR|LOOKUPP)\s*\((.*)\)\s*$', caseSensitive: false).firstMatch(text);
+    final match = RegExp(r'^(?:BUSCAR|LOOKUP|LOOKUPR|LOOKUPP)\s*\((.*)\)\s*$',
+            caseSensitive: false)
+        .firstMatch(text);
     if (match == null) return null;
     final args = _splitFormulaArgs(match.group(1) ?? '');
     if (args.length < 4) return null;
@@ -327,9 +379,13 @@ class _SpecialMatrixHeader {
     final localRef = _unwrapRef(args[2].trim());
     final sourceReturnField = args[3].trim();
     final localValue = valueByCandidates([localRef]);
-    if (sourceTable.isEmpty || sourceLookupField.isEmpty || sourceReturnField.isEmpty || localValue.isEmpty) return '';
+    if (sourceTable.isEmpty ||
+        sourceLookupField.isEmpty ||
+        sourceReturnField.isEmpty ||
+        localValue.isEmpty) return '';
 
-    final rows = await local.where('local_matrix_rows', 'source_table = ?', [sourceTable]);
+    final rows = await local
+        .where('local_matrix_rows', 'source_table = ?', [sourceTable]);
     final wantedLookup = _specialNorm(sourceLookupField);
     final wantedReturn = _specialNorm(sourceReturnField);
     final targetValue = localValue.trim().toLowerCase();
@@ -344,7 +400,8 @@ class _SpecialMatrixHeader {
           if (keyNorm == wantedLookup) lookup = e.value;
           if (keyNorm == wantedReturn) ret = e.value;
         }
-        if ((lookup?.toString().trim().toLowerCase() ?? '') == targetValue) return ret?.toString().trim() ?? '';
+        if ((lookup?.toString().trim().toLowerCase() ?? '') == targetValue)
+          return ret?.toString().trim() ?? '';
       } catch (_) {}
     }
     return '';
@@ -376,7 +433,8 @@ class _SpecialMatrixHeader {
     controllers.clear();
   }
 
-  String _initialValue(Map<String, dynamic> field, Map<String, dynamic> payload) {
+  String _initialValue(
+      Map<String, dynamic> field, Map<String, dynamic> payload) {
     final campo = field['campo']?.toString() ?? '';
     final wanted = _specialNorm(campo);
     for (final e in payload.entries) {
@@ -384,9 +442,12 @@ class _SpecialMatrixHeader {
     }
     final def = field['valor_default']?.toString().trim() ?? '';
     if (def.isNotEmpty && def.toLowerCase() != 'null') return def;
-    final formula = field['formula_funcion']?.toString().trim().toUpperCase() ?? '';
+    final formula =
+        field['formula_funcion']?.toString().trim().toUpperCase() ?? '';
     final now = DateTime.now();
-    if (formula.contains('FECHA_ACTUAL') || formula.contains('HOY()') || formula == 'HOY') return _specialDateIso(now);
+    if (formula.contains('FECHA_ACTUAL') ||
+        formula.contains('HOY()') ||
+        formula == 'HOY') return _specialDateIso(now);
     if (formula.contains('HORA_ACTUAL')) return _specialTimeHm(now);
     if (_specialNorm(campo) == 'FECHA') return _specialDateIso(now);
     return '';
@@ -405,7 +466,8 @@ class _SpecialMatrixHeader {
   String valueByCandidates(List<String> candidates, {String fallback = ''}) {
     final wanted = candidates.map(_specialNorm).toSet();
     for (final entry in controllers.entries) {
-      if (wanted.contains(_specialNorm(entry.key))) return entry.value.text.trim();
+      if (wanted.contains(_specialNorm(entry.key)))
+        return entry.value.text.trim();
     }
     return fallback;
   }
@@ -415,7 +477,9 @@ class _SpecialMatrixHeader {
     return controllers.keys.any((key) => wanted.contains(_specialNorm(key)));
   }
 
-  List<Map<String, dynamic>> fieldsWhere(bool Function(Map<String, dynamic>) test) => fields.where(test).toList();
+  List<Map<String, dynamic>> fieldsWhere(
+          bool Function(Map<String, dynamic>) test) =>
+      fields.where(test).toList();
 
   String _unwrapRef(String value) {
     final text = value.trim();
@@ -431,7 +495,8 @@ class _SpecialMatrixHeader {
     Map<String, dynamic>? fallback;
     for (final field in fields) {
       final candidates = [field['id'], field['campo'], field['etiqueta']];
-      if (candidates.any((v) => _specialNorm(v?.toString() ?? '') == wanted)) return field;
+      if (candidates.any((v) => _specialNorm(v?.toString() ?? '') == wanted))
+        return field;
     }
     // Respaldo global: permite que GT-CABECERA_TAREO_PERSONAL use id_campo_dropdown
     // apuntando a un campo/catálogo definido en otra tabla de la matriz.
@@ -440,7 +505,8 @@ class _SpecialMatrixHeader {
     return fallback;
   }
 
-  Future<Map<String, dynamic>?> _globalFieldByIdentifier(String identifier) async {
+  Future<Map<String, dynamic>?> _globalFieldByIdentifier(
+      String identifier) async {
     final wanted = _specialNorm(_unwrapRef(identifier));
     if (wanted.isEmpty) return null;
     final all = await local.getAll('local_form_fields');
@@ -448,8 +514,10 @@ class _SpecialMatrixHeader {
     for (final row in all) {
       final field = Map<String, dynamic>.from(row);
       final candidates = [field['id'], field['campo'], field['etiqueta']];
-      if (!candidates.any((v) => _specialNorm(v?.toString() ?? '') == wanted)) continue;
-      if (_specialNorm(field['tabla_destino']?.toString() ?? '') == _specialNorm(tableName)) return field;
+      if (!candidates.any((v) => _specialNorm(v?.toString() ?? '') == wanted))
+        continue;
+      if (_specialNorm(field['tabla_destino']?.toString() ?? '') ==
+          _specialNorm(tableName)) return field;
       fallback ??= field;
     }
     return fallback;
@@ -469,7 +537,8 @@ class _SpecialMatrixHeader {
     }
     final sourceTable = field['tabla_destino']?.toString().trim() ?? '';
     final sourceColumn = field['campo']?.toString().trim() ?? '';
-    if (sourceTable.isNotEmpty && sourceColumn.isNotEmpty) return '$sourceTable.$sourceColumn';
+    if (sourceTable.isNotEmpty && sourceColumn.isNotEmpty)
+      return '$sourceTable.$sourceColumn';
     return raw.trim();
   }
 
@@ -479,7 +548,9 @@ class _SpecialMatrixHeader {
     final values = <String>{};
     for (final catalogKey in <String>{key, raw.trim(), _unwrapRef(raw)}) {
       if (catalogKey.trim().isEmpty) continue;
-      final catalogRows = await local.where('local_catalog_values', 'catalog_key = ?', [catalogKey], orderBy: 'value');
+      final catalogRows = await local.where(
+          'local_catalog_values', 'catalog_key = ?', [catalogKey],
+          orderBy: 'value');
       for (final row in catalogRows) {
         final value = row['value']?.toString().trim() ?? '';
         if (value.isNotEmpty) values.add(value);
@@ -487,11 +558,16 @@ class _SpecialMatrixHeader {
     }
     final source = key.replaceAll('[', '').replaceAll(']', '').trim();
     if (source.isNotEmpty) {
-      final parts = source.split(RegExp(r'[.|:]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+      final parts = source
+          .split(RegExp(r'[.|:]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toList();
       if (parts.isNotEmpty) {
         final sourceTable = parts.first;
         final sourceField = parts.length > 1 ? parts.last : '';
-        final rows = await local.where('local_matrix_rows', 'source_table = ?', [sourceTable]);
+        final rows = await local
+            .where('local_matrix_rows', 'source_table = ?', [sourceTable]);
         for (final row in rows) {
           try {
             final payload = jsonDecode(row['payload_json']?.toString() ?? '{}');
@@ -522,21 +598,32 @@ class _SpecialMatrixHeader {
   List<String>? _literalOptions(Map<String, dynamic> field) {
     final raw = field['id_campo_dropdown']?.toString().trim() ?? '';
     if (raw.isEmpty) return null;
-    final isLiteral = raw.startsWith('[') && raw.endsWith(']') && !raw.contains('.') && !raw.contains(':');
+    final isLiteral = raw.startsWith('[') &&
+        raw.endsWith(']') &&
+        !raw.contains('.') &&
+        !raw.contains(':');
     if (!isLiteral) return null;
     final clean = raw.substring(1, raw.length - 1);
-    return clean.split(RegExp(r'[;,|]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+    return clean
+        .split(RegExp(r'[;,|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
   }
 
   String _label(Map<String, dynamic> field) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString().trim() ?? '';
     final requerido = _specialAsBool(field['requerido']);
-    final label = etiqueta.isNotEmpty && etiqueta.toLowerCase() != 'null' ? etiqueta : campo;
+    final label = etiqueta.isNotEmpty && etiqueta.toLowerCase() != 'null'
+        ? etiqueta
+        : campo;
     return requerido ? '$label *' : label;
   }
 
-  Future<void> _pickSearchable(BuildContext context, Map<String, dynamic> field, List<String> options, void Function(void Function()) setState) async {
+  Future<void> _pickSearchable(BuildContext context, Map<String, dynamic> field,
+      List<String> options, void Function(void Function()) setState) async {
     final campo = field['campo']?.toString() ?? '';
     final searchCtrl = TextEditingController();
     var filtered = List<String>.from(options);
@@ -546,7 +633,8 @@ class _SpecialMatrixHeader {
         builder: (dialogContext) => StatefulBuilder(
           builder: (context, setLocalState) => AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
             title: Text(_label(field).replaceAll(' *', '')),
             content: SizedBox(
               width: 430,
@@ -554,28 +642,46 @@ class _SpecialMatrixHeader {
                 TextField(
                   controller: searchCtrl,
                   autofocus: false,
-                  decoration: const InputDecoration(labelText: 'Buscar', prefixIcon: Icon(Icons.search), border: OutlineInputBorder(), isDense: true),
+                  decoration: const InputDecoration(
+                      labelText: 'Buscar',
+                      prefixIcon: Icon(Icons.search),
+                      border: OutlineInputBorder(),
+                      isDense: true),
                   onChanged: (value) {
                     final q = value.trim().toLowerCase();
-                    setLocalState(() => filtered = q.isEmpty ? List<String>.from(options) : options.where((e) => e.toLowerCase().contains(q)).toList());
+                    setLocalState(() => filtered = q.isEmpty
+                        ? List<String>.from(options)
+                        : options
+                            .where((e) => e.toLowerCase().contains(q))
+                            .toList());
                   },
                 ),
                 const SizedBox(height: 12),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 360),
                   child: filtered.isEmpty
-                      ? const Padding(padding: EdgeInsets.all(16), child: Text('No hay coincidencias.'))
+                      ? const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('No hay coincidencias.'))
                       : ListView.builder(
                           shrinkWrap: true,
                           itemCount: filtered.length,
-                          itemBuilder: (_, i) => ListTile(dense: true, title: Text(filtered[i]), onTap: () => Navigator.pop(dialogContext, filtered[i])),
+                          itemBuilder: (_, i) => ListTile(
+                              dense: true,
+                              title: Text(filtered[i]),
+                              onTap: () =>
+                                  Navigator.pop(dialogContext, filtered[i])),
                         ),
                 ),
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-              TextButton(onPressed: () => Navigator.pop(dialogContext, ''), child: const Text('Limpiar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, ''),
+                  child: const Text('Limpiar')),
             ],
           ),
         ),
@@ -590,7 +696,8 @@ class _SpecialMatrixHeader {
     }
   }
 
-  Widget buildField(BuildContext context, Map<String, dynamic> field, void Function(void Function()) setState) {
+  Widget buildField(BuildContext context, Map<String, dynamic> field,
+      void Function(void Function()) setState) {
     final campo = field['campo']?.toString() ?? '';
     final ctrl = controllers[campo];
     if (ctrl == null) return const SizedBox.shrink();
@@ -599,14 +706,26 @@ class _SpecialMatrixHeader {
     final editable = _specialAsBool(field['editable'], defaultValue: true);
     final label = _label(field);
     final rawDropdown = field['id_campo_dropdown']?.toString().trim() ?? '';
-    final literal = (ui == 'dropdown' || ui == 'multiselect') ? _literalOptions(field) : null;
+    final literal = (ui == 'dropdown' || ui == 'multiselect')
+        ? _literalOptions(field)
+        : null;
 
     if ((ui == 'dropdown' || ui == 'multiselect') && literal != null) {
       return InkWell(
-        onTap: editable ? () => _pickSearchable(context, field, literal, setState) : null,
+        onTap: editable
+            ? () => _pickSearchable(context, field, literal, setState)
+            : null,
         child: InputDecorator(
-          decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: const Icon(Icons.search)),
-          child: Text(ctrl.text.trim().isEmpty ? 'Seleccione o busque...' : ctrl.text.trim(), maxLines: 1, overflow: TextOverflow.ellipsis),
+          decoration: InputDecoration(
+              labelText: label,
+              border: const OutlineInputBorder(),
+              suffixIcon: const Icon(Icons.search)),
+          child: Text(
+              ctrl.text.trim().isEmpty
+                  ? 'Seleccione o busque...'
+                  : ctrl.text.trim(),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis),
         ),
       );
     }
@@ -617,15 +736,24 @@ class _SpecialMatrixHeader {
         builder: (context, snap) {
           final opts = snap.data ?? const <String>[];
           return InkWell(
-            onTap: editable && opts.isNotEmpty ? () => _pickSearchable(context, field, opts, setState) : null,
+            onTap: editable && opts.isNotEmpty
+                ? () => _pickSearchable(context, field, opts, setState)
+                : null,
             child: InputDecorator(
               decoration: InputDecoration(
                 labelText: label,
                 border: const OutlineInputBorder(),
                 suffixIcon: const Icon(Icons.search),
-                helperText: opts.isEmpty ? 'Sin valores locales para $rawDropdown. Actualiza datos con internet.' : null,
+                helperText: opts.isEmpty
+                    ? 'Sin valores locales para $rawDropdown. Actualiza datos con internet.'
+                    : null,
               ),
-              child: Text(ctrl.text.trim().isEmpty ? 'Seleccione o busque...' : ctrl.text.trim(), maxLines: 1, overflow: TextOverflow.ellipsis),
+              child: Text(
+                  ctrl.text.trim().isEmpty
+                      ? 'Seleccione o busque...'
+                      : ctrl.text.trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis),
             ),
           );
         },
@@ -636,17 +764,26 @@ class _SpecialMatrixHeader {
       return TextField(
         controller: ctrl,
         readOnly: true,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: const Icon(Icons.calendar_today)),
-        onTap: editable ? () async {
-          final today = DateTime.now();
-          final current = DateTime.tryParse(ctrl.text.trim()) ?? today;
-          final picked = await showDatePicker(context: context, initialDate: current, firstDate: DateTime(today.year - 3), lastDate: DateTime(today.year + 3));
-          if (picked != null) {
-            setState(() => ctrl.text = _specialDateIso(picked));
-            await _recalculateFormulaControllers();
-            setState(() {});
-          }
-        } : null,
+        decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            suffixIcon: const Icon(Icons.calendar_today)),
+        onTap: editable
+            ? () async {
+                final today = DateTime.now();
+                final current = DateTime.tryParse(ctrl.text.trim()) ?? today;
+                final picked = await showDatePicker(
+                    context: context,
+                    initialDate: current,
+                    firstDate: DateTime(today.year - 3),
+                    lastDate: DateTime(today.year + 3));
+                if (picked != null) {
+                  setState(() => ctrl.text = _specialDateIso(picked));
+                  await _recalculateFormulaControllers();
+                  setState(() {});
+                }
+              }
+            : null,
       );
     }
 
@@ -654,19 +791,29 @@ class _SpecialMatrixHeader {
       return TextField(
         controller: ctrl,
         readOnly: true,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: const Icon(Icons.access_time)),
-        onTap: editable ? () async {
-          final parts = ctrl.text.trim().split(':');
-          final initial = parts.length >= 2
-              ? TimeOfDay(hour: int.tryParse(parts[0]) ?? TimeOfDay.now().hour, minute: int.tryParse(parts[1]) ?? TimeOfDay.now().minute)
-              : TimeOfDay.now();
-          final picked = await showTimePicker(context: context, initialTime: initial);
-          if (picked != null) {
-            setState(() => ctrl.text = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
-            await _recalculateFormulaControllers();
-            setState(() {});
-          }
-        } : null,
+        decoration: InputDecoration(
+            labelText: label,
+            border: const OutlineInputBorder(),
+            suffixIcon: const Icon(Icons.access_time)),
+        onTap: editable
+            ? () async {
+                final parts = ctrl.text.trim().split(':');
+                final initial = parts.length >= 2
+                    ? TimeOfDay(
+                        hour: int.tryParse(parts[0]) ?? TimeOfDay.now().hour,
+                        minute:
+                            int.tryParse(parts[1]) ?? TimeOfDay.now().minute)
+                    : TimeOfDay.now();
+                final picked = await showTimePicker(
+                    context: context, initialTime: initial);
+                if (picked != null) {
+                  setState(() => ctrl.text =
+                      '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
+                  await _recalculateFormulaControllers();
+                  setState(() {});
+                }
+              }
+            : null,
       );
     }
 
@@ -674,13 +821,24 @@ class _SpecialMatrixHeader {
     return TextField(
       controller: ctrl,
       readOnly: readOnly,
-      keyboardType: (ui == 'number' || tipo == 'numeric' || tipo == 'decimal' || tipo == 'integer' || tipo == 'int') ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
+      keyboardType: (ui == 'number' ||
+              tipo == 'numeric' ||
+              tipo == 'decimal' ||
+              tipo == 'integer' ||
+              tipo == 'int')
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : TextInputType.text,
       textCapitalization: TextCapitalization.characters,
-      decoration: InputDecoration(labelText: label, border: const OutlineInputBorder(), suffixIcon: readOnly ? const Icon(Icons.lock_outline) : null),
-      onChanged: readOnly ? null : (_) async {
-        await _recalculateFormulaControllers();
-        setState(() {});
-      },
+      decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: readOnly ? const Icon(Icons.lock_outline) : null),
+      onChanged: readOnly
+          ? null
+          : (_) async {
+              await _recalculateFormulaControllers();
+              setState(() {});
+            },
     );
   }
 
@@ -692,10 +850,15 @@ class _SpecialMatrixHeader {
     return int.tryParse(text) ?? fallback;
   }
 
-  List<Widget> buildFields(BuildContext context, void Function(void Function()) setState, {bool Function(Map<String, dynamic>)? filter}) {
-    final visibleFields = filter == null ? fields : fields.where(filter).toList();
+  List<Widget> buildFields(
+      BuildContext context, void Function(void Function()) setState,
+      {bool Function(Map<String, dynamic>)? filter}) {
+    final visibleFields =
+        filter == null ? fields : fields.where(filter).toList();
     if (loading) return const [LinearProgressIndicator()];
-    if (visibleFields.isEmpty) return [Text('No hay campos configurados en MATRIZ_CAMPOS_FORMATO_APPGT para $tableName.')];
+    if (visibleFields.isEmpty) {
+      return const [Text('Este formato todavía no tiene campos configurados.')];
+    }
 
     final rows = <int, List<Map<String, dynamic>>>{};
     for (var i = 0; i < visibleFields.length; i++) {
@@ -707,13 +870,17 @@ class _SpecialMatrixHeader {
     final widgets = <Widget>[];
     final sortedRows = rows.keys.toList()..sort();
     for (final row in sortedRows) {
-      final rowFields = rows[row]!..sort((a, b) {
-        final ca = _gridNumber(a['grid_columna'], 1);
-        final cb = _gridNumber(b['grid_columna'], 1);
-        if (ca != cb) return ca.compareTo(cb);
-        return _gridNumber(a['orden'], 999).compareTo(_gridNumber(b['orden'], 999));
-      });
-      final columns = rowFields.map((field) => Expanded(child: buildField(context, field, setState))).toList();
+      final rowFields = rows[row]!
+        ..sort((a, b) {
+          final ca = _gridNumber(a['grid_columna'], 1);
+          final cb = _gridNumber(b['grid_columna'], 1);
+          if (ca != cb) return ca.compareTo(cb);
+          return _gridNumber(a['orden'], 999)
+              .compareTo(_gridNumber(b['orden'], 999));
+        });
+      final columns = rowFields
+          .map((field) => Expanded(child: buildField(context, field, setState)))
+          .toList();
       widgets.add(Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         for (var i = 0; i < columns.length; i++) ...[
           if (i > 0) const SizedBox(width: 12),
@@ -725,8 +892,6 @@ class _SpecialMatrixHeader {
     return widgets;
   }
 }
-
-
 
 class AsistenciaPersonalSpecialPage extends StatefulWidget {
   final String moduleId;
@@ -747,10 +912,12 @@ class AsistenciaPersonalSpecialPage extends StatefulWidget {
   });
 
   @override
-  State<AsistenciaPersonalSpecialPage> createState() => _AsistenciaPersonalSpecialPageState();
+  State<AsistenciaPersonalSpecialPage> createState() =>
+      _AsistenciaPersonalSpecialPageState();
 }
 
-class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecialPage> {
+class _AsistenciaPersonalSpecialPageState
+    extends State<AsistenciaPersonalSpecialPage> {
   final local = LocalDb.instance;
   final uuid = const Uuid();
   final fechaCtrl = TextEditingController();
@@ -794,10 +961,14 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     super.dispose();
   }
 
-  String _dateIso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  String _dateTitle(DateTime d) => '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().substring(2)}';
-  String _timeHm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-  String _norm(String v) => v.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+  String _dateIso(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _dateTitle(DateTime d) =>
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().substring(2)}';
+  String _timeHm(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  String _norm(String v) =>
+      v.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
   String _digits(String v) => v.replaceAll(RegExp(r'[^0-9]'), '');
 
   dynamic _rowValue(Map<String, dynamic> row, List<String> keys) {
@@ -808,8 +979,10 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     return null;
   }
 
-  Future<Set<String>> _destinationFieldNorms(String table, {Iterable<String> extra = const []}) async {
-    final rows = await local.where('local_form_fields', 'tabla_destino = ?', [table]);
+  Future<Set<String>> _destinationFieldNorms(String table,
+      {Iterable<String> extra = const []}) async {
+    final rows =
+        await local.where('local_form_fields', 'tabla_destino = ?', [table]);
     final out = extra.map(_norm).toSet();
     for (final row in rows) {
       final campo = row['campo']?.toString().trim() ?? '';
@@ -818,8 +991,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     return out;
   }
 
-
-  Map<String, dynamic> _filterPayloadForNorms(Map<String, dynamic> payload, Set<String> allowed) {
+  Map<String, dynamic> _filterPayloadForNorms(
+      Map<String, dynamic> payload, Set<String> allowed) {
     final out = <String, dynamic>{};
     for (final entry in payload.entries) {
       final key = entry.key.toString();
@@ -830,9 +1003,15 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
 
   Future<String> _activeUserName() async {
     final session = LocalSession();
-    final userId = (Supabase.instance.client.auth.currentUser?.id ?? await session.cachedUserId())?.trim() ?? '';
-    final login = (await session.cachedLoginIdentifier())?.trim().toLowerCase() ?? '';
-    final aliases = (await session.cachedLoginAliases()).map((e) => e.trim().toLowerCase()).toSet();
+    final userId = (Supabase.instance.client.auth.currentUser?.id ??
+                await session.cachedUserId())
+            ?.trim() ??
+        '';
+    final login =
+        (await session.cachedLoginIdentifier())?.trim().toLowerCase() ?? '';
+    final aliases = (await session.cachedLoginAliases())
+        .map((e) => e.trim().toLowerCase())
+        .toSet();
     final profiles = await local.getAll('local_profile');
     for (final p in profiles) {
       final id = p['id']?.toString().trim() ?? '';
@@ -840,7 +1019,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       final email = p['email']?.toString().trim().toLowerCase() ?? '';
       final matches = (userId.isNotEmpty && id == userId) ||
           (login.isNotEmpty && (login == dni || login == email)) ||
-          aliases.contains(dni) || aliases.contains(email);
+          aliases.contains(dni) ||
+          aliases.contains(email);
       if (!matches) continue;
       final name = p['nombres']?.toString().trim() ?? '';
       if (name.isNotEmpty) return name;
@@ -855,7 +1035,15 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       try {
         final decoded = jsonDecode(v);
         if (decoded is Map) {
-          for (final k in ['dni', 'DNI', 'Dni', 'documento', 'codigo_personal', 'QR_PERSONAL', 'id_local']) {
+          for (final k in [
+            'dni',
+            'DNI',
+            'Dni',
+            'documento',
+            'codigo_personal',
+            'QR_PERSONAL',
+            'id_local'
+          ]) {
             final value = decoded[k]?.toString().trim() ?? '';
             if (value.isNotEmpty) return value;
           }
@@ -874,9 +1062,11 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
   void _hydrateFromInitialPayload() {
     final payload = widget.initialPayload;
     if (payload == null || payload.isEmpty) return;
-    fechaCtrl.text = (_rowValue(payload, ['FECHA', 'Fecha']) ?? fechaCtrl.text).toString();
+    fechaCtrl.text =
+        (_rowValue(payload, ['FECHA', 'Fecha']) ?? fechaCtrl.text).toString();
     placaCtrl.text = (_rowValue(payload, ['PLACA', 'Placa']) ?? '').toString();
-    reclutadorCtrl.text = (_rowValue(payload, ['RECLUTADOR', 'Reclutador']) ?? '').toString();
+    reclutadorCtrl.text =
+        (_rowValue(payload, ['RECLUTADOR', 'Reclutador']) ?? '').toString();
     scannedRows.add(Map<String, dynamic>.from(payload));
   }
 
@@ -884,11 +1074,13 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     await asistenciaHeader.load(initialPayload: widget.initialPayload);
     final fecha = asistenciaHeader.valueByCandidates(['FECHA', 'Fecha']);
     if (fecha.isNotEmpty) fechaCtrl.text = fecha;
-    final placa = asistenciaHeader.valueByCandidates(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD']);
+    final placa = asistenciaHeader
+        .valueByCandidates(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD']);
     if (placa.isNotEmpty) placaCtrl.text = placa;
     final reclutador = asistenciaHeader.valueByCandidates(['RECLUTADOR']);
     if (reclutador.isNotEmpty) reclutadorCtrl.text = reclutador;
-    final movimiento = asistenciaHeader.valueByCandidates(['MOVIMIENTO', 'TIPO_MOVIMIENTO', 'TIPO MOVIMIENTO']);
+    final movimiento = asistenciaHeader.valueByCandidates(
+        ['MOVIMIENTO', 'TIPO_MOVIMIENTO', 'TIPO MOVIMIENTO']);
     if (movimiento.trim().isNotEmpty) {
       final upper = movimiento.trim().toUpperCase();
       tipoMovimiento = upper.contains('SAL') ? 'SALIDA' : 'INGRESO';
@@ -897,17 +1089,21 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     await _loadDailyAttendanceRows();
   }
 
-  String _headerValue(List<String> fields, {String fallback = ''}) => asistenciaHeader.valueByCandidates(fields, fallback: fallback);
+  String _headerValue(List<String> fields, {String fallback = ''}) =>
+      asistenciaHeader.valueByCandidates(fields, fallback: fallback);
 
   Map<String, dynamic> _asistenciaHeaderPayload() {
     final payload = asistenciaHeader.payload();
     final fecha = _headerValue(['FECHA'], fallback: fechaCtrl.text.trim());
     if (fecha.isNotEmpty) payload['FECHA'] = fecha;
-    final placa = _headerValue(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'], fallback: placaCtrl.text.trim());
+    final placa = _headerValue(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'],
+        fallback: placaCtrl.text.trim());
     if (placa.isNotEmpty) payload['PLACA'] = placa;
-    final reclutador = _headerValue(['RECLUTADOR'], fallback: reclutadorCtrl.text.trim());
+    final reclutador =
+        _headerValue(['RECLUTADOR'], fallback: reclutadorCtrl.text.trim());
     if (reclutador.isNotEmpty) payload['RECLUTADOR'] = reclutador;
-    payload['TIPO_MOVIMIENTO'] = tipoMovimiento == 'SALIDA' ? 'Salida' : 'Ingreso';
+    payload['TIPO_MOVIMIENTO'] =
+        tipoMovimiento == 'SALIDA' ? 'Salida' : 'Ingreso';
     return payload;
   }
 
@@ -916,43 +1112,58 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     final rows = await local.allRecords();
     final dayRows = <Map<String, dynamic>>[];
     for (final r in rows) {
-      if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL') continue;
+      if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL')
+        continue;
       try {
-        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-        final f = (payload['FECHA'] ?? payload['FECHA_INGRESO'] ?? '').toString().trim();
+        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
+        final f = (payload['FECHA'] ?? payload['FECHA_INGRESO'] ?? '')
+            .toString()
+            .trim();
         if (f == fecha) dayRows.add(payload);
       } catch (_) {}
     }
-    dayRows.sort((a, b) => (b['HORA_INGRESO']?.toString() ?? '').compareTo(a['HORA_INGRESO']?.toString() ?? ''));
-    if (mounted) setState(() {
-      scannedRows
-        ..clear()
-        ..addAll(dayRows);
-    });
+    dayRows.sort((a, b) => (b['HORA_INGRESO']?.toString() ?? '')
+        .compareTo(a['HORA_INGRESO']?.toString() ?? ''));
+    if (mounted)
+      setState(() {
+        scannedRows
+          ..clear()
+          ..addAll(dayRows);
+      });
   }
 
   Future<void> _loadAsistenciaWorkers() async {
     final out = <String, Map<String, dynamic>>{};
     void addWorker(Map<String, dynamic> payload) {
-      final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
+      final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '')
+          .toString()
+          .trim();
       if (dni.isEmpty) return;
       out[_digits(dni).isNotEmpty ? _digits(dni) : dni] = payload;
     }
 
-    for (final source in ['GH-REGISTRO_PERSONAL_PLANILLA', 'GH_REGISTRO_PERSONAL_PLANILLA']) {
-      final rows = await local.where('local_matrix_rows', 'source_table = ?', [source]);
+    for (final source in [
+      'GH-REGISTRO_PERSONAL_PLANILLA',
+      'GH_REGISTRO_PERSONAL_PLANILLA'
+    ]) {
+      final rows =
+          await local.where('local_matrix_rows', 'source_table = ?', [source]);
       for (final r in rows) {
         try {
-          addWorker(jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>);
+          addWorker(jsonDecode(r['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>);
         } catch (_) {}
       }
     }
     final pending = await local.allRecords();
     for (final r in pending) {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
-      if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' && table != 'GH_REGISTRO_PERSONAL_PLANILLA') continue;
+      if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' &&
+          table != 'GH_REGISTRO_PERSONAL_PLANILLA') continue;
       try {
-        addWorker(jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>);
+        addWorker(jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>);
       } catch (_) {}
     }
     if (mounted) setState(() => asistenciaWorkers = out.values.toList());
@@ -964,11 +1175,27 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     final qDigits = _digits(q);
     if (q.isEmpty) return null;
     for (final payload in asistenciaWorkers) {
-      final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
-      final nombre = (_rowValue(payload, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString().trim();
-      final qr = (_rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']) ?? '').toString().trim();
+      final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '')
+          .toString()
+          .trim();
+      final nombre = (_rowValue(payload, [
+                'APELLIDOS Y NOMBRES',
+                'Apellidos y Nombres',
+                'NOMBRE COMPLETO'
+              ]) ??
+              '')
+          .toString()
+          .trim();
+      final qr =
+          (_rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']) ??
+                  '')
+              .toString()
+              .trim();
       final haystack = '$dni $nombre $qr'.toLowerCase();
-      if ((qDigits.isNotEmpty && (_digits(dni).contains(qDigits) || _digits(qr).contains(qDigits))) || haystack.contains(q)) return payload;
+      if ((qDigits.isNotEmpty &&
+              (_digits(dni).contains(qDigits) ||
+                  _digits(qr).contains(qDigits))) ||
+          haystack.contains(q)) return payload;
     }
     return null;
   }
@@ -978,11 +1205,16 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     if (loaded != null) return loaded;
     final code = _normalizeScan(raw);
     if (code.isEmpty) return null;
-    for (final source in ['GH-REGISTRO_PERSONAL_PLANILLA', 'GH_REGISTRO_PERSONAL_PLANILLA']) {
-      final rows = await local.where('local_matrix_rows', 'source_table = ?', [source]);
+    for (final source in [
+      'GH-REGISTRO_PERSONAL_PLANILLA',
+      'GH_REGISTRO_PERSONAL_PLANILLA'
+    ]) {
+      final rows =
+          await local.where('local_matrix_rows', 'source_table = ?', [source]);
       for (final r in rows) {
         try {
-          final payload = jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
+          final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>;
           final candidates = [
             _rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']),
             _rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']),
@@ -996,9 +1228,11 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     final pending = await local.allRecords();
     for (final r in pending) {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
-      if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' && table != 'GH_REGISTRO_PERSONAL_PLANILLA') continue;
+      if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' &&
+          table != 'GH_REGISTRO_PERSONAL_PLANILLA') continue;
       try {
-        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
+        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
         final candidates = [
           _rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']),
           _rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']),
@@ -1018,7 +1252,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       final a = DateTime(2000, 1, 1, int.parse(i[0]), int.parse(i[1]));
       var b = DateTime(2000, 1, 1, int.parse(s[0]), int.parse(s[1]));
       if (b.isBefore(a)) b = b.add(const Duration(days: 1));
-      return double.parse((b.difference(a).inMinutes / 60.0).toStringAsFixed(2));
+      return double.parse(
+          (b.difference(a).inMinutes / 60.0).toStringAsFixed(2));
     } catch (_) {
       return null;
     }
@@ -1029,9 +1264,11 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     final rows = await local.allRecords();
     Map<String, dynamic>? firstSameDay;
     for (final r in rows) {
-      if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL') continue;
+      if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL')
+        continue;
       try {
-        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
+        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
         final samePersonDay = (payload['FECHA']?.toString() ?? '') == fecha &&
             (payload['DNI']?.toString() ?? '') == dni;
         if (!samePersonDay) continue;
@@ -1052,13 +1289,13 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     return firstSameDay;
   }
 
-
   Future<Map<String, dynamic>?> _findPlanillaFormat() async {
     final formats = await local.getAll('local_formats', orderBy: 'orden');
     for (final f in formats) {
       final table = (f['tabla_destino']?.toString() ?? '').toUpperCase();
       final id = (f['id']?.toString() ?? '').toUpperCase();
-      if (table == 'GH-REGISTRO_PERSONAL_PLANILLA' || id.contains('REGISTRO_PERSONAL_PLANILLA')) {
+      if (table == 'GH-REGISTRO_PERSONAL_PLANILLA' ||
+          id.contains('REGISTRO_PERSONAL_PLANILLA')) {
         return Map<String, dynamic>.from(f);
       }
     }
@@ -1070,24 +1307,36 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       context: context,
       builder: (_) => AlertDialog(
         title: const Text('Personal no encontrado'),
-        content: Text('El DNI $dni no existe en GH-REGISTRO_PERSONAL_PLANILLA local. ¿Qué deseas hacer?'),
+        content: Text(
+            'El DNI $dni no existe en el registro de personal local. ¿Qué deseas hacer?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, 'omit'), child: const Text('Omitir')),
-          FilledButton(onPressed: () => Navigator.pop(context, 'add'), child: const Text('Agregar personal')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, 'omit'),
+              child: const Text('Omitir')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, 'add'),
+              child: const Text('Agregar personal')),
         ],
       ),
     );
     if (action == 'add') {
       final fmt = await _findPlanillaFormat();
       if (fmt == null) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No se encontró el formato GH-REGISTRO_PERSONAL_PLANILLA en datos locales.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'No se encontró el formato Registro de personal en los datos locales.')));
         return false;
       }
       await Navigator.of(context).push(MaterialPageRoute(
         builder: (_) => FormRunnerPage(
           moduleId: fmt['modulo_id']?.toString() ?? widget.moduleId,
           format: fmt,
-          initialPayload: {'DNI': dni, 'Dni': dni, 'dni': dni, 'DOCUMENTO': dni},
+          initialPayload: {
+            'DNI': dni,
+            'Dni': dni,
+            'dni': dni,
+            'DOCUMENTO': dni
+          },
         ),
       ));
       await _loadAsistenciaWorkers();
@@ -1096,10 +1345,13 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     return action == 'omit';
   }
 
-  Future<void> _saveAttendancePayload(Map<String, dynamic> payload, String idLocal, Map<String, dynamic>? existing) async {
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? await LocalSession().cachedUserId();
+  Future<void> _saveAttendancePayload(Map<String, dynamic> payload,
+      String idLocal, Map<String, dynamic>? existing) async {
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await LocalSession().cachedUserId();
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay usuario local para guardar asistencia.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No hay usuario local para guardar asistencia.')));
       return;
     }
     setState(() => saving = true);
@@ -1123,7 +1375,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
         scannedRows.insert(0, payload);
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo guardar asistencia: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar asistencia: $e')));
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -1142,22 +1395,42 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       if (!proceed || !mounted) return;
       resolvedWorker = await _findWorker(code);
     }
-    final dni = (_rowValue(resolvedWorker ?? const <String, dynamic>{}, ['DNI', 'Dni', 'DOCUMENTO']) ?? code).toString().trim();
-    final nombre = (_rowValue(resolvedWorker ?? const <String, dynamic>{}, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
-    final puesto = (_rowValue(resolvedWorker ?? const <String, dynamic>{}, ['PUESTO', 'Puesto', 'CARGO']) ?? '').toString();
+    final dni = (_rowValue(resolvedWorker ?? const <String, dynamic>{},
+                ['DNI', 'Dni', 'DOCUMENTO']) ??
+            code)
+        .toString()
+        .trim();
+    final nombre = (_rowValue(resolvedWorker ?? const <String, dynamic>{}, [
+              'APELLIDOS Y NOMBRES',
+              'Apellidos y Nombres',
+              'NOMBRE COMPLETO'
+            ]) ??
+            '')
+        .toString();
+    final puesto = (_rowValue(resolvedWorker ?? const <String, dynamic>{},
+                ['PUESTO', 'Puesto', 'CARGO']) ??
+            '')
+        .toString();
     final now = DateTime.now();
     final time = _timeHm(now);
     final headerPayload = _asistenciaHeaderPayload();
-    final headerFecha = headerPayload['FECHA']?.toString().trim() ?? fechaCtrl.text.trim();
-    final headerPlaca = headerPayload['PLACA']?.toString().trim() ?? placaCtrl.text.trim();
-    final headerReclutador = headerPayload['RECLUTADOR']?.toString().trim() ?? reclutadorCtrl.text.trim();
+    final headerFecha =
+        headerPayload['FECHA']?.toString().trim() ?? fechaCtrl.text.trim();
+    final headerPlaca =
+        headerPayload['PLACA']?.toString().trim() ?? placaCtrl.text.trim();
+    final headerReclutador = headerPayload['RECLUTADOR']?.toString().trim() ??
+        reclutadorCtrl.text.trim();
     final existing = await _existingAttendancePayload(dni);
     if (tipoMovimiento == 'INGRESO' && existing != null) {
-      await _showAppGtAlert(context, 'Personal ya tiene asistencia', playSound: true);
+      await _showAppGtAlert(context, 'Personal ya tiene asistencia',
+          playSound: true);
       return;
     }
     if (tipoMovimiento == 'SALIDA') {
-      final ingresoPrevio = existing == null ? '' : ((existing['payload'] as Map)['HORA_INGRESO']?.toString().trim() ?? '');
+      final ingresoPrevio = existing == null
+          ? ''
+          : ((existing['payload'] as Map)['HORA_INGRESO']?.toString().trim() ??
+              '');
       if (ingresoPrevio.isEmpty || ingresoPrevio.toLowerCase() == 'null') {
         await _showAppGtAlert(context, 'Personal no tiene ingreso');
         return;
@@ -1181,7 +1454,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
 
     if (tipoMovimiento == 'INGRESO') {
       payload['HORA_INGRESO'] = time;
-      payload['FECHA_INGRESO'] = headerFecha.isNotEmpty ? headerFecha : _dateIso(now);
+      payload['FECHA_INGRESO'] =
+          headerFecha.isNotEmpty ? headerFecha : _dateIso(now);
       payload['PLACA'] = headerPlaca;
       payload['RECLUTADOR'] = headerReclutador;
     } else {
@@ -1190,8 +1464,10 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       final ingreso = payload['HORA_INGRESO']?.toString() ?? '';
       final horas = _hoursBetween(ingreso, time);
       if (horas != null) payload['HORAS_ASISTENCIA'] = horas;
-      if ((payload['PLACA']?.toString().trim() ?? '').isEmpty) payload['PLACA'] = headerPlaca;
-      if ((payload['RECLUTADOR']?.toString().trim() ?? '').isEmpty) payload['RECLUTADOR'] = headerReclutador;
+      if ((payload['PLACA']?.toString().trim() ?? '').isEmpty)
+        payload['PLACA'] = headerPlaca;
+      if ((payload['RECLUTADOR']?.toString().trim() ?? '').isEmpty)
+        payload['RECLUTADOR'] = headerReclutador;
     }
     payload.addAll(headerPayload);
     payload['FECHA'] = headerFecha;
@@ -1200,12 +1476,30 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     if (puesto.isNotEmpty) payload['PUESTO'] = puesto;
     payload['MARCADOR_ASISTENCIA'] = await _activeUserName();
 
-    final allowed = await _destinationFieldNorms('GT-ASISTENCIA_PERSONAL', extra: ['id_local', 'FECHA', 'DNI', 'APELLIDOS Y NOMBRES', 'PUESTO', 'PLACA', 'RECLUTADOR', 'HORA_INGRESO', 'HORA_SALIDA', 'FECHA_INGRESO', 'FECHA_SALIDA', 'HORAS_ASISTENCIA', 'MARCADOR_ASISTENCIA', 'estado_registro']);
-    await _saveAttendancePayload(_filterPayloadForNorms(payload, allowed), idLocal, existing);
+    final allowed =
+        await _destinationFieldNorms('GT-ASISTENCIA_PERSONAL', extra: [
+      'id_local',
+      'FECHA',
+      'DNI',
+      'APELLIDOS Y NOMBRES',
+      'PUESTO',
+      'PLACA',
+      'RECLUTADOR',
+      'HORA_INGRESO',
+      'HORA_SALIDA',
+      'FECHA_INGRESO',
+      'FECHA_SALIDA',
+      'HORAS_ASISTENCIA',
+      'MARCADOR_ASISTENCIA',
+      'estado_registro'
+    ]);
+    await _saveAttendancePayload(
+        _filterPayloadForNorms(payload, allowed), idLocal, existing);
   }
 
   Future<void> _openCameraScanner() async {
-    final code = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
+    final code = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
     if (code != null && code.trim().isNotEmpty) await _processScan(code);
   }
 
@@ -1214,12 +1508,23 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
     final qDigits = _digits(q);
     final options = q.isEmpty
         ? <Map<String, dynamic>>[]
-        : asistenciaWorkers.where((w) {
-            final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-            final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
-            final haystack = '$dni $nombre'.toLowerCase();
-            return haystack.contains(q) || (qDigits.isNotEmpty && _digits(dni).contains(qDigits));
-          }).take(8).toList();
+        : asistenciaWorkers
+            .where((w) {
+              final dni =
+                  (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
+              final nombre = (_rowValue(w, [
+                        'APELLIDOS Y NOMBRES',
+                        'Apellidos y Nombres',
+                        'NOMBRE COMPLETO'
+                      ]) ??
+                      '')
+                  .toString();
+              final haystack = '$dni $nombre'.toLowerCase();
+              return haystack.contains(q) ||
+                  (qDigits.isNotEmpty && _digits(dni).contains(qDigits));
+            })
+            .take(8)
+            .toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextField(
         controller: scannerCtrl,
@@ -1229,7 +1534,10 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
           labelText: 'Escanear DNI / QR / código de barras',
           helperText: 'Escribe DNI o nombre, o usa lector físico/cámara.',
           border: const OutlineInputBorder(),
-          suffixIcon: IconButton(onPressed: _openCameraScanner, icon: const Icon(Icons.qr_code_scanner), tooltip: 'Abrir cámara'),
+          suffixIcon: IconButton(
+              onPressed: _openCameraScanner,
+              icon: const Icon(Icons.qr_code_scanner),
+              tooltip: 'Abrir cámara'),
         ),
         textInputAction: TextInputAction.done,
         onChanged: (_) => setState(() {}),
@@ -1250,11 +1558,19 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
             separatorBuilder: (_, __) => const Divider(height: 1),
             itemBuilder: (_, i) {
               final w = options[i];
-              final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-              final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
+              final dni =
+                  (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
+              final nombre = (_rowValue(w, [
+                        'APELLIDOS Y NOMBRES',
+                        'Apellidos y Nombres',
+                        'NOMBRE COMPLETO'
+                      ]) ??
+                      '')
+                  .toString();
               return ListTile(
                 dense: true,
-                leading: const Icon(Icons.badge_outlined, color: Color(0xFF2E6B37)),
+                leading:
+                    const Icon(Icons.badge_outlined, color: Color(0xFF2E6B37)),
                 title: Text('$dni - $nombre'),
                 onTap: () => _processScan(dni),
               );
@@ -1266,7 +1582,9 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
 
   bool _isAsistenciaMovementField(Map<String, dynamic> field) {
     final n = _specialNorm(field['campo']?.toString() ?? '');
-    return n == 'MOVIMIENTO' || n == 'TIPO_MOVIMIENTO' || n == 'TIPO_MOVIMIENTO_ASISTENCIA';
+    return n == 'MOVIMIENTO' ||
+        n == 'TIPO_MOVIMIENTO' ||
+        n == 'TIPO_MOVIMIENTO_ASISTENCIA';
   }
 
   void _setTipoMovimiento(String value) {
@@ -1275,7 +1593,9 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       final text = value == 'SALIDA' ? 'Salida' : 'Ingreso';
       for (final entry in asistenciaHeader.controllers.entries) {
         final n = _specialNorm(entry.key);
-        if (n == 'MOVIMIENTO' || n == 'TIPO_MOVIMIENTO' || n == 'TIPO_MOVIMIENTO_ASISTENCIA') {
+        if (n == 'MOVIMIENTO' ||
+            n == 'TIPO_MOVIMIENTO' ||
+            n == 'TIPO_MOVIMIENTO_ASISTENCIA') {
           entry.value.text = text;
         }
       }
@@ -1290,7 +1610,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
           onPressed: () => _setTipoMovimiento('INGRESO'),
           icon: Icon(isIngreso ? Icons.check_circle : Icons.login),
           label: const Text('Ingreso'),
-          style: FilledButton.styleFrom(backgroundColor: isIngreso ? primary : Colors.grey.shade600),
+          style: FilledButton.styleFrom(
+              backgroundColor: isIngreso ? primary : Colors.grey.shade600),
         ),
       ),
       const SizedBox(width: 12),
@@ -1299,7 +1620,8 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
           onPressed: () => _setTipoMovimiento('SALIDA'),
           icon: Icon(!isIngreso ? Icons.check_circle : Icons.logout),
           label: const Text('Salida'),
-          style: FilledButton.styleFrom(backgroundColor: !isIngreso ? primary : Colors.grey.shade600),
+          style: FilledButton.styleFrom(
+              backgroundColor: !isIngreso ? primary : Colors.grey.shade600),
         ),
       ),
     ]);
@@ -1313,12 +1635,16 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
         color: Colors.white,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: const Color(0xFFE1EEF1)),
-        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 4))],
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 4))
+        ],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         _movementButtons(primary),
         const SizedBox(height: 14),
-        ...asistenciaHeader.buildFields(context, setState, filter: (field) => !_isAsistenciaMovementField(field)),
+        ...asistenciaHeader.buildFields(context, setState,
+            filter: (field) => !_isAsistenciaMovementField(field)),
         const SizedBox(height: 2),
         _workerSearchBox(),
       ]),
@@ -1333,41 +1659,129 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
       dataRowMaxHeight: 76,
       headingRowHeight: 56,
       columns: const [
-        DataColumn(label: SizedBox(width: 95, child: Text('DNI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 260, child: Text('Apellidos y nombres', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 150, child: Text('Placa', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 170, child: Text('Reclutador', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 180, child: Text('Puesto', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 115, child: Text('Fecha ingreso', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 90, child: Text('Ingreso', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 115, child: Text('Fecha salida', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 90, child: Text('Salida', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(label: SizedBox(width: 80, child: Text('Horas', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 95,
+                child: Text('DNI',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 260,
+                child: Text('Apellidos y nombres',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 150,
+                child: Text('Placa',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 170,
+                child: Text('Reclutador',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 180,
+                child: Text('Puesto',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 115,
+                child: Text('Fecha ingreso',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 90,
+                child: Text('Ingreso',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 115,
+                child: Text('Fecha salida',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 90,
+                child: Text('Salida',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
+        DataColumn(
+            label: SizedBox(
+                width: 80,
+                child: Text('Horas',
+                    style: TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.bold)))),
       ],
-      rows: scannedRows.map((r) => DataRow(cells: [
-        DataCell(SizedBox(width: 95, child: Text(r['DNI']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 260, child: Text(r['APELLIDOS Y NOMBRES']?.toString() ?? '', maxLines: 3, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 150, child: Text(r['PLACA']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 170, child: Text(r['RECLUTADOR']?.toString() ?? '', maxLines: 3, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 180, child: Text(r['PUESTO']?.toString() ?? '', maxLines: 3, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 115, child: Text(r['FECHA_INGRESO']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 90, child: Text(r['HORA_INGRESO']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 115, child: Text(r['FECHA_SALIDA']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 90, child: Text(r['HORA_SALIDA']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-        DataCell(SizedBox(width: 80, child: Text(r['HORAS_ASISTENCIA']?.toString() ?? '', maxLines: 2, overflow: TextOverflow.ellipsis))),
-      ])).toList(),
+      rows: scannedRows
+          .map((r) => DataRow(cells: [
+                DataCell(SizedBox(
+                    width: 95,
+                    child: Text(r['DNI']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 260,
+                    child: Text(r['APELLIDOS Y NOMBRES']?.toString() ?? '',
+                        maxLines: 3, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 150,
+                    child: Text(r['PLACA']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 170,
+                    child: Text(r['RECLUTADOR']?.toString() ?? '',
+                        maxLines: 3, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 180,
+                    child: Text(r['PUESTO']?.toString() ?? '',
+                        maxLines: 3, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 115,
+                    child: Text(r['FECHA_INGRESO']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 90,
+                    child: Text(r['HORA_INGRESO']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 115,
+                    child: Text(r['FECHA_SALIDA']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 90,
+                    child: Text(r['HORA_SALIDA']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+                DataCell(SizedBox(
+                    width: 80,
+                    child: Text(r['HORAS_ASISTENCIA']?.toString() ?? '',
+                        maxLines: 2, overflow: TextOverflow.ellipsis))),
+              ]))
+          .toList(),
     );
 
     return Container(
       margin: const EdgeInsets.only(top: 14),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: const Color(0xFFE1EEF1))),
+      decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFFE1EEF1))),
       clipBehavior: Clip.antiAlias,
       child: SizedBox(
         height: scannedRows.length > 7 ? 410 : null,
         child: Scrollbar(
           controller: _asistenciaHorizontalCtrl,
-          thumbVisibility: true,
-          notificationPredicate: (notification) => notification.metrics.axis == Axis.horizontal,
+          // Sin filas, el pulgar quedaba sobre el encabezado DNI. El scroll
+          // horizontal continúa disponible en cuanto existe contenido.
+          thumbVisibility: scannedRows.isNotEmpty,
+          notificationPredicate: (notification) =>
+              notification.metrics.axis == Axis.horizontal,
           child: SingleChildScrollView(
             controller: _asistenciaHorizontalCtrl,
             scrollDirection: Axis.horizontal,
@@ -1399,11 +1813,16 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
         title: const Text('Asistencia de Personal'),
         backgroundColor: const Color(0xFFF4F8F7),
         elevation: 0,
-        actions: [IconButton(
-          tooltip: 'Cerrar cabecera',
-          icon: const Icon(Icons.close),
-          onPressed: () { widget.onSavedAndExit?.call(); Navigator.maybePop(context); },
-        )],
+        actions: [
+          IconButton(
+            tooltip: 'Cerrar cabecera',
+            icon: const Icon(Icons.close),
+            onPressed: () {
+              widget.onSavedAndExit?.call();
+              Navigator.maybePop(context);
+            },
+          )
+        ],
       ),
       body: Center(
         child: ConstrainedBox(
@@ -1411,10 +1830,13 @@ class _AsistenciaPersonalSpecialPageState extends State<AsistenciaPersonalSpecia
           child: Scrollbar(
             controller: _asistenciaVerticalCtrl,
             thumbVisibility: true,
-            child: ListView(controller: _asistenciaVerticalCtrl, padding: const EdgeInsets.all(18), children: [
-            _headerCard(),
-            _rowsTable(),
-          ]),
+            child: ListView(
+                controller: _asistenciaVerticalCtrl,
+                padding: const EdgeInsets.all(18),
+                children: [
+                  _headerCard(),
+                  _rowsTable(),
+                ]),
           ),
         ),
       ),
@@ -1473,7 +1895,8 @@ class TareoPersonalSpecialPage extends StatefulWidget {
   });
 
   @override
-  State<TareoPersonalSpecialPage> createState() => _TareoPersonalSpecialPageState();
+  State<TareoPersonalSpecialPage> createState() =>
+      _TareoPersonalSpecialPageState();
 }
 
 class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
@@ -1505,7 +1928,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     fechaCtrl.text = _dateIso(now);
     horaInicioCtrl.text = _timeHm(now);
     tareoHeader = _SpecialMatrixHeader(local, 'GT-CABECERA_TAREO_PERSONAL');
-    final rawDraftId = widget.editIdLocal ?? widget.initialPayload?['id_local']?.toString() ?? uuid.v4();
+    final rawDraftId = widget.editIdLocal ??
+        widget.initialPayload?['id_local']?.toString() ??
+        uuid.v4();
     draftIdLocal = rawDraftId.replaceFirst(RegExp(r'_[0-9]+$'), '');
     _load();
   }
@@ -1525,14 +1950,27 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     super.dispose();
   }
 
-  String _dateIso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
-  String _timeHm(DateTime d) => '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  String _dateIso(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _timeHm(DateTime d) =>
+      '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   String _digits(String v) => v.replaceAll(RegExp(r'[^0-9]'), '');
   String _norm(String v) {
     var s = v.trim().toUpperCase();
-    const map = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'};
+    const map = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     map.forEach((k, value) => s = s.replaceAll(k, value));
-    return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return s
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   dynamic _rowValue(Map<String, dynamic> row, List<String> keys) {
@@ -1543,8 +1981,10 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return null;
   }
 
-  Future<Set<String>> _destinationFieldNorms(String table, {Iterable<String> extra = const []}) async {
-    final rows = await local.where('local_form_fields', 'tabla_destino = ?', [table]);
+  Future<Set<String>> _destinationFieldNorms(String table,
+      {Iterable<String> extra = const []}) async {
+    final rows =
+        await local.where('local_form_fields', 'tabla_destino = ?', [table]);
     final out = extra.map(_norm).toSet();
     for (final row in rows) {
       final campo = row['campo']?.toString().trim() ?? '';
@@ -1553,9 +1993,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return out;
   }
 
-
   Future<List<String>> _workersWithoutAttendanceForDay() async {
-    final fecha = tareoHeader.valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()).trim();
+    final fecha = tareoHeader
+        .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()).trim();
     if (fecha.isEmpty || selectedWorkers.isEmpty) return const [];
     final attended = <String>{};
     final rows = await local.allRecords();
@@ -1563,10 +2003,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
       if (table != 'GT-ASISTENCIA_PERSONAL') continue;
       try {
-        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>;
-        final rowFecha = (_rowValue(payload, ['FECHA', 'FECHA_INGRESO']) ?? '').toString().trim();
+        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
+        final rowFecha = (_rowValue(payload, ['FECHA', 'FECHA_INGRESO']) ?? '')
+            .toString()
+            .trim();
         if (rowFecha != fecha) continue;
-        final dni = _digits((_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString());
+        final dni = _digits(
+            (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString());
         if (dni.isNotEmpty) attended.add(dni);
       } catch (_) {}
     }
@@ -1580,7 +2024,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
     return missing;
   }
-  Map<String, dynamic> _filterPayloadForNorms(Map<String, dynamic> payload, Set<String> allowed) {
+
+  Map<String, dynamic> _filterPayloadForNorms(
+      Map<String, dynamic> payload, Set<String> allowed) {
     final out = <String, dynamic>{};
     for (final entry in payload.entries) {
       final key = entry.key.toString();
@@ -1592,17 +2038,20 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   Future<void> _load() async {
     await tareoHeader.load(initialPayload: widget.initialPayload);
     final fs = tareoHeader.fields;
-    final planilla = await local.where('local_matrix_rows', 'source_table = ?', ['GH-REGISTRO_PERSONAL_PLANILLA']);
+    final planilla = await local.where('local_matrix_rows', 'source_table = ?',
+        ['GH-REGISTRO_PERSONAL_PLANILLA']);
     final loadedWorkers = <Map<String, dynamic>>[];
     for (final r in planilla) {
       try {
-        loadedWorkers.add(jsonDecode(r['payload_json']?.toString() ?? '{}') as Map<String, dynamic>);
+        loadedWorkers.add(jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>);
       } catch (_) {}
     }
 
     final loadedLotes = <Map<String, dynamic>>[];
     for (final source in ['LOTES_VARIEDADES_GT', 'LOTES-VARIEDADES-GT']) {
-      final rows = await local.where('local_matrix_rows', 'source_table = ?', [source]);
+      final rows =
+          await local.where('local_matrix_rows', 'source_table = ?', [source]);
       for (final r in rows) {
         try {
           final payload = jsonDecode(r['payload_json']?.toString() ?? '{}');
@@ -1615,14 +2064,23 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       }
     }
 
-    if (widget.initialPayload != null) _hydrateFromPayload(widget.initialPayload!);
-    final fecha = tareoHeader.valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim());
+    if (widget.initialPayload != null)
+      _hydrateFromPayload(widget.initialPayload!);
+    final fecha = tareoHeader
+        .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim());
     if (fecha.isNotEmpty) fechaCtrl.text = fecha;
-    final hi = tareoHeader.valueByCandidates(['HORA_INICIO', 'HORA INICIO'], fallback: horaInicioCtrl.text.trim());
+    final hi = tareoHeader.valueByCandidates(['HORA_INICIO', 'HORA INICIO'],
+        fallback: horaInicioCtrl.text.trim());
     if (hi.isNotEmpty) horaInicioCtrl.text = hi;
-    final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'], fallback: horaFinCtrl.text.trim());
+    final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'],
+        fallback: horaFinCtrl.text.trim());
     if (hf.isNotEmpty) horaFinCtrl.text = hf;
-    if (mounted) setState(() { fields = fs; workers = loadedWorkers; lotesVariedades = loadedLotes; });
+    if (mounted)
+      setState(() {
+        fields = fs;
+        workers = loadedWorkers;
+        lotesVariedades = loadedLotes;
+      });
   }
 
   void _hydrateFromPayload(Map<String, dynamic> p) {
@@ -1631,9 +2089,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     turnoCtrl.text = (_rowValue(p, ['TURNO']) ?? '').toString();
     variedadCtrl.text = (_rowValue(p, ['VARIEDAD']) ?? '').toString();
     areaCtrl.text = (_rowValue(p, ['AREA']) ?? '').toString();
-    centroCostoCtrl.text = (_rowValue(p, ['CENTRO_COSTO', 'CENTRO COSTO']) ?? '').toString();
-    horaInicioCtrl.text = (_rowValue(p, ['HORA_INICIO', 'HORA_INCIO', 'HORA INICIO']) ?? horaInicioCtrl.text).toString();
-    horaFinCtrl.text = (_rowValue(p, ['HORA_FIN', 'HORA FIN']) ?? '').toString();
+    centroCostoCtrl.text =
+        (_rowValue(p, ['CENTRO_COSTO', 'CENTRO COSTO']) ?? '').toString();
+    horaInicioCtrl.text =
+        (_rowValue(p, ['HORA_INICIO', 'HORA_INCIO', 'HORA INICIO']) ??
+                horaInicioCtrl.text)
+            .toString();
+    horaFinCtrl.text =
+        (_rowValue(p, ['HORA_FIN', 'HORA FIN']) ?? '').toString();
     final raw = p['__TRABAJADORES__'] ?? p['__tareo_rows'];
     if (raw is List) {
       selectedWorkers
@@ -1642,14 +2105,16 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     } else {
       final dni = (_rowValue(p, ['DNI']) ?? '').toString();
       final nombre = (_rowValue(p, ['APELLIDOS Y NOMBRES']) ?? '').toString();
-      if (dni.isNotEmpty || nombre.isNotEmpty) selectedWorkers.add({'DNI': dni, 'APELLIDOS Y NOMBRES': nombre});
+      if (dni.isNotEmpty || nombre.isNotEmpty)
+        selectedWorkers.add({'DNI': dni, 'APELLIDOS Y NOMBRES': nombre});
     }
   }
 
   Map<String, dynamic>? _field(String campo) {
     final n = _norm(campo);
     for (final f in fields) {
-      if (_norm(f['campo']?.toString() ?? '') == n || _norm(f['etiqueta']?.toString() ?? '') == n) return f;
+      if (_norm(f['campo']?.toString() ?? '') == n ||
+          _norm(f['etiqueta']?.toString() ?? '') == n) return f;
     }
     return null;
   }
@@ -1657,11 +2122,19 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   List<String> _dropdownOptions(String campo) {
     final raw = _field(campo)?['id_campo_dropdown']?.toString().trim() ?? '';
     if (raw.isEmpty) return const [];
-    final clean = raw.startsWith('[') && raw.endsWith(']') ? raw.substring(1, raw.length - 1) : raw;
-    return clean.split(RegExp(r'[;,]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet().toList();
+    final clean = raw.startsWith('[') && raw.endsWith(']')
+        ? raw.substring(1, raw.length - 1)
+        : raw;
+    return clean
+        .split(RegExp(r'[;,]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toSet()
+        .toList();
   }
 
-  Widget _matrixField(String label, TextEditingController ctrl, {String? displayLabel, bool readOnly = false}) {
+  Widget _matrixField(String label, TextEditingController ctrl,
+      {String? displayLabel, bool readOnly = false}) {
     final visibleLabel = displayLabel ?? label;
     final opts = _dropdownOptions(label);
     if (opts.isNotEmpty && !readOnly) {
@@ -1704,12 +2177,16 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     for (final row in lotesVariedades) {
       final turno = (_rowValue(row, ['TURNO', 'LOTE']) ?? '').toString().trim();
       if (turno.toLowerCase() != selected) continue;
-      variedadCtrl.text = (_rowValue(row, ['VARIEDAD']) ?? '').toString().trim();
+      variedadCtrl.text =
+          (_rowValue(row, ['VARIEDAD']) ?? '').toString().trim();
       return;
     }
   }
 
-  Future<String?> _showSearchablePicker({required String title, required List<String> options, String? currentValue}) async {
+  Future<String?> _showSearchablePicker(
+      {required String title,
+      required List<String> options,
+      String? currentValue}) async {
     final unique = <String>[];
     final seen = <String>{};
     for (final option in options) {
@@ -1726,8 +2203,11 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
           var filtered = List<String>.from(unique);
           return AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
-            title: Text(title, style: const TextStyle(color: Color(0xFF0D5F78), fontWeight: FontWeight.w800)),
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            title: Text(title,
+                style: const TextStyle(
+                    color: Color(0xFF0D5F78), fontWeight: FontWeight.w800)),
             content: SizedBox(
               width: 430,
               child: StatefulBuilder(
@@ -1746,7 +2226,11 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
                       onChanged: (value) {
                         final q = value.trim().toLowerCase();
                         setLocalState(() {
-                          filtered = q.isEmpty ? List<String>.from(unique) : unique.where((e) => e.toLowerCase().contains(q)).toList();
+                          filtered = q.isEmpty
+                              ? List<String>.from(unique)
+                              : unique
+                                  .where((e) => e.toLowerCase().contains(q))
+                                  .toList();
                         });
                       },
                     ),
@@ -1754,7 +2238,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
                     ConstrainedBox(
                       constraints: const BoxConstraints(maxHeight: 360),
                       child: filtered.isEmpty
-                          ? const Padding(padding: EdgeInsets.all(16), child: Text('No hay coincidencias.'))
+                          ? const Padding(
+                              padding: EdgeInsets.all(16),
+                              child: Text('No hay coincidencias.'))
                           : ListView.builder(
                               shrinkWrap: true,
                               itemCount: filtered.length,
@@ -1763,10 +2249,17 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
                                 final selected = option == currentValue;
                                 return ListTile(
                                   dense: true,
-                                  leading: const Icon(Icons.list_alt_outlined, color: Color(0xFF2E6B37)),
-                                  title: Text(option, maxLines: 1, overflow: TextOverflow.ellipsis),
-                                  trailing: selected ? const Icon(Icons.check, color: Color(0xFF2E6B37)) : null,
-                                  onTap: () => Navigator.pop(dialogContext, option),
+                                  leading: const Icon(Icons.list_alt_outlined,
+                                      color: Color(0xFF2E6B37)),
+                                  title: Text(option,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis),
+                                  trailing: selected
+                                      ? const Icon(Icons.check,
+                                          color: Color(0xFF2E6B37))
+                                      : null,
+                                  onTap: () =>
+                                      Navigator.pop(dialogContext, option),
                                 );
                               },
                             ),
@@ -1776,8 +2269,12 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text('Cancelar')),
-              TextButton(onPressed: () => Navigator.pop(dialogContext, ''), child: const Text('Limpiar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, ''),
+                  child: const Text('Limpiar')),
             ],
           );
         },
@@ -1797,7 +2294,10 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final hasValue = current.isNotEmpty;
     return InkWell(
       onTap: () async {
-        final selected = await _showSearchablePicker(title: label, options: options, currentValue: hasValue ? current : null);
+        final selected = await _showSearchablePicker(
+            title: label,
+            options: options,
+            currentValue: hasValue ? current : null);
         if (selected == null) return;
         setState(() {
           controller.text = selected;
@@ -1809,7 +2309,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
           labelText: label,
           border: const OutlineInputBorder(),
           suffixIcon: const Icon(Icons.search),
-          helperText: options.isEmpty ? 'Sin valores locales. Presiona Actualizar con internet.' : null,
+          helperText: options.isEmpty
+              ? 'Sin valores locales. Presiona Actualizar con internet.'
+              : null,
         ),
         child: Text(
           hasValue ? current : 'Seleccione o busque...',
@@ -1833,25 +2335,37 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   Future<void> _pickTime(TextEditingController controller) async {
     final parts = controller.text.trim().split(':');
     final initial = parts.length >= 2
-        ? TimeOfDay(hour: int.tryParse(parts[0]) ?? TimeOfDay.now().hour, minute: int.tryParse(parts[1]) ?? TimeOfDay.now().minute)
+        ? TimeOfDay(
+            hour: int.tryParse(parts[0]) ?? TimeOfDay.now().hour,
+            minute: int.tryParse(parts[1]) ?? TimeOfDay.now().minute)
         : TimeOfDay.now();
     final picked = await showTimePicker(context: context, initialTime: initial);
     if (picked != null) {
-      setState(() => controller.text = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
+      setState(() => controller.text =
+          '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
     }
   }
 
   Future<String> _activeUserName() async {
     final session = LocalSession();
-    final userId = (Supabase.instance.client.auth.currentUser?.id ?? await session.cachedUserId())?.trim() ?? '';
-    final login = (await session.cachedLoginIdentifier())?.trim().toLowerCase() ?? '';
-    final aliases = (await session.cachedLoginAliases()).map((e) => e.trim().toLowerCase()).toSet();
+    final userId = (Supabase.instance.client.auth.currentUser?.id ??
+                await session.cachedUserId())
+            ?.trim() ??
+        '';
+    final login =
+        (await session.cachedLoginIdentifier())?.trim().toLowerCase() ?? '';
+    final aliases = (await session.cachedLoginAliases())
+        .map((e) => e.trim().toLowerCase())
+        .toSet();
     final profiles = await local.getAll('local_profile');
     for (final p in profiles) {
       final id = p['id']?.toString().trim() ?? '';
       final dni = p['dni']?.toString().trim().toLowerCase() ?? '';
       final email = p['email']?.toString().trim().toLowerCase() ?? '';
-      final matches = (userId.isNotEmpty && id == userId) || (login.isNotEmpty && (login == dni || login == email)) || aliases.contains(dni) || aliases.contains(email);
+      final matches = (userId.isNotEmpty && id == userId) ||
+          (login.isNotEmpty && (login == dni || login == email)) ||
+          aliases.contains(dni) ||
+          aliases.contains(email);
       if (!matches) continue;
       final name = p['nombres']?.toString().trim() ?? '';
       if (name.isNotEmpty) return name;
@@ -1861,10 +2375,15 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
 
   Future<void> _pickDate() async {
     final today = DateTime.now();
-    final min = DateTime(today.year, today.month, today.day).subtract(const Duration(days: 1));
+    final min = DateTime(today.year, today.month, today.day)
+        .subtract(const Duration(days: 1));
     final max = DateTime(today.year, today.month, today.day);
     final current = DateTime.tryParse(fechaCtrl.text) ?? max;
-    final picked = await showDatePicker(context: context, initialDate: _safeDatePickerInitialDate(current, min, max), firstDate: min, lastDate: max);
+    final picked = await showDatePicker(
+        context: context,
+        initialDate: _safeDatePickerInitialDate(current, min, max),
+        firstDate: min,
+        lastDate: max);
     if (picked != null) setState(() => fechaCtrl.text = _dateIso(picked));
   }
 
@@ -1874,17 +2393,33 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     if (q.isEmpty) return null;
     for (final w in workers) {
       final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-      final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
+      final nombre = (_rowValue(w, [
+                'APELLIDOS Y NOMBRES',
+                'Apellidos y Nombres',
+                'NOMBRE COMPLETO'
+              ]) ??
+              '')
+          .toString();
       final haystack = '$dni $nombre'.toLowerCase();
-      if ((qDigits.isNotEmpty && _digits(dni).contains(qDigits)) || haystack.contains(q)) return w;
+      if ((qDigits.isNotEmpty && _digits(dni).contains(qDigits)) ||
+          haystack.contains(q)) return w;
     }
     return null;
   }
 
   void _addWorker(Map<String, dynamic> w) {
-    final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
-    if (dni.isEmpty || selectedWorkers.any((e) => (e['DNI']?.toString() ?? '') == dni)) return;
-    final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString().trim();
+    final dni =
+        (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
+    if (dni.isEmpty ||
+        selectedWorkers.any((e) => (e['DNI']?.toString() ?? '') == dni)) return;
+    final nombre = (_rowValue(w, [
+              'APELLIDOS Y NOMBRES',
+              'Apellidos y Nombres',
+              'NOMBRE COMPLETO'
+            ]) ??
+            '')
+        .toString()
+        .trim();
     setState(() {
       selectedWorkers.add({'DNI': dni, 'APELLIDOS Y NOMBRES': nombre});
       trabajadorCtrl.clear();
@@ -1892,11 +2427,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   }
 
   Future<void> _openQr() async {
-    final code = await Navigator.of(context).push<String>(MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
+    final code = await Navigator.of(context).push<String>(
+        MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
     if (code == null || code.trim().isEmpty) return;
     final w = _findWorker(code) ?? _findWorker(_digits(code));
     if (w == null) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Trabajador no encontrado: $code')));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Trabajador no encontrado: $code')));
       return;
     }
     _addWorker(w);
@@ -1911,18 +2449,25 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       var b = DateTime(2000, 1, 1, int.parse(s[0]), int.parse(s[1]));
       if (b.isBefore(a)) b = b.add(const Duration(days: 1));
       return double.parse((b.difference(a).inMinutes / 60).toStringAsFixed(2));
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
   bool _isTareoTimeField(Map<String, dynamic> field) {
     final campo = _norm(field['campo']?.toString() ?? '');
-    return campo == 'HORA_INICIO' || campo == 'HORA_FIN' || campo == 'HORA_INCIO';
+    return campo == 'HORA_INICIO' ||
+        campo == 'HORA_FIN' ||
+        campo == 'HORA_INCIO';
   }
 
   Map<String, dynamic> _tareoHeaderPayload() {
     final payload = tareoHeader.payload();
-    final hi = tareoHeader.valueByCandidates(['HORA_INICIO', 'HORA INICIO', 'HORA_INCIO'], fallback: horaInicioCtrl.text.trim());
-    final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'], fallback: horaFinCtrl.text.trim());
+    final hi = tareoHeader.valueByCandidates(
+        ['HORA_INICIO', 'HORA INICIO', 'HORA_INCIO'],
+        fallback: horaInicioCtrl.text.trim());
+    final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'],
+        fallback: horaFinCtrl.text.trim());
     if (hi.isNotEmpty) payload['HORA_INICIO'] = hi;
     if (hf.isNotEmpty) payload['HORA_FIN'] = hf;
     return payload;
@@ -1930,38 +2475,63 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
 
   Future<void> _saveDraft({required bool goNext}) async {
     if (selectedWorkers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Agrega al menos un trabajador.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Agrega al menos un trabajador.')));
       return;
     }
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? await LocalSession().cachedUserId();
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await LocalSession().cachedUserId();
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay usuario local para guardar tareo.')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('No hay usuario local para guardar tareo.')));
       return;
     }
     final missingAttendance = await _workersWithoutAttendanceForDay();
     if (missingAttendance.isNotEmpty) {
-      final omit = await _showMissingAttendanceAlert(context, missingAttendance);
+      final omit =
+          await _showMissingAttendanceAlert(context, missingAttendance);
       if (!omit || !mounted) return;
     }
     final tareador = await _activeUserName();
     final headerPayload = _tareoHeaderPayload();
     final horaInicio = headerPayload['HORA_INICIO']?.toString().trim() ?? '';
     final horaFin = headerPayload['HORA_FIN']?.toString().trim() ?? '';
-    final horasMatriz = tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
-    final horas = horasMatriz.trim().isNotEmpty ? horasMatriz.trim() : _hoursBetween(horaInicio, horaFin);
+    final horasMatriz =
+        tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
+    final horas = horasMatriz.trim().isNotEmpty
+        ? horasMatriz.trim()
+        : _hoursBetween(horaInicio, horaFin);
     final basePayloadRaw = <String, dynamic>{
       ...headerPayload,
-      'FECHA': tareoHeader.valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()),
-      'CENTRO_COSTO': tareoHeader.valueByCandidates(['CENTRO_COSTO', 'CENTRO COSTO'], fallback: centroCostoCtrl.text.trim()),
-      'LABOR': tareoHeader.valueByCandidates(['LABOR'], fallback: laborCtrl.text.trim()),
-      'VARIEDAD': tareoHeader.valueByCandidates(['VARIEDAD'], fallback: variedadCtrl.text.trim()),
+      'FECHA': tareoHeader
+          .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()),
+      'CENTRO_COSTO': tareoHeader.valueByCandidates(
+          ['CENTRO_COSTO', 'CENTRO COSTO'],
+          fallback: centroCostoCtrl.text.trim()),
+      'LABOR': tareoHeader
+          .valueByCandidates(['LABOR'], fallback: laborCtrl.text.trim()),
+      'VARIEDAD': tareoHeader
+          .valueByCandidates(['VARIEDAD'], fallback: variedadCtrl.text.trim()),
       'HORA_INICIO': horaInicio,
       'HORA_FIN': horaFin,
       'HORAS_TRABAJADAS': horas,
       'TAREADOR': tareador,
       'estado_registro': 'COMPLETO',
     };
-    final allowed = await _destinationFieldNorms('GT-TAREO_PERSONAL', extra: ['id_local', 'FECHA', 'CENTRO_COSTO', 'LABOR', 'VARIEDAD', 'HORA_INICIO', 'HORA_FIN', 'HORAS_TRABAJADAS', 'TAREADOR', 'DNI', 'APELLIDOS Y NOMBRES', 'estado_registro']);
+    final allowed = await _destinationFieldNorms('GT-TAREO_PERSONAL', extra: [
+      'id_local',
+      'FECHA',
+      'CENTRO_COSTO',
+      'LABOR',
+      'VARIEDAD',
+      'HORA_INICIO',
+      'HORA_FIN',
+      'HORAS_TRABAJADAS',
+      'TAREADOR',
+      'DNI',
+      'APELLIDOS Y NOMBRES',
+      'estado_registro'
+    ]);
     final basePayload = _filterPayloadForNorms(basePayloadRaw, allowed);
     setState(() => saving = true);
     try {
@@ -1969,12 +2539,15 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       final createdAt = DateTime.now().toIso8601String();
       for (var i = 0; i < selectedWorkers.length; i++) {
         final worker = selectedWorkers[i];
-        final rowIdLocal = selectedWorkers.length == 1 ? draftIdLocal : '${draftIdLocal}_${i + 1}';
+        final rowIdLocal = selectedWorkers.length == 1
+            ? draftIdLocal
+            : '${draftIdLocal}_${i + 1}';
         final payload = <String, dynamic>{
           ...basePayload,
           'id_local': rowIdLocal,
           'DNI': worker['DNI']?.toString().trim() ?? '',
-          'APELLIDOS Y NOMBRES': worker['APELLIDOS Y NOMBRES']?.toString().trim() ?? '',
+          'APELLIDOS Y NOMBRES':
+              worker['APELLIDOS Y NOMBRES']?.toString().trim() ?? '',
         };
         await local.insertPending({
           'id_local': rowIdLocal,
@@ -1998,25 +2571,48 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         Navigator.pop(context);
       }
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo guardar tareo local: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('No se pudo guardar tareo local: $e')));
     } finally {
       if (mounted) setState(() => saving = false);
     }
   }
 
   Widget _workersPicker() {
-    final options = trabajadorCtrl.text.trim().isEmpty ? workers.take(20).toList() : workers.where((w) {
-      final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-      final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
-      final q = trabajadorCtrl.text.toLowerCase();
-      return '$dni $nombre'.toLowerCase().contains(q) || _digits(dni).contains(_digits(q));
-    }).take(20).toList();
+    final options = trabajadorCtrl.text.trim().isEmpty
+        ? workers.take(20).toList()
+        : workers
+            .where((w) {
+              final dni =
+                  (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
+              final nombre = (_rowValue(w, [
+                        'APELLIDOS Y NOMBRES',
+                        'Apellidos y Nombres',
+                        'NOMBRE COMPLETO'
+                      ]) ??
+                      '')
+                  .toString();
+              final q = trabajadorCtrl.text.toLowerCase();
+              return '$dni $nombre'.toLowerCase().contains(q) ||
+                  _digits(dni).contains(_digits(q));
+            })
+            .take(20)
+            .toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextField(
         controller: trabajadorCtrl,
-        decoration: InputDecoration(labelText: 'TRABAJADORES', helperText: 'Busca por DNI o nombre. Cámara/QR disponible.', border: const OutlineInputBorder(), suffixIcon: IconButton(icon: const Icon(Icons.qr_code_scanner), onPressed: _openQr)),
+        decoration: InputDecoration(
+            labelText: 'TRABAJADORES',
+            helperText: 'Busca por DNI o nombre. Cámara/QR disponible.',
+            border: const OutlineInputBorder(),
+            suffixIcon: IconButton(
+                icon: const Icon(Icons.qr_code_scanner), onPressed: _openQr)),
         onChanged: (_) => setState(() {}),
-        onSubmitted: (v) { final w = _findWorker(v); if (w != null) _addWorker(w); },
+        onSubmitted: (v) {
+          final w = _findWorker(v);
+          if (w != null) _addWorker(w);
+        },
       ),
       const SizedBox(height: 8),
       if (trabajadorCtrl.text.trim().isNotEmpty)
@@ -2026,58 +2622,111 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             itemCount: options.length,
             itemBuilder: (_, i) {
               final w = options[i];
-              final dni = (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-              final nombre = (_rowValue(w, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'NOMBRE COMPLETO']) ?? '').toString();
-              return ListTile(dense: true, title: Text('$dni-$nombre'), onTap: () => _addWorker(w));
+              final dni =
+                  (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
+              final nombre = (_rowValue(w, [
+                        'APELLIDOS Y NOMBRES',
+                        'Apellidos y Nombres',
+                        'NOMBRE COMPLETO'
+                      ]) ??
+                      '')
+                  .toString();
+              return ListTile(
+                  dense: true,
+                  title: Text('$dni-$nombre'),
+                  onTap: () => _addWorker(w));
             },
           ),
         ),
       const SizedBox(height: 8),
       SingleChildScrollView(
         scrollDirection: Axis.horizontal,
-        child: DataTable(columns: const [
-          DataColumn(label: Text('DNI')), DataColumn(label: Text('Apellidos y nombres')), DataColumn(label: Text('')),
-        ], rows: selectedWorkers.map((w) => DataRow(cells: [
-          DataCell(Text(w['DNI']?.toString() ?? '')),
-          DataCell(Text(w['APELLIDOS Y NOMBRES']?.toString() ?? '')),
-          DataCell(IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => setState(() => selectedWorkers.remove(w)))),
-        ])).toList()),
+        child: DataTable(
+            columns: const [
+              DataColumn(label: Text('DNI')),
+              DataColumn(label: Text('Apellidos y nombres')),
+              DataColumn(label: Text('')),
+            ],
+            rows: selectedWorkers
+                .map((w) => DataRow(cells: [
+                      DataCell(Text(w['DNI']?.toString() ?? '')),
+                      DataCell(
+                          Text(w['APELLIDOS Y NOMBRES']?.toString() ?? '')),
+                      DataCell(IconButton(
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () =>
+                              setState(() => selectedWorkers.remove(w)))),
+                    ]))
+                .toList()),
       ),
     ]);
   }
 
-  Widget _headerStep() => ListView(padding: const EdgeInsets.all(14), children: [
-    Text('Tareo de personal', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-    const SizedBox(height: 12),
-    ...tareoHeader.buildFields(context, setState, filter: (field) => !_isTareoTimeField(field)),
-    _workersPicker(),
-    const SizedBox(height: 18),
-    FilledButton.icon(onPressed: saving ? null : () => _saveDraft(goNext: true), icon: const Icon(Icons.arrow_forward), label: const Text('Continuar')),
-  ]);
+  Widget _headerStep() =>
+      ListView(padding: const EdgeInsets.all(14), children: [
+        Text('Tareo de personal',
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
+                ?.copyWith(fontWeight: FontWeight.w800)),
+        const SizedBox(height: 12),
+        ...tareoHeader.buildFields(context, setState,
+            filter: (field) => !_isTareoTimeField(field)),
+        _workersPicker(),
+        const SizedBox(height: 18),
+        FilledButton.icon(
+            onPressed: saving ? null : () => _saveDraft(goNext: true),
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('Continuar')),
+      ]);
 
   Widget _hoursStep() {
     final timeFields = tareoHeader.fieldsWhere(_isTareoTimeField);
     return ListView(padding: const EdgeInsets.all(14), children: [
-      Text('Horas del tareo', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
+      Text('Horas del tareo',
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
+              ?.copyWith(fontWeight: FontWeight.w800)),
       const SizedBox(height: 12),
       if (timeFields.isNotEmpty)
         ...tareoHeader.buildFields(context, setState, filter: _isTareoTimeField)
       else ...[
-        TextField(controller: horaInicioCtrl, readOnly: true, onTap: () => _pickTime(horaInicioCtrl), decoration: const InputDecoration(labelText: 'HORA_INICIO', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time))),
+        TextField(
+            controller: horaInicioCtrl,
+            readOnly: true,
+            onTap: () => _pickTime(horaInicioCtrl),
+            decoration: const InputDecoration(
+                labelText: 'HORA_INICIO',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.access_time))),
         const SizedBox(height: 10),
-        TextField(controller: horaFinCtrl, readOnly: true, onTap: () => _pickTime(horaFinCtrl), decoration: const InputDecoration(labelText: 'HORA_FIN', helperText: 'Puede quedar vacío, pero no sincronizará hasta completarlo.', border: OutlineInputBorder(), suffixIcon: Icon(Icons.access_time))),
+        TextField(
+            controller: horaFinCtrl,
+            readOnly: true,
+            onTap: () => _pickTime(horaFinCtrl),
+            decoration: const InputDecoration(
+                labelText: 'HORA_FIN',
+                helperText:
+                    'Puede quedar vacío, pero no sincronizará hasta completarlo.',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.access_time))),
       ],
       const SizedBox(height: 18),
-      FilledButton(onPressed: saving ? null : () => _saveDraft(goNext: false), child: const Icon(Icons.save)),
-      TextButton(onPressed: () => setState(() => secondStep = false), child: const Text('Volver a trabajadores')),
+      FilledButton(
+          onPressed: saving ? null : () => _saveDraft(goNext: false),
+          child: const Icon(Icons.save)),
+      TextButton(
+          onPressed: () => setState(() => secondStep = false),
+          child: const Text('Volver a trabajadores')),
     ]);
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('GT-TAREO_PERSONAL')),
-    body: secondStep ? _hoursStep() : _headerStep(),
-  );
+        appBar: AppBar(title: const Text('Tareo de personal')),
+        body: secondStep ? _hoursStep() : _headerStep(),
+      );
 }
 
 class _PlagaHallazgo {
@@ -2106,10 +2755,12 @@ class PlagasEnfermedadesSpecialPage extends StatefulWidget {
   });
 
   @override
-  State<PlagasEnfermedadesSpecialPage> createState() => _PlagasEnfermedadesSpecialPageState();
+  State<PlagasEnfermedadesSpecialPage> createState() =>
+      _PlagasEnfermedadesSpecialPageState();
 }
 
-class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecialPage> {
+class _PlagasEnfermedadesSpecialPageState
+    extends State<PlagasEnfermedadesSpecialPage> {
   final local = LocalDb.instance;
   final picker = ImagePicker();
   final uuid = const Uuid();
@@ -2120,14 +2771,20 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   List<Map<String, dynamic>> conceptosEstadios = [];
   List<Map<String, dynamic>> etapasFenologicas = [];
 
-  final fechaCtrl = TextEditingController(text: DateTime.now().toIso8601String().substring(0, 10));
+  final fechaCtrl = TextEditingController(
+      text: DateTime.now().toIso8601String().substring(0, 10));
   final loteCtrl = TextEditingController();
   final variedadCtrl = TextEditingController();
   final valTurCtrl = TextEditingController();
   final fenologiaCtrl = TextEditingController();
 
-  final Map<String, String?> fotos = {'FOTO1': null, 'FOTO2': null, 'FOTO3': null};
-  final Map<String, Map<int, String>> matriz = {}; // descripcion|estadio -> planta -> valor
+  final Map<String, String?> fotos = {
+    'FOTO1': null,
+    'FOTO2': null,
+    'FOTO3': null
+  };
+  final Map<String, Map<int, String>> matriz =
+      {}; // descripcion|estadio -> planta -> valor
   final Set<int> plantasGuardadas = {};
   final List<_PlagaHallazgo> hallazgos = [_PlagaHallazgo()];
 
@@ -2171,13 +2828,18 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     final table = await _resolveTableDestino();
     final rows = table == null
         ? <Map<String, dynamic>>[]
-        : await local.where('local_form_fields', 'tabla_destino = ? and activo = 1', [table], orderBy: 'orden');
-    final lotes = await local.getAll('local_lotes_variedades', orderBy: 'turno');
+        : await local.where(
+            'local_form_fields', 'tabla_destino = ? and activo = 1', [table],
+            orderBy: 'orden');
+    final lotes =
+        await local.getAll('local_lotes_variedades', orderBy: 'turno');
     await _refreshSanidadCatalogsIfNeeded();
     final conceptos = widget.isConteoFruta
         ? await _loadConteoEstadios()
-        : await local.getAll('local_plagas_conceptos', orderBy: 'concepto, estadio');
-    final etapas = await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
+        : await local.getAll('local_plagas_conceptos',
+            orderBy: 'concepto, estadio');
+    final etapas =
+        await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
     if (!mounted) return;
     setState(() {
       tableDestino = table;
@@ -2206,7 +2868,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   String? _clean(dynamic value) {
     if (value == null) return null;
     final s = value.toString().trim();
-    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL') return null;
+    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL')
+      return null;
     return s;
   }
 
@@ -2218,7 +2881,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     return null;
   }
 
-  Future<List<Map<String, dynamic>>> _fetchSupabaseRows(String table, String select) async {
+  Future<List<Map<String, dynamic>>> _fetchSupabaseRows(
+      String table, String select) async {
     // Primero se consulta sin lista explícita de columnas.
     // En tablas con nombres/columnas en mayúsculas, PostgREST puede devolver vacío o fallar
     // cuando el select viene con comillas dentro del string. Con select() traemos el registro
@@ -2237,7 +2901,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     }
   }
 
-  List<Map<String, dynamic>> _mapFenologiaRows(List<Map<String, dynamic>> source) {
+  List<Map<String, dynamic>> _mapFenologiaRows(
+      List<Map<String, dynamic>> source) {
     final rows = <String, Map<String, dynamic>>{};
     for (final e in source) {
       final etapa = _valueByColumn(e, [
@@ -2249,9 +2914,7 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
             'FENOLOGICA',
             'FENOLÓGICA',
             'ETAPA',
-          ])
-              ?.toString()
-              .trim() ??
+          ])?.toString().trim() ??
           '';
       if (etapa.isEmpty) continue;
       rows[etapa] = {'etapa_fenologica': etapa};
@@ -2259,11 +2922,19 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     return rows.values.toList();
   }
 
-
   List<Map<String, dynamic>> _mapConteoRows(List<Map<String, dynamic>> source) {
     final rows = <String, Map<String, dynamic>>{};
     for (final e in source) {
-      final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+      final estadio = _valueByColumn(e, [
+            'ESTADIO O TIPO',
+            'ESTADIOS O TIPOS',
+            'ESTADIOS O TIPO',
+            'ESTADIO_O_TIPO',
+            'ESTADIOS_O_TIPOS',
+            'ESTADIO',
+            'TIPO'
+          ])?.toString().trim() ??
+          '';
       if (estadio.isEmpty) continue;
       rows[estadio] = {
         'concepto': 'CONTEO_FRUTA',
@@ -2275,12 +2946,16 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   }
 
   Future<List<Map<String, dynamic>>> _loadConteoEstadios() async {
-    final localRows = await local.getAll('local_conteo_estadios', orderBy: 'estadio');
-    List<Map<String, dynamic>> rows = localRows.map((e) => <String, dynamic>{
-      'concepto': 'CONTEO_FRUTA',
-      'estadio': e['estadio']?.toString().trim() ?? '',
-      'formula': e['formula']?.toString().trim() ?? '',
-    }).where((e) => (e['estadio'] ?? '').toString().isNotEmpty).toList();
+    final localRows =
+        await local.getAll('local_conteo_estadios', orderBy: 'estadio');
+    List<Map<String, dynamic>> rows = localRows
+        .map((e) => <String, dynamic>{
+              'concepto': 'CONTEO_FRUTA',
+              'estadio': e['estadio']?.toString().trim() ?? '',
+              'formula': e['formula']?.toString().trim() ?? '',
+            })
+        .where((e) => (e['estadio'] ?? '').toString().isNotEmpty)
+        .toList();
     if (rows.isNotEmpty) return rows;
 
     // Respaldo offline: si la tabla especial fue descargada como matriz genérica,
@@ -2300,10 +2975,14 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     }
     rows = _mapConteoRows(decoded);
     if (rows.isNotEmpty) {
-      await local.replaceTable('local_conteo_estadios', rows.map((e) => {
-        'estadio': e['estadio'],
-        'formula': e['formula'],
-      }).toList());
+      await local.replaceTable(
+          'local_conteo_estadios',
+          rows
+              .map((e) => {
+                    'estadio': e['estadio'],
+                    'formula': e['formula'],
+                  })
+              .toList());
       return rows;
     }
 
@@ -2313,10 +2992,14 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     );
     rows = _mapConteoRows(remote);
     if (rows.isNotEmpty) {
-      await local.replaceTable('local_conteo_estadios', rows.map((e) => {
-        'estadio': e['estadio'],
-        'formula': e['formula'],
-      }).toList());
+      await local.replaceTable(
+          'local_conteo_estadios',
+          rows
+              .map((e) => {
+                    'estadio': e['estadio'],
+                    'formula': e['formula'],
+                  })
+              .toList());
       return rows;
     }
 
@@ -2324,10 +3007,14 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     // SN-MATRIZ_ESTADIOS_CONTEO_FRUTA no fue descargada por permisos/RLS o caché.
     // Cuando Actualizar matrices descargue la matriz real, esta lista queda reemplazada.
     rows = _fallbackConteoRows();
-    await local.replaceTable('local_conteo_estadios', rows.map((e) => {
-      'estadio': e['estadio'],
-      'formula': e['formula'],
-    }).toList());
+    await local.replaceTable(
+        'local_conteo_estadios',
+        rows
+            .map((e) => {
+                  'estadio': e['estadio'],
+                  'formula': e['formula'],
+                })
+            .toList());
     return rows;
   }
 
@@ -2354,16 +3041,20 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       'FRUTO ROSADO',
       'FRUTO AZUL',
     ];
-    return estadios.map((e) => {
-      'concepto': 'CONTEO_FRUTA',
-      'estadio': e,
-      'formula': 'INDIVIDUO',
-    }).toList();
+    return estadios
+        .map((e) => {
+              'concepto': 'CONTEO_FRUTA',
+              'estadio': e,
+              'formula': 'INDIVIDUO',
+            })
+        .toList();
   }
 
   Future<void> _refreshSanidadCatalogsIfNeeded() async {
-    var conceptos = await local.getAll('local_plagas_conceptos', orderBy: 'concepto, estadio');
-    var etapas = await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
+    var conceptos = await local.getAll('local_plagas_conceptos',
+        orderBy: 'concepto, estadio');
+    var etapas =
+        await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
 
     if (conceptos.isEmpty) {
       final remoteConceptos = await _fetchSupabaseRows(
@@ -2372,8 +3063,18 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       );
       final rows = <String, Map<String, dynamic>>{};
       for (final e in remoteConceptos) {
-        final concepto = _valueByColumn(e, ['CONCEPTO'])?.toString().trim() ?? '';
-        final estadio = _valueByColumn(e, ['ESTADIO O TIPO', 'ESTADIOS O TIPOS', 'ESTADIOS O TIPO', 'ESTADIO_O_TIPO', 'ESTADIOS_O_TIPOS', 'ESTADIO', 'TIPO'])?.toString().trim() ?? '';
+        final concepto =
+            _valueByColumn(e, ['CONCEPTO'])?.toString().trim() ?? '';
+        final estadio = _valueByColumn(e, [
+              'ESTADIO O TIPO',
+              'ESTADIOS O TIPOS',
+              'ESTADIOS O TIPO',
+              'ESTADIO_O_TIPO',
+              'ESTADIOS_O_TIPOS',
+              'ESTADIO',
+              'TIPO'
+            ])?.toString().trim() ??
+            '';
         if (concepto.isEmpty || estadio.isEmpty) continue;
         final id = '$concepto$estadio';
         rows[id] = {
@@ -2384,8 +3085,10 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         };
       }
       if (rows.isNotEmpty) {
-        await local.replaceTable('local_plagas_conceptos', rows.values.toList());
-        conceptos = await local.getAll('local_plagas_conceptos', orderBy: 'concepto, estadio');
+        await local.replaceTable(
+            'local_plagas_conceptos', rows.values.toList());
+        conceptos = await local.getAll('local_plagas_conceptos',
+            orderBy: 'concepto, estadio');
       }
     }
 
@@ -2406,9 +3109,20 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
 
   String _norm(String value) {
     var s = value.trim().toUpperCase();
-    const map = {'Á':'A','É':'E','Í':'I','Ó':'O','Ú':'U','Ü':'U','Ñ':'N'};
+    const map = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     map.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return s
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   String? _fieldName(List<String> candidates) {
@@ -2420,7 +3134,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     return null;
   }
 
-  String? _plantField(int plant) => _fieldName(['PLANTA $plant', 'PLANTA$plant', 'PLANTA_$plant']);
+  String? _plantField(int plant) =>
+      _fieldName(['PLANTA $plant', 'PLANTA$plant', 'PLANTA_$plant']);
   String? get _idField => _fieldName(['ID_REGISTRO', 'ID']);
   String? get _fechaField => _fieldName(['FECHA']);
   String? get _loteField => _fieldName(['LOTE', 'TURNO']);
@@ -2429,11 +3144,13 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   String? get _valTurField => _fieldName(['VAL/TUR', 'VAL_TUR', 'VALTUR']);
   String? get _fenologiaField => _fieldName(['FENOLOGIA', 'FENOLOGÍA']);
   String? get _descripcionField => _fieldName(['DESCRIPCION', 'DESCRIPCIÓN']);
-  String? get _estadioField => _fieldName(['ESTADIO O TIPO', 'ESTADIO', 'TIPO']);
+  String? get _estadioField =>
+      _fieldName(['ESTADIO O TIPO', 'ESTADIO', 'TIPO']);
   String? get _formulaField => _fieldName(['FORMULA', 'FÓRMULA']);
   String? get _muestraField => _fieldName(['MUESTRA']);
   String? get _promedioField => _fieldName(['PROMEDIO', 'RESULTADO']);
-  String? get _idFilaSerialField => _fieldName(['id_fila_serial', 'ID_FILA_SERIAL']);
+  String? get _idFilaSerialField =>
+      _fieldName(['id_fila_serial', 'ID_FILA_SERIAL']);
 
   List<String> _turnosUnicos() {
     final seen = <String>{};
@@ -2449,8 +3166,11 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
 
   void _setVariedad(String? turno) {
     if (turno == null || turno.isEmpty) return;
-    final match = lotesVariedades.where((e) => e['turno']?.toString().trim() == turno).toList();
-    variedadCtrl.text = match.isEmpty ? '' : (match.first['variedad']?.toString() ?? '');
+    final match = lotesVariedades
+        .where((e) => e['turno']?.toString().trim() == turno)
+        .toList();
+    variedadCtrl.text =
+        match.isEmpty ? '' : (match.first['variedad']?.toString() ?? '');
   }
 
   List<String> _conceptos() {
@@ -2494,7 +3214,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     }
     await local.replaceTable('local_fenologias', rows);
 
-    final etapas = await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
+    final etapas =
+        await local.getAll('local_fenologias', orderBy: 'etapa_fenologica');
     if (mounted) {
       setState(() => etapasFenologicas = etapas);
     } else {
@@ -2502,7 +3223,6 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     }
     return _fenologias();
   }
-
 
   dynamic _payloadValue(Map<String, dynamic> payload, List<String> candidates) {
     final wanted = candidates.map(_norm).toSet();
@@ -2521,7 +3241,10 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       final rawRows = payload['__plagas_rows'];
       if (rawRows is List && rawRows.isNotEmpty) {
         _rebuildMatrizFromPayloadRows(
-          rawRows.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList(),
+          rawRows
+              .whereType<Map>()
+              .map((e) => Map<String, dynamic>.from(e))
+              .toList(),
         );
       } else {
         _rebuildMatrizFromPayloadRows([payload]);
@@ -2537,11 +3260,21 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   void _applyBasePayload(Map<String, dynamic> payload) {
     final id = _payloadValue(payload, ['ID_REGISTRO', 'ID'])?.toString().trim();
     if (id != null && id.isNotEmpty) idRegistro = id;
-    fechaCtrl.text = _payloadValue(payload, ['FECHA'])?.toString().trim() ?? fechaCtrl.text;
-    loteCtrl.text = _payloadValue(payload, ['LOTE', 'TURNO'])?.toString().trim() ?? loteCtrl.text;
-    variedadCtrl.text = _payloadValue(payload, ['VARIEDAD'])?.toString().trim() ?? variedadCtrl.text;
-    valTurCtrl.text = _payloadValue(payload, ['VAL/TUR', 'VAL_TUR', 'VALTUR'])?.toString().trim() ?? valTurCtrl.text;
-    fenologiaCtrl.text = _payloadValue(payload, ['FENOLOGIA', 'FENOLOGÍA'])?.toString().trim() ?? fenologiaCtrl.text;
+    fechaCtrl.text =
+        _payloadValue(payload, ['FECHA'])?.toString().trim() ?? fechaCtrl.text;
+    loteCtrl.text =
+        _payloadValue(payload, ['LOTE', 'TURNO'])?.toString().trim() ??
+            loteCtrl.text;
+    variedadCtrl.text =
+        _payloadValue(payload, ['VARIEDAD'])?.toString().trim() ??
+            variedadCtrl.text;
+    valTurCtrl.text = _payloadValue(payload, ['VAL/TUR', 'VAL_TUR', 'VALTUR'])
+            ?.toString()
+            .trim() ??
+        valTurCtrl.text;
+    fenologiaCtrl.text =
+        _payloadValue(payload, ['FENOLOGIA', 'FENOLOGÍA'])?.toString().trim() ??
+            fenologiaCtrl.text;
   }
 
   void _rebuildMatrizFromPayloadRows(List<Map<String, dynamic>> rows) {
@@ -2552,9 +3285,17 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     for (final payload in rows) {
       final concepto = widget.isConteoFruta
           ? 'CONTEO_FRUTA'
-          : _payloadValue(payload, ['DESCRIPCION', 'DESCRIPCIÓN'])?.toString().trim();
-      final estadio = _payloadValue(payload, ['ESTADIO O TIPO', 'ESTADIO', 'TIPO'])?.toString().trim();
-      if (concepto == null || concepto.isEmpty || estadio == null || estadio.isEmpty) continue;
+          : _payloadValue(payload, ['DESCRIPCION', 'DESCRIPCIÓN'])
+              ?.toString()
+              .trim();
+      final estadio =
+          _payloadValue(payload, ['ESTADIO O TIPO', 'ESTADIO', 'TIPO'])
+              ?.toString()
+              .trim();
+      if (concepto == null ||
+          concepto.isEmpty ||
+          estadio == null ||
+          estadio.isEmpty) continue;
 
       for (final entry in payload.entries) {
         final keyNorm = _norm(entry.key);
@@ -2592,8 +3333,11 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     if (widget.isConteoFruta) {
       final h = _PlagaHallazgo()..concepto = 'CONTEO_FRUTA';
       _ensureControllers(h);
-      for (final estadioEntry in (byConcepto['CONTEO_FRUTA'] ?? const <String, String>{}).entries) {
-        h.valores.putIfAbsent(estadioEntry.key, () => TextEditingController()).text = estadioEntry.value;
+      for (final estadioEntry
+          in (byConcepto['CONTEO_FRUTA'] ?? const <String, String>{}).entries) {
+        h.valores
+            .putIfAbsent(estadioEntry.key, () => TextEditingController())
+            .text = estadioEntry.value;
       }
       hallazgos.add(h);
     } else if (byConcepto.isEmpty) {
@@ -2603,7 +3347,9 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         final h = _PlagaHallazgo()..concepto = conceptEntry.key;
         _ensureControllers(h);
         for (final estadioEntry in conceptEntry.value.entries) {
-          h.valores.putIfAbsent(estadioEntry.key, () => TextEditingController()).text = estadioEntry.value;
+          h.valores
+              .putIfAbsent(estadioEntry.key, () => TextEditingController())
+              .text = estadioEntry.value;
         }
         hallazgos.add(h);
       }
@@ -2615,7 +3361,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     for (final r in conceptosEstadios) {
       final c = r['concepto']?.toString().trim() ?? '';
       final e = r['estadio']?.toString().trim() ?? '';
-      final sameConcept = widget.isConteoFruta || (concepto != null && c == concepto.trim());
+      final sameConcept =
+          widget.isConteoFruta || (concepto != null && c == concepto.trim());
       if (sameConcept && e == estadio.trim()) {
         return _norm(r['formula']?.toString() ?? '');
       }
@@ -2631,9 +3378,12 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     return '';
   }
 
-  bool _isIncidencia(String? concepto, String estadio) => _formulaFor(concepto, estadio) == 'INCIDENCIA';
-  bool _isIndividuo(String? concepto, String estadio) => _formulaFor(concepto, estadio) == 'INDIVIDUO';
-  bool _isIndividuoCm(String? concepto, String estadio) => _formulaFor(concepto, estadio) == 'INDIVIDUOCM';
+  bool _isIncidencia(String? concepto, String estadio) =>
+      _formulaFor(concepto, estadio) == 'INCIDENCIA';
+  bool _isIndividuo(String? concepto, String estadio) =>
+      _formulaFor(concepto, estadio) == 'INDIVIDUO';
+  bool _isIndividuoCm(String? concepto, String estadio) =>
+      _formulaFor(concepto, estadio) == 'INDIVIDUOCM';
 
   List<String> _estadios(String? concepto) {
     if (widget.isConteoFruta) {
@@ -2664,23 +3414,34 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   Future<void> _pickPhoto() async {
     if (pickingPhoto || saving) return;
     FocusScope.of(context).unfocus();
-    final pendientes = fotos.entries.where((e) => e.value == null || e.value!.isEmpty).map((e) => e.key).toList();
+    final pendientes = fotos.entries
+        .where((e) => e.value == null || e.value!.isEmpty)
+        .map((e) => e.key)
+        .toList();
     final next = pendientes.isEmpty ? null : pendientes.first;
     if (next == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ya tienes 3 fotos registradas.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Ya tienes 3 fotos registradas.')));
       return;
     }
     setState(() => pickingPhoto = true);
     try {
-      final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 45, maxWidth: 800, maxHeight: 800);
+      final file = await picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 45,
+          maxWidth: 800,
+          maxHeight: 800);
       if (file == null || !mounted) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
-      setState(() => fotos[next] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$next registrada.')));
+      setState(
+          () => fotos[next] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('$next registrada.')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir la cámara: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la cámara: $e')));
     } finally {
       if (mounted) setState(() => pickingPhoto = false);
     }
@@ -2715,7 +3476,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       }
       hallazgos
         ..clear()
-        ..add(_PlagaHallazgo()..concepto = widget.isConteoFruta ? 'CONTEO_FRUTA' : null);
+        ..add(_PlagaHallazgo()
+          ..concepto = widget.isConteoFruta ? 'CONTEO_FRUTA' : null);
       headerOpen = false;
     });
   }
@@ -2732,8 +3494,10 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   Map<String, dynamic> _basePayload() {
     final payload = <String, dynamic>{};
     void put(String? campo, dynamic value) {
-      if (campo != null && value != null && value.toString().trim().isNotEmpty) payload[campo] = value;
+      if (campo != null && value != null && value.toString().trim().isNotEmpty)
+        payload[campo] = value;
     }
+
     put(_idField, idRegistro);
     put(_fechaField, fechaCtrl.text.trim());
     put(_loteField, loteCtrl.text.trim());
@@ -2744,9 +3508,12 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     for (final f in fields) {
       final campo = f['campo']?.toString() ?? '';
       final n = _norm(campo);
-      if (n == 'FOTO1' && fotos['FOTO1'] != null) payload[campo] = fotos['FOTO1'];
-      if (n == 'FOTO2' && fotos['FOTO2'] != null) payload[campo] = fotos['FOTO2'];
-      if (n == 'FOTO3' && fotos['FOTO3'] != null) payload[campo] = fotos['FOTO3'];
+      if (n == 'FOTO1' && fotos['FOTO1'] != null)
+        payload[campo] = fotos['FOTO1'];
+      if (n == 'FOTO2' && fotos['FOTO2'] != null)
+        payload[campo] = fotos['FOTO2'];
+      if (n == 'FOTO3' && fotos['FOTO3'] != null)
+        payload[campo] = fotos['FOTO3'];
     }
     return payload;
   }
@@ -2784,7 +3551,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       final formula = _formulaField;
       final muestra = _muestraField;
       final promedio = _promedioField;
-      if (!widget.isConteoFruta && descripcion != null) payload[descripcion] = parts[0];
+      if (!widget.isConteoFruta && descripcion != null)
+        payload[descripcion] = parts[0];
       if (estadio != null) payload[estadio] = parts[1];
       if (formula != null) payload[formula] = _rawFormulaForEstadio(parts[1]);
 
@@ -2793,12 +3561,15 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         final campoPlanta = _plantField(plantEntry.key);
         if (campoPlanta == null) continue;
         payload[campoPlanta] = plantEntry.value;
-        final parsed = num.tryParse(plantEntry.value.toString().replaceAll(',', '.'));
+        final parsed =
+            num.tryParse(plantEntry.value.toString().replaceAll(',', '.'));
         if (parsed != null) numericValues.add(parsed);
       }
-      if (muestra != null && maxPlantaEvaluada > 0) payload[muestra] = maxPlantaEvaluada;
+      if (muestra != null && maxPlantaEvaluada > 0)
+        payload[muestra] = maxPlantaEvaluada;
       if (promedio != null && numericValues.isNotEmpty) {
-        payload[promedio] = numericValues.reduce((a, b) => a + b) / numericValues.length;
+        payload[promedio] =
+            numericValues.reduce((a, b) => a + b) / numericValues.length;
       }
 
       final idFilaSerial = _idFilaSerialField;
@@ -2832,7 +3603,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     if (matriz.isEmpty) return false;
 
     final cachedUserId = await LocalSession().cachedUserId();
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
+    final userId =
+        Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) return false;
 
     await local.deletePendingRecordsByPrefix('${idRegistro}_');
@@ -2853,21 +3625,25 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     FocusScope.of(context).unfocus();
     final table = tableDestino;
     if (table == null || table.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tabla destino no configurada.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tabla destino no configurada.')));
       return;
     }
     _commitCurrentPlant();
     if (matriz.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay evaluaciones para guardar.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay evaluaciones para guardar.')));
       return;
     }
     setState(() => saving = true);
     try {
       final cachedUserId = await LocalSession().cachedUserId();
-      final userId = Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
+      final userId =
+          Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
       if (userId == null) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay usuario local disponible.')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('No hay usuario local disponible.')));
         return;
       }
 
@@ -2886,7 +3662,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       }
       widget.onLocalChanged?.call();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registro guardado localmente.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Registro guardado localmente.')));
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
         if (widget.onSavedAndExit != null) {
@@ -2897,17 +3674,20 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo guardar localmente: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar localmente: $e')));
     } finally {
       if (mounted) setState(() => saving = false);
     }
   }
 
   Widget _fieldBox({required Widget child, double? width}) {
-    return SizedBox(width: width, height: _FormVisuals.headerFieldHeight, child: child);
+    return SizedBox(
+        width: width, height: _FormVisuals.headerFieldHeight, child: child);
   }
 
-  Widget _textInput(String label, TextEditingController c, {bool readOnly = false}) {
+  Widget _textInput(String label, TextEditingController c,
+      {bool readOnly = false}) {
     return TextField(
       controller: c,
       readOnly: readOnly,
@@ -2935,7 +3715,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         }
         if (!mounted) return;
         if (availableValues.isEmpty) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No hay opciones disponibles para $label.')));
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+              content: Text('No hay opciones disponibles para $label.')));
           return;
         }
         final selected = await showModalBottomSheet<String>(
@@ -2950,7 +3731,9 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
                   children: [
                     Padding(
                       padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-                      child: Text(label, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800)),
+                      child: Text(label,
+                          style: const TextStyle(
+                              fontSize: 15, fontWeight: FontWeight.w800)),
                     ),
                     const Divider(height: 1),
                     Expanded(
@@ -3005,14 +3788,16 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         final now = DateTime.now();
         final minDate = DateTime(1900);
         final maxDate = DateTime(now.year + 20);
-        final initial = _safeDatePickerInitialDate(DateTime.tryParse(fechaCtrl.text) ?? now, minDate, maxDate);
+        final initial = _safeDatePickerInitialDate(
+            DateTime.tryParse(fechaCtrl.text) ?? now, minDate, maxDate);
         final picked = await showDatePicker(
           context: context,
           firstDate: minDate,
           lastDate: maxDate,
           initialDate: initial,
         );
-        if (picked != null) fechaCtrl.text = picked.toIso8601String().substring(0, 10);
+        if (picked != null)
+          fechaCtrl.text = picked.toIso8601String().substring(0, 10);
       },
     );
   }
@@ -3038,8 +3823,13 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
           InkWell(
             onTap: () => setState(() => headerOpen = !headerOpen),
             child: Row(children: [
-              const Expanded(child: Text('Cabecera', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800))),
-              Icon(headerOpen ? Icons.keyboard_arrow_up : Icons.keyboard_arrow_down),
+              const Expanded(
+                  child: Text('Cabecera',
+                      style: TextStyle(
+                          fontSize: 14, fontWeight: FontWeight.w800))),
+              Icon(headerOpen
+                  ? Icons.keyboard_arrow_up
+                  : Icons.keyboard_arrow_down),
             ]),
           ),
           if (headerOpen) ...[
@@ -3061,8 +3851,15 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
                 isExpanded: true,
                 decoration: _FormVisuals.decoration('Lote'),
                 style: const TextStyle(fontSize: 13, color: Colors.black87),
-                items: _turnosUnicos().map((e) => DropdownMenuItem(value: e, child: Text(e, overflow: TextOverflow.ellipsis))).toList(),
-                onChanged: (v) => setState(() { loteCtrl.text = v ?? ''; _setVariedad(v); }),
+                items: _turnosUnicos()
+                    .map((e) => DropdownMenuItem(
+                        value: e,
+                        child: Text(e, overflow: TextOverflow.ellipsis)))
+                    .toList(),
+                onChanged: (v) => setState(() {
+                  loteCtrl.text = v ?? '';
+                  _setVariedad(v);
+                }),
               ),
               _textInput('Variedad', variedadCtrl, readOnly: true),
               _textInput('Val/Tur', valTurCtrl),
@@ -3079,15 +3876,29 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
         child: Row(children: [
-          Expanded(child: Text('Evaluación PLANTA $currentPlant', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800))),
+          Expanded(
+              child: Text('Evaluación PLANTA $currentPlant',
+                  style: const TextStyle(
+                      fontSize: 14, fontWeight: FontWeight.w800))),
           SizedBox(
             width: 130,
             child: DropdownButtonFormField<int>(
               value: currentPlant,
               decoration: _FormVisuals.decoration('Plantas'),
               style: const TextStyle(fontSize: 12, color: Colors.black87),
-              items: List.generate(50, (i) => i + 1).map((p) => DropdownMenuItem(value: p, child: Text('PLANTA $p', style: const TextStyle(fontSize: 12)))).toList(),
-              onChanged: (v) => setState(() { if (v != null) { _commitCurrentPlant(); currentPlant = v; _loadHallazgosForCurrentPlant(); } }),
+              items: List.generate(50, (i) => i + 1)
+                  .map((p) => DropdownMenuItem(
+                      value: p,
+                      child: Text('PLANTA $p',
+                          style: const TextStyle(fontSize: 12))))
+                  .toList(),
+              onChanged: (v) => setState(() {
+                if (v != null) {
+                  _commitCurrentPlant();
+                  currentPlant = v;
+                  _loadHallazgosForCurrentPlant();
+                }
+              }),
             ),
           ),
         ]),
@@ -3095,12 +3906,15 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
     );
   }
 
-  Widget _valorPorFormula(_PlagaHallazgo h, String estadio, TextEditingController ctrl) {
+  Widget _valorPorFormula(
+      _PlagaHallazgo h, String estadio, TextEditingController ctrl) {
     if (widget.isConteoFruta) {
       return TextField(
         controller: ctrl,
         keyboardType: TextInputType.number,
-        inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
+        inputFormatters: <TextInputFormatter>[
+          FilteringTextInputFormatter.digitsOnly
+        ],
         style: const TextStyle(fontSize: 13),
         decoration: _FormVisuals.decoration('Valor'),
       );
@@ -3123,7 +3937,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         ? <TextInputFormatter>[
             TextInputFormatter.withFunction((oldValue, newValue) {
               final text = newValue.text;
-              if (text.isEmpty || RegExp(r'^\d{0,8}(\.\d{0,2})?$').hasMatch(text)) {
+              if (text.isEmpty ||
+                  RegExp(r'^\d{0,8}(\.\d{0,2})?$').hasMatch(text)) {
                 return newValue;
               }
               return oldValue;
@@ -3153,15 +3968,37 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
         padding: const EdgeInsets.all(10),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
-            Expanded(child: Text(widget.isConteoFruta ? 'Estadios o tipos' : 'Hallazgos', style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
-            if (!widget.isConteoFruta) IconButton(onPressed: currentHallazgo > 0 ? () => setState(() => currentHallazgo--) : null, icon: const Icon(Icons.chevron_left)),
-            if (!widget.isConteoFruta) IconButton(onPressed: currentHallazgo < hallazgos.length - 1 ? () => setState(() => currentHallazgo++) : null, icon: const Icon(Icons.chevron_right)),
+            Expanded(
+                child: Text(
+                    widget.isConteoFruta ? 'Estadios o tipos' : 'Hallazgos',
+                    style: const TextStyle(
+                        fontSize: 15, fontWeight: FontWeight.w800))),
+            if (!widget.isConteoFruta)
+              IconButton(
+                  onPressed: currentHallazgo > 0
+                      ? () => setState(() => currentHallazgo--)
+                      : null,
+                  icon: const Icon(Icons.chevron_left)),
+            if (!widget.isConteoFruta)
+              IconButton(
+                  onPressed: currentHallazgo < hallazgos.length - 1
+                      ? () => setState(() => currentHallazgo++)
+                      : null,
+                  icon: const Icon(Icons.chevron_right)),
           ]),
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: const Color(0xFFF1F4F6), borderRadius: BorderRadius.circular(12)),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.isConteoFruta ? 'Conteo por planta' : 'Hallazgo ${currentHallazgo + 1}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
+            decoration: BoxDecoration(
+                color: const Color(0xFFF1F4F6),
+                borderRadius: BorderRadius.circular(12)),
+            child:
+                Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(
+                  widget.isConteoFruta
+                      ? 'Conteo por planta'
+                      : 'Hallazgo ${currentHallazgo + 1}',
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700)),
               if (!widget.isConteoFruta) ...[
                 const SizedBox(height: 8),
                 Builder(
@@ -3187,9 +4024,16 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
                   child: Row(children: [
                     Expanded(
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        decoration: BoxDecoration(border: Border.all(color: const Color(0xFF2B7180)), borderRadius: BorderRadius.circular(20)),
-                        child: Text(estadio, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF166273))),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFF2B7180)),
+                            borderRadius: BorderRadius.circular(20)),
+                        child: Text(estadio,
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                                color: Color(0xFF166273))),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -3211,20 +4055,41 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.isConteoFruta ? 'Conteo de Fruta' : 'Plagas y Enfermedades', style: const TextStyle(fontSize: 16)),
-        actions: [IconButton(onPressed: (saving || pickingPhoto) ? null : _pickPhoto, icon: const Icon(Icons.photo_camera))],
+        title: Text(
+            widget.isConteoFruta ? 'Conteo de Fruta' : 'Plagas y Enfermedades',
+            style: const TextStyle(fontSize: 16)),
+        actions: [
+          IconButton(
+              onPressed: (saving || pickingPhoto) ? null : _pickPhoto,
+              icon: const Icon(Icons.photo_camera))
+        ],
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
-      floatingActionButton: FloatingActionButton(onPressed: saving ? null : _saveAndExit, child: saving ? const SizedBox(width: 22, height: 22, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save)),
+      floatingActionButton: FloatingActionButton(
+          onPressed: saving ? null : _saveAndExit,
+          child: saving
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.save)),
       bottomNavigationBar: SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(10, 4, 88, 8),
           child: Row(children: [
             if (!widget.isConteoFruta) ...[
-              Expanded(child: OutlinedButton.icon(onPressed: _addHallazgo, icon: const Icon(Icons.add), label: const Text('Hallazgo'))),
+              Expanded(
+                  child: OutlinedButton.icon(
+                      onPressed: _addHallazgo,
+                      icon: const Icon(Icons.add),
+                      label: const Text('Hallazgo'))),
               const SizedBox(width: 8),
             ],
-            Expanded(child: FilledButton.icon(onPressed: () => _newPlant(), icon: const Icon(Icons.add), label: const Text('Planta'))),
+            Expanded(
+                child: FilledButton.icon(
+                    onPressed: () => _newPlant(),
+                    icon: const Icon(Icons.add),
+                    label: const Text('Planta'))),
           ]),
         ),
       ),
@@ -3237,7 +4102,8 @@ class _PlagasEnfermedadesSpecialPageState extends State<PlagasEnfermedadesSpecia
                 children: [
                   _cabecera(context),
                   _plantSelector(context),
-                  Expanded(child: SingleChildScrollView(child: _hallazgos(context))),
+                  Expanded(
+                      child: SingleChildScrollView(child: _hallazgos(context))),
                 ],
               ),
       ),
@@ -3281,10 +4147,12 @@ class PlantEvaluationSpecialPage extends StatefulWidget {
   });
 
   @override
-  State<PlantEvaluationSpecialPage> createState() => _PlantEvaluationSpecialPageState();
+  State<PlantEvaluationSpecialPage> createState() =>
+      _PlantEvaluationSpecialPageState();
 }
 
-class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage> {
+class _PlantEvaluationSpecialPageState
+    extends State<PlantEvaluationSpecialPage> {
   final local = LocalDb.instance;
   final uuid = const Uuid();
   final picker = ImagePicker();
@@ -3309,9 +4177,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
       ? 'Evaluación Planta $currentPlant'
       : 'Evaluación Planta $currentPlant';
 
-  String get findingTitle => widget.screenKind == PlantScreenKind.fenologia
-      ? 'Hallazgos'
-      : 'Estadios';
+  String get findingTitle =>
+      widget.screenKind == PlantScreenKind.fenologia ? 'Hallazgos' : 'Estadios';
 
   @override
   void initState() {
@@ -3330,7 +4197,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
             orderBy: 'orden',
           );
 
-    final lotes = await local.getAll('local_lotes_variedades', orderBy: 'turno');
+    final lotes =
+        await local.getAll('local_lotes_variedades', orderBy: 'turno');
 
     for (final c in controllers.values) {
       c.dispose();
@@ -3342,14 +4210,18 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     for (final field in rows) {
       final campo = _campo(field);
       final tipo = _tipo(field);
-      if (campo.isEmpty || tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'calculated') continue;
+      if (campo.isEmpty ||
+          tipo == 'hidden' ||
+          tipo == 'hidden_id' ||
+          tipo == 'calculated') continue;
       if (tipo == 'boolean_int') {
         dropdownValues[campo] = null;
       } else if (tipo == 'photo') {
         imageValues[campo] = null;
       } else {
         final c = TextEditingController();
-        if (tipo == 'date') c.text = DateTime.now().toIso8601String().substring(0, 10);
+        if (tipo == 'date')
+          c.text = DateTime.now().toIso8601String().substring(0, 10);
         controllers[campo] = c;
       }
     }
@@ -3379,26 +4251,30 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
   String? _clean(dynamic value) {
     if (value == null) return null;
     final s = value.toString().trim();
-    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL') return null;
+    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL')
+      return null;
     return s;
   }
 
   String _campo(Map<String, dynamic> f) => f['campo']?.toString() ?? '';
-  String _etiqueta(Map<String, dynamic> f) => f['etiqueta']?.toString() ?? _campo(f);
+  String _etiqueta(Map<String, dynamic> f) =>
+      f['etiqueta']?.toString() ?? _campo(f);
   String _tipo(Map<String, dynamic> f) {
     final raw = (f['tipo']?.toString() ?? 'text').trim().toLowerCase();
-    if (raw == 'boolean' || raw == 'bool' || raw == 'boolean_int' || raw == 'boolean_01') return 'boolean_int';
+    if (raw == 'boolean' ||
+        raw == 'bool' ||
+        raw == 'boolean_int' ||
+        raw == 'boolean_01') return 'boolean_int';
     if (raw == 'checkbox' || raw == 'check') return 'checkbox';
     if (raw == 'switch' || raw == 'toggle') return 'switch';
     if (raw == 'rating' || raw == 'stars') return 'rating';
     if (raw == 'slider' || raw == 'range') return 'slider';
-    if (raw == 'email' || raw == 'phone' || raw == 'url' || raw == 'percent') return raw;
+    if (raw == 'email' || raw == 'phone' || raw == 'url' || raw == 'percent')
+      return raw;
     if (raw == 'hidden_id') return 'hidden_id';
     if (raw == 'integer' || raw == 'int') return 'integer';
     return raw;
   }
-
-
 
   String _normalizarNombreCampo(String value) {
     var s = value.trim().toUpperCase();
@@ -3416,13 +4292,16 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     s = s.replaceAll(RegExp(r'_+'), '_');
     return s.replaceAll(RegExp(r'^_|_$'), '');
   }
+
   bool _isTurnoOrLoteCampo(String campo, [String? etiqueta]) {
     final valores = {
       _normalizarNombreCampo(campo),
       if (etiqueta != null) _normalizarNombreCampo(etiqueta),
     };
-    return valores.any((c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
+    return valores.any(
+        (c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
   }
+
   bool _isVariedadCampo(String campo, [String? etiqueta]) {
     final valores = {
       _normalizarNombreCampo(campo),
@@ -3430,6 +4309,7 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     };
     return valores.any((c) => c == 'VARIEDAD' || c == 'VARIEDADES');
   }
+
   List<String> _turnosUnicos() {
     final seen = <String>{};
     final out = <String>[];
@@ -3441,10 +4321,13 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     }
     return out;
   }
+
   void _setVariedadFromTurno(String? turno) {
     if (turno == null || turno.trim().isEmpty) return;
     final t = turno.trim();
-    final matches = lotesVariedades.where((e) => e['turno']?.toString().trim() == t).toList();
+    final matches = lotesVariedades
+        .where((e) => e['turno']?.toString().trim() == t)
+        .toList();
     if (matches.isEmpty) return;
     final variedad = matches.first['variedad']?.toString().trim() ?? '';
     for (final field in fields) {
@@ -3456,17 +4339,24 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     }
   }
 
-  bool _isPhotoField(Map<String, dynamic> f) => _tipo(f) == 'photo' || _campo(f).toUpperCase().startsWith('FOTO');
+  bool _isPhotoField(Map<String, dynamic> f) =>
+      _tipo(f) == 'photo' || _campo(f).toUpperCase().startsWith('FOTO');
 
   bool _isHeaderField(Map<String, dynamic> f) {
     final campo = _campo(f).toUpperCase();
     final tipo = _tipo(f);
-    if (tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'photo' || tipo == 'signature' || tipo == 'calculated') return false;
-    if (tipo == 'boolean_int' || tipo == 'checkbox' || tipo == 'switch') return false;
+    if (tipo == 'hidden' ||
+        tipo == 'hidden_id' ||
+        tipo == 'photo' ||
+        tipo == 'signature' ||
+        tipo == 'calculated') return false;
+    if (tipo == 'boolean_int' || tipo == 'checkbox' || tipo == 'switch')
+      return false;
     if (campo.contains('OBSERV')) return false;
     if (campo.contains('PLANTA')) return false;
     if (campo.contains('HALLAZGO')) return false;
-    if (widget.screenKind == PlantScreenKind.conteoFruta && (campo.contains('ESTADIO') || campo.contains('TIPO'))) return false;
+    if (widget.screenKind == PlantScreenKind.conteoFruta &&
+        (campo.contains('ESTADIO') || campo.contains('TIPO'))) return false;
     return true;
   }
 
@@ -3474,7 +4364,10 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     final tipo = _tipo(f);
     final campo = _campo(f).toUpperCase();
     if (_isHeaderField(f) || _isPhotoField(f)) return false;
-    if (tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'signature' || tipo == 'calculated') return false;
+    if (tipo == 'hidden' ||
+        tipo == 'hidden_id' ||
+        tipo == 'signature' ||
+        tipo == 'calculated') return false;
     if (campo.contains('OBSERV')) return true;
     return true;
   }
@@ -3482,7 +4375,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
   Future<void> _pickPhoto(String campo) async {
     if (pickingPhoto || savingPlant) return;
     FocusScope.of(context).unfocus();
-    final count = imageValues.values.where((v) => v != null && v.isNotEmpty).length;
+    final count =
+        imageValues.values.where((v) => v != null && v.isNotEmpty).length;
     if (imageValues[campo] == null && count >= 3) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Máximo 3 fotos por registro.')),
@@ -3491,14 +4385,20 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     }
     setState(() => pickingPhoto = true);
     try {
-      final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 45, maxWidth: 800, maxHeight: 800);
+      final file = await picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 45,
+          maxWidth: 800,
+          maxHeight: 800);
       if (file == null || !mounted) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
-      setState(() => imageValues[campo] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
+      setState(() =>
+          imageValues[campo] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir la cámara: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la cámara: $e')));
     } finally {
       if (mounted) setState(() => pickingPhoto = false);
     }
@@ -3510,7 +4410,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     if (tipo == 'hidden_id') return null;
     if (tipo == 'hidden') return idFilaSerial;
     if (_isPhotoField(f)) return imageValues[campo];
-    if (tipo == 'boolean_int' || tipo == 'checkbox' || tipo == 'switch') return dropdownValues[campo] ?? 0;
+    if (tipo == 'boolean_int' || tipo == 'checkbox' || tipo == 'switch')
+      return dropdownValues[campo] ?? 0;
     if (tipo == 'calculated') return null;
     final raw = controllers[campo]?.text.trim() ?? '';
     if (raw.isEmpty) return null;
@@ -3524,13 +4425,16 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     FocusScope.of(context).unfocus();
     final table = tableDestino;
     if (table == null || table.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tabla destino no configurada.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tabla destino no configurada.')));
       return;
     }
     final cachedUserId = await LocalSession().cachedUserId();
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
+    final userId =
+        Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No hay usuario local disponible.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('No hay usuario local disponible.')));
       return;
     }
 
@@ -3549,21 +4453,21 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     setState(() => savingPlant = true);
     try {
       await local.insertPending({
-      'id_local': idLocal,
-      'user_id': userId,
-      'modulo_id': widget.moduleId,
-      'formato_id': widget.format['id'],
-      'formato_tabla_id': null,
-      'tabla_destino': table,
-      'payload_json': jsonEncode(payload),
-      'estado': 'pendiente',
-      'intentos': 0,
-      'created_at': DateTime.now().toIso8601String(),
-    });
-
+        'id_local': idLocal,
+        'user_id': userId,
+        'modulo_id': widget.moduleId,
+        'formato_id': widget.format['id'],
+        'formato_tabla_id': null,
+        'tabla_destino': table,
+        'payload_json': jsonEncode(payload),
+        'estado': 'pendiente',
+        'intentos': 0,
+        'created_at': DateTime.now().toIso8601String(),
+      });
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo guardar localmente: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo guardar localmente: $e')));
       setState(() => savingPlant = false);
       return;
     }
@@ -3583,7 +4487,9 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Planta ${moveNext ? currentPlant - 1 : currentPlant} guardada localmente.')),
+      SnackBar(
+          content: Text(
+              'Planta ${moveNext ? currentPlant - 1 : currentPlant} guardada localmente.')),
     );
     if (!moveNext) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -3619,7 +4525,11 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     if (_isTurnoOrLoteCampo(campo, etiqueta) && turnosDisponibles.isNotEmpty) {
       final current = controllers[campo]?.text.trim();
       return DropdownButtonFormField<String>(
-        value: (current != null && current.isNotEmpty && turnosDisponibles.contains(current)) ? current : null,
+        value: (current != null &&
+                current.isNotEmpty &&
+                turnosDisponibles.contains(current))
+            ? current
+            : null,
         decoration: _FormVisuals.decoration(etiqueta),
         style: const TextStyle(fontSize: 12.5, color: Colors.black87),
         items: turnosDisponibles.map((turno) {
@@ -3644,13 +4554,24 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
         controller: controllers[campo],
         readOnly: true,
         style: _FormVisuals.fieldTextStyle,
-        decoration: _FormVisuals.decoration(etiqueta, icon: Icons.calendar_month),
+        decoration:
+            _FormVisuals.decoration(etiqueta, icon: Icons.calendar_month),
         onTap: () async {
           final now = DateTime.now();
           final minDate = DateTime(1900);
           final maxDate = DateTime(now.year + 20);
-          final picked = await showDatePicker(context: context, firstDate: minDate, lastDate: maxDate, initialDate: _safeDatePickerInitialDate(DateTime.tryParse(controllers[campo]?.text.trim() ?? '') ?? now, minDate, maxDate));
-          if (picked != null) controllers[campo]?.text = picked.toIso8601String().substring(0, 10);
+          final picked = await showDatePicker(
+              context: context,
+              firstDate: minDate,
+              lastDate: maxDate,
+              initialDate: _safeDatePickerInitialDate(
+                  DateTime.tryParse(controllers[campo]?.text.trim() ?? '') ??
+                      now,
+                  minDate,
+                  maxDate));
+          if (picked != null)
+            controllers[campo]?.text =
+                picked.toIso8601String().substring(0, 10);
         },
       );
     }
@@ -3661,7 +4582,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
         title: Text(etiqueta, style: const TextStyle(fontSize: 12.5)),
         controlAffinity: ListTileControlAffinity.leading,
         contentPadding: EdgeInsets.zero,
-        onChanged: (v) => setState(() => dropdownValues[campo] = v == true ? 1 : 0),
+        onChanged: (v) =>
+            setState(() => dropdownValues[campo] = v == true ? 1 : 0),
       );
     }
     if (tipo == 'switch') {
@@ -3679,7 +4601,10 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
         value: dropdownValues[campo],
         decoration: _FormVisuals.decoration(etiqueta),
         style: const TextStyle(fontSize: 12.5, color: Colors.black87),
-        items: const [DropdownMenuItem(value: 1, child: Text('1 / Sí')), DropdownMenuItem(value: 0, child: Text('0 / No'))],
+        items: const [
+          DropdownMenuItem(value: 1, child: Text('1 / Sí')),
+          DropdownMenuItem(value: 0, child: Text('0 / No'))
+        ],
         onChanged: (v) => setState(() => dropdownValues[campo] = v),
       );
     }
@@ -3688,7 +4613,15 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
       style: _FormVisuals.fieldTextStyle,
       minLines: tipo == 'multiline' ? 2 : 1,
       maxLines: tipo == 'multiline' ? 4 : 1,
-      keyboardType: (tipo == 'number' || tipo == 'percent') ? const TextInputType.numberWithOptions(decimal: true) : tipo == 'email' ? TextInputType.emailAddress : tipo == 'phone' ? TextInputType.phone : tipo == 'url' ? TextInputType.url : TextInputType.text,
+      keyboardType: (tipo == 'number' || tipo == 'percent')
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : tipo == 'email'
+              ? TextInputType.emailAddress
+              : tipo == 'phone'
+                  ? TextInputType.phone
+                  : tipo == 'url'
+                      ? TextInputType.url
+                      : TextInputType.text,
       decoration: _FormVisuals.decoration(etiqueta),
     );
   }
@@ -3705,7 +4638,8 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
             padding: const EdgeInsets.only(right: 6),
             child: OutlinedButton.icon(
               onPressed: () => _pickPhoto(campo),
-              icon: Icon(has ? Icons.check_circle : Icons.photo_camera, size: 16),
+              icon:
+                  Icon(has ? Icons.check_circle : Icons.photo_camera, size: 16),
               label: Text(_etiqueta(f), style: const TextStyle(fontSize: 11)),
             ),
           ),
@@ -3730,12 +4664,21 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
     return Scaffold(
       appBar: AppBar(
         title: Text(title, style: const TextStyle(fontSize: 16)),
-        actions: [IconButton(onPressed: savingPlant ? null : () => _savePlant(moveNext: false), icon: const Icon(Icons.save))],
+        actions: [
+          IconButton(
+              onPressed: savingPlant ? null : () => _savePlant(moveNext: false),
+              icon: const Icon(Icons.save))
+        ],
       ),
       floatingActionButton: FloatingActionButton(
         onPressed: savingPlant ? null : () => _savePlant(moveNext: false),
         tooltip: 'Guardar',
-        child: savingPlant ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save),
+        child: savingPlant
+            ? const SizedBox(
+                width: 18,
+                height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2))
+            : const Icon(Icons.save),
       ),
       body: loading
           ? const Center(child: CircularProgressIndicator())
@@ -3745,59 +4688,93 @@ class _PlantEvaluationSpecialPageState extends State<PlantEvaluationSpecialPage>
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(10),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      const Text('Cabecera', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      _twoColumnFields(headerFields),
-                      const SizedBox(height: 8),
-                      _photoBar(),
-                    ]),
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Cabecera',
+                              style: TextStyle(
+                                  fontSize: 13, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          _twoColumnFields(headerFields),
+                          const SizedBox(height: 8),
+                          _photoBar(),
+                        ]),
                   ),
                 ),
                 const SizedBox(height: 8),
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.all(10),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Row(children: [
-                        Expanded(child: Text(plantTitle, style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800))),
-                        Text('Guardadas: ${savedPlants.length}', style: const TextStyle(fontSize: 11.5)),
-                      ]),
-                      const SizedBox(height: 8),
-                      Row(
+                    child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          IconButton(onPressed: currentPlant > 1 ? () => setState(() => currentPlant--) : null, icon: const Icon(Icons.chevron_left)),
-                          Expanded(
-                            child: Center(child: Text('Planta $currentPlant', style: const TextStyle(fontWeight: FontWeight.w700))),
+                          Row(children: [
+                            Expanded(
+                                child: Text(plantTitle,
+                                    style: const TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w800))),
+                            Text('Guardadas: ${savedPlants.length}',
+                                style: const TextStyle(fontSize: 11.5)),
+                          ]),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              IconButton(
+                                  onPressed: currentPlant > 1
+                                      ? () => setState(() => currentPlant--)
+                                      : null,
+                                  icon: const Icon(Icons.chevron_left)),
+                              Expanded(
+                                child: Center(
+                                    child: Text('Planta $currentPlant',
+                                        style: const TextStyle(
+                                            fontWeight: FontWeight.w700))),
+                              ),
+                              IconButton(
+                                  onPressed: () =>
+                                      setState(() => currentPlant++),
+                                  icon: const Icon(Icons.chevron_right)),
+                            ],
                           ),
-                          IconButton(onPressed: () => setState(() => currentPlant++), icon: const Icon(Icons.chevron_right)),
-                        ],
-                      ),
-                      const Divider(),
-                      Text(findingTitle, style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
-                      const SizedBox(height: 8),
-                      _twoColumnFields(evalFields.isEmpty ? fields.where((f) => !_isPhotoField(f)).skip(headerFields.length).take(8).toList() : evalFields),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: OutlinedButton.icon(
-                              onPressed: () {},
-                              icon: const Icon(Icons.add, size: 16),
-                              label: Text(widget.screenKind == PlantScreenKind.fenologia ? '+ Hallazgo' : '+ Estadio'),
-                            ),
+                          const Divider(),
+                          Text(findingTitle,
+                              style: const TextStyle(
+                                  fontSize: 13.5, fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 8),
+                          _twoColumnFields(evalFields.isEmpty
+                              ? fields
+                                  .where((f) => !_isPhotoField(f))
+                                  .skip(headerFields.length)
+                                  .take(8)
+                                  .toList()
+                              : evalFields),
+                          const SizedBox(height: 10),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton.icon(
+                                  onPressed: () {},
+                                  icon: const Icon(Icons.add, size: 16),
+                                  label: Text(widget.screenKind ==
+                                          PlantScreenKind.fenologia
+                                      ? '+ Hallazgo'
+                                      : '+ Estadio'),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton.icon(
+                                  onPressed: savingPlant
+                                      ? null
+                                      : () => _savePlant(moveNext: true),
+                                  icon: const Icon(Icons.add, size: 16),
+                                  label: const Text('Planta'),
+                                ),
+                              ),
+                            ],
                           ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: FilledButton.icon(
-                              onPressed: savingPlant ? null : () => _savePlant(moveNext: true),
-                              icon: const Icon(Icons.add, size: 16),
-                              label: const Text('Planta'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ]),
+                        ]),
                   ),
                 ),
                 const SizedBox(height: 84),
@@ -3853,9 +4830,12 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     final table = await _resolveTableDestino();
     final rows = table == null
         ? <Map<String, dynamic>>[]
-        : await local.where('local_form_fields', 'tabla_destino = ? and activo = 1', [table], orderBy: 'orden');
+        : await local.where(
+            'local_form_fields', 'tabla_destino = ? and activo = 1', [table],
+            orderBy: 'orden');
 
-    final lotes = await local.getAll('local_lotes_variedades', orderBy: 'turno');
+    final lotes =
+        await local.getAll('local_lotes_variedades', orderBy: 'turno');
 
     for (final c in controllers.values) {
       c.dispose();
@@ -3869,10 +4849,16 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     for (final f in rows) {
       final campo = _campo(f);
       final tipo = _tipo(f);
-      if (campo.isEmpty || tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'calculated') continue;
-      final initialValue = initial[campo] ?? initial[campo.toUpperCase()] ?? initial[campo.toLowerCase()];
+      if (campo.isEmpty ||
+          tipo == 'hidden' ||
+          tipo == 'hidden_id' ||
+          tipo == 'calculated') continue;
+      final initialValue = initial[campo] ??
+          initial[campo.toUpperCase()] ??
+          initial[campo.toLowerCase()];
       if (tipo == 'boolean_int') {
-        dropdownValues[campo] = initialValue == null ? null : int.tryParse(initialValue.toString());
+        dropdownValues[campo] =
+            initialValue == null ? null : int.tryParse(initialValue.toString());
       } else if (tipo == 'signature') {
         signatureValues[campo] = initialValue?.toString();
       } else if (tipo == 'photo') {
@@ -3899,32 +4885,39 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
   Future<String?> _resolveTableDestino() async {
     final direct = _clean(widget.format['tabla_destino']);
     if (direct != null) return direct;
-    final rows = await local.where('local_format_tables', 'formato_id = ? and activo = 1', [widget.format['id']], orderBy: 'orden');
+    final rows = await local.where('local_format_tables',
+        'formato_id = ? and activo = 1', [widget.format['id']],
+        orderBy: 'orden');
     return rows.isEmpty ? null : _clean(rows.first['tabla_destino']);
   }
 
   String? _clean(dynamic value) {
     if (value == null) return null;
     final s = value.toString().trim();
-    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL') return null;
+    if (s.isEmpty || s.toUpperCase() == 'EMPTY' || s.toUpperCase() == 'NULL')
+      return null;
     return s;
   }
 
   String _campo(Map<String, dynamic> f) => f['campo']?.toString() ?? '';
-  String _etiqueta(Map<String, dynamic> f) => f['etiqueta']?.toString() ?? _campo(f);
+  String _etiqueta(Map<String, dynamic> f) =>
+      f['etiqueta']?.toString() ?? _campo(f);
   String _tipo(Map<String, dynamic> f) {
     final raw = (f['tipo']?.toString() ?? 'text').trim().toLowerCase();
-    if (raw == 'boolean' || raw == 'bool' || raw == 'boolean_int' || raw == 'boolean_01') return 'boolean_int';
+    if (raw == 'boolean' ||
+        raw == 'bool' ||
+        raw == 'boolean_int' ||
+        raw == 'boolean_01') return 'boolean_int';
     if (raw == 'checkbox' || raw == 'check') return 'checkbox';
     if (raw == 'switch' || raw == 'toggle') return 'switch';
     if (raw == 'rating' || raw == 'stars') return 'rating';
     if (raw == 'slider' || raw == 'range') return 'slider';
-    if (raw == 'email' || raw == 'phone' || raw == 'url' || raw == 'percent') return raw;
+    if (raw == 'email' || raw == 'phone' || raw == 'url' || raw == 'percent')
+      return raw;
     if (raw == 'integer' || raw == 'int') return 'integer';
     if (raw == 'hidden_id') return 'hidden_id';
     return raw;
   }
-
 
   String _normalizarNombreCampo(String value) {
     var s = value.trim().toUpperCase();
@@ -3942,13 +4935,16 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     s = s.replaceAll(RegExp(r'_+'), '_');
     return s.replaceAll(RegExp(r'^_|_$'), '');
   }
+
   bool _isTurnoOrLoteCampo(String campo, [String? etiqueta]) {
     final valores = {
       _normalizarNombreCampo(campo),
       if (etiqueta != null) _normalizarNombreCampo(etiqueta),
     };
-    return valores.any((c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
+    return valores.any(
+        (c) => c == 'TURNO' || c == 'TURNOS' || c == 'LOTE' || c == 'LOTES');
   }
+
   bool _isVariedadCampo(String campo, [String? etiqueta]) {
     final valores = {
       _normalizarNombreCampo(campo),
@@ -3956,6 +4952,7 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     };
     return valores.any((c) => c == 'VARIEDAD' || c == 'VARIEDADES');
   }
+
   List<String> _turnosUnicos() {
     final seen = <String>{};
     final out = <String>[];
@@ -3967,10 +4964,13 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     }
     return out;
   }
+
   void _setVariedadFromTurno(String? turno) {
     if (turno == null || turno.trim().isEmpty) return;
     final t = turno.trim();
-    final matches = lotesVariedades.where((e) => e['turno']?.toString().trim() == t).toList();
+    final matches = lotesVariedades
+        .where((e) => e['turno']?.toString().trim() == t)
+        .toList();
     if (matches.isEmpty) return;
     final variedad = matches.first['variedad']?.toString().trim() ?? '';
     for (final field in fields) {
@@ -3982,37 +4982,52 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     }
   }
 
-  bool _isChecklist(Map<String, dynamic> f) => ['boolean_int', 'checkbox', 'switch'].contains(_tipo(f));
-  bool _isPhoto(Map<String, dynamic> f) => _tipo(f) == 'photo' || _campo(f).toUpperCase().startsWith('FOTO');
+  bool _isChecklist(Map<String, dynamic> f) =>
+      ['boolean_int', 'checkbox', 'switch'].contains(_tipo(f));
+  bool _isPhoto(Map<String, dynamic> f) =>
+      _tipo(f) == 'photo' || _campo(f).toUpperCase().startsWith('FOTO');
   bool _isSignature(Map<String, dynamic> f) => _tipo(f) == 'signature';
   bool _isHeader(Map<String, dynamic> f) {
     final tipo = _tipo(f);
-    if (tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'calculated') return false;
+    if (tipo == 'hidden' || tipo == 'hidden_id' || tipo == 'calculated')
+      return false;
     return !_isChecklist(f) && !_isPhoto(f) && !_isSignature(f);
   }
 
   Future<void> _pickPhoto(String campo) async {
-    final count = imageValues.values.where((v) => v != null && v.isNotEmpty).length;
+    final count =
+        imageValues.values.where((v) => v != null && v.isNotEmpty).length;
     if (imageValues[campo] == null && count >= 3) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Máximo 3 fotos por registro.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Máximo 3 fotos por registro.')));
       return;
     }
     try {
-      final file = await picker.pickImage(source: ImageSource.camera, imageQuality: 45, maxWidth: 800, maxHeight: 800);
+      final file = await picker.pickImage(
+          source: ImageSource.camera,
+          imageQuality: 45,
+          maxWidth: 800,
+          maxHeight: 800);
       if (file == null || !mounted) return;
       final bytes = await file.readAsBytes();
       if (!mounted) return;
-      setState(() => imageValues[campo] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
+      setState(() =>
+          imageValues[campo] = 'data:image/jpeg;base64,${base64Encode(bytes)}');
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo abrir la cámara: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo abrir la cámara: $e')));
     }
   }
 
   Future<void> _captureSignature(String campo) async {
-    final bytes = await showDialog(context: context, barrierDismissible: false, builder: (_) => const SignatureDialog());
+    final bytes = await showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => const SignatureDialog());
     if (bytes == null) return;
-    setState(() => signatureValues[campo] = 'data:image/png;base64,${base64Encode(bytes)}');
+    setState(() => signatureValues[campo] =
+        'data:image/png;base64,${base64Encode(bytes)}');
   }
 
   Widget _field(Map<String, dynamic> f) {
@@ -4024,7 +5039,11 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     if (_isTurnoOrLoteCampo(campo, etiqueta) && turnosDisponibles.isNotEmpty) {
       final current = controllers[campo]?.text.trim();
       return DropdownButtonFormField<String>(
-        value: (current != null && current.isNotEmpty && turnosDisponibles.contains(current)) ? current : null,
+        value: (current != null &&
+                current.isNotEmpty &&
+                turnosDisponibles.contains(current))
+            ? current
+            : null,
         decoration: _FormVisuals.decoration(etiqueta),
         style: const TextStyle(fontSize: 12.5, color: Colors.black87),
         items: turnosDisponibles.map((turno) {
@@ -4049,13 +5068,24 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
         controller: controllers[campo],
         readOnly: true,
         style: _FormVisuals.fieldTextStyle,
-        decoration: _FormVisuals.decoration(etiqueta, icon: Icons.calendar_month),
+        decoration:
+            _FormVisuals.decoration(etiqueta, icon: Icons.calendar_month),
         onTap: () async {
           final now = DateTime.now();
           final minDate = DateTime(1900);
           final maxDate = DateTime(now.year + 20);
-          final picked = await showDatePicker(context: context, firstDate: minDate, lastDate: maxDate, initialDate: _safeDatePickerInitialDate(DateTime.tryParse(controllers[campo]?.text.trim() ?? '') ?? now, minDate, maxDate));
-          if (picked != null) controllers[campo]?.text = picked.toIso8601String().substring(0, 10);
+          final picked = await showDatePicker(
+              context: context,
+              firstDate: minDate,
+              lastDate: maxDate,
+              initialDate: _safeDatePickerInitialDate(
+                  DateTime.tryParse(controllers[campo]?.text.trim() ?? '') ??
+                      now,
+                  minDate,
+                  maxDate));
+          if (picked != null)
+            controllers[campo]?.text =
+                picked.toIso8601String().substring(0, 10);
         },
       );
     }
@@ -4064,7 +5094,15 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
       style: _FormVisuals.fieldTextStyle,
       minLines: tipo == 'multiline' ? 2 : 1,
       maxLines: tipo == 'multiline' ? 4 : 1,
-      keyboardType: (tipo == 'number' || tipo == 'percent') ? const TextInputType.numberWithOptions(decimal: true) : tipo == 'email' ? TextInputType.emailAddress : tipo == 'phone' ? TextInputType.phone : tipo == 'url' ? TextInputType.url : TextInputType.text,
+      keyboardType: (tipo == 'number' || tipo == 'percent')
+          ? const TextInputType.numberWithOptions(decimal: true)
+          : tipo == 'email'
+              ? TextInputType.emailAddress
+              : tipo == 'phone'
+                  ? TextInputType.phone
+                  : tipo == 'url'
+                      ? TextInputType.url
+                      : TextInputType.text,
       decoration: _FormVisuals.decoration(etiqueta),
     );
   }
@@ -4073,7 +5111,11 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     return Wrap(
       spacing: 8,
       runSpacing: 8,
-      children: rows.map((f) => SizedBox(width: (MediaQuery.of(context).size.width - 38) / 2, child: _field(f))).toList(),
+      children: rows
+          .map((f) => SizedBox(
+              width: (MediaQuery.of(context).size.width - 38) / 2,
+              child: _field(f)))
+          .toList(),
     );
   }
 
@@ -4096,16 +5138,20 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
   Future<void> _save() async {
     final table = tableDestino;
     if (table == null || table.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Tabla destino no configurada.')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Tabla destino no configurada.')));
       return;
     }
     final cachedUserId = await LocalSession().cachedUserId();
-    final userId = Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
+    final userId =
+        Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) return;
-    final id = (widget.editIdLocal != null && widget.editIdLocal!.trim().isNotEmpty)
-        ? widget.editIdLocal!.trim()
-        : uuid.v4();
-    final payload = Map<String, dynamic>.from(widget.initialPayload ?? <String, dynamic>{});
+    final id =
+        (widget.editIdLocal != null && widget.editIdLocal!.trim().isNotEmpty)
+            ? widget.editIdLocal!.trim()
+            : uuid.v4();
+    final payload =
+        Map<String, dynamic>.from(widget.initialPayload ?? <String, dynamic>{});
     payload['id_local'] = id;
     for (final f in fields) {
       final campo = _campo(f);
@@ -4130,7 +5176,8 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     });
     widget.onLocalChanged?.call();
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registro de maquinaria guardado localmente.')));
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Registro de maquinaria guardado localmente.')));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (widget.onSavedAndExit != null) {
@@ -4149,25 +5196,41 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     final signatures = fields.where(_isSignature).toList();
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Horas Maquinaria', style: TextStyle(fontSize: 16)), actions: [IconButton(onPressed: _save, icon: const Icon(Icons.save))]),
-      floatingActionButton: FloatingActionButton(onPressed: _save, tooltip: 'Guardar', child: const Icon(Icons.save)),
+      appBar: AppBar(
+          title: const Text('Horas Maquinaria', style: TextStyle(fontSize: 16)),
+          actions: [
+            IconButton(onPressed: _save, icon: const Icon(Icons.save))
+          ]),
+      floatingActionButton: FloatingActionButton(
+          onPressed: _save, tooltip: 'Guardar', child: const Icon(Icons.save)),
       body: loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(10),
               children: [
-                Card(child: Padding(padding: const EdgeInsets.all(10), child: _twoColumn(header))),
+                Card(
+                    child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: _twoColumn(header))),
                 const SizedBox(height: 8),
                 if (photos.isNotEmpty)
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(10),
-                      child: Row(children: photos.map((f) {
+                      child: Row(
+                          children: photos.map((f) {
                         final campo = _campo(f);
                         final has = imageValues[campo] != null;
-                        return Expanded(child: Padding(
+                        return Expanded(
+                            child: Padding(
                           padding: const EdgeInsets.only(right: 6),
-                          child: OutlinedButton.icon(onPressed: () => _pickPhoto(campo), icon: Icon(has ? Icons.check_circle : Icons.photo_camera, size: 16), label: Text(_etiqueta(f), style: const TextStyle(fontSize: 11))),
+                          child: OutlinedButton.icon(
+                              onPressed: () => _pickPhoto(campo),
+                              icon: Icon(
+                                  has ? Icons.check_circle : Icons.photo_camera,
+                                  size: 16),
+                              label: Text(_etiqueta(f),
+                                  style: const TextStyle(fontSize: 11))),
                         ));
                       }).toList()),
                     ),
@@ -4177,7 +5240,9 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
                   Card(
                     child: ExpansionTile(
                       initiallyExpanded: true,
-                      title: const Text('Check List Maquinaria', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                      title: const Text('Check List Maquinaria',
+                          style: TextStyle(
+                              fontSize: 14, fontWeight: FontWeight.bold)),
                       childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 10),
                       children: [
                         Wrap(
@@ -4186,13 +5251,22 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
                           children: checklist.map((f) {
                             final campo = _campo(f);
                             return SizedBox(
-                              width: (MediaQuery.of(context).size.width - 38) / 2,
+                              width:
+                                  (MediaQuery.of(context).size.width - 38) / 2,
                               child: DropdownButtonFormField<int>(
                                 value: dropdownValues[campo],
-                                decoration: _FormVisuals.decoration(_etiqueta(f)),
-                                style: const TextStyle(fontSize: 12.5, color: Colors.black87),
-                                items: const [DropdownMenuItem(value: 1, child: Text('1 / Sí')), DropdownMenuItem(value: 0, child: Text('0 / No'))],
-                                onChanged: (v) => setState(() => dropdownValues[campo] = v),
+                                decoration:
+                                    _FormVisuals.decoration(_etiqueta(f)),
+                                style: const TextStyle(
+                                    fontSize: 12.5, color: Colors.black87),
+                                items: const [
+                                  DropdownMenuItem(
+                                      value: 1, child: Text('1 / Sí')),
+                                  DropdownMenuItem(
+                                      value: 0, child: Text('0 / No'))
+                                ],
+                                onChanged: (v) =>
+                                    setState(() => dropdownValues[campo] = v),
                               ),
                             );
                           }).toList(),
@@ -4215,8 +5289,10 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
                             width: (MediaQuery.of(context).size.width - 38) / 2,
                             child: OutlinedButton.icon(
                               onPressed: () => _captureSignature(campo),
-                              icon: Icon(has ? Icons.check_circle : Icons.draw, size: 16),
-                              label: Text(_etiqueta(f), style: const TextStyle(fontSize: 11)),
+                              icon: Icon(has ? Icons.check_circle : Icons.draw,
+                                  size: 16),
+                              label: Text(_etiqueta(f),
+                                  style: const TextStyle(fontSize: 11)),
                             ),
                           );
                         }).toList(),

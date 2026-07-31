@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  Widget subject({VoidCallback? onEdit}) {
+  Widget subject({VoidCallback? onEdit, bool selectionEnabled = false}) {
     final rows = [
       {
         'codigo': 'REG-001',
@@ -23,6 +23,7 @@ void main() {
           labelFor: (column) => column.toUpperCase(),
           textFor: (record, column) => record[column]?.toString() ?? '',
           cellBuilder: (context, record, column) => Text('${record[column]}'),
+          selectionEnabled: selectionEnabled,
           onEdit: onEdit == null ? null : (_) => onEdit(),
         ),
       ),
@@ -55,5 +56,24 @@ void main() {
 
     expect(edits, 1);
     expect(find.text('Palta'), findsOneWidget);
+  });
+
+  testWidgets('mantiene fija la columna N° durante el scroll horizontal',
+      (tester) async {
+    await tester.pumpWidget(subject(selectionEnabled: true));
+
+    final numberCell = find.byKey(const Key('mobile-record-number-1'));
+    final initialNumberX = tester.getTopLeft(numberCell).dx;
+    final initialValueX = tester.getTopLeft(find.text('REG-001')).dx;
+
+    await tester.drag(
+      find.byKey(const Key('mobile-records-list')),
+      const Offset(-520, 0),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.getTopLeft(numberCell).dx, closeTo(initialNumberX, 0.1));
+    expect(tester.getTopLeft(find.text('REG-001')).dx, lessThan(initialValueX));
+    expect(find.text('Elegir'), findsOneWidget);
   });
 }

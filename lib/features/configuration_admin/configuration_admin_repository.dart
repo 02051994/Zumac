@@ -89,6 +89,14 @@ class ConfigurationAdminRepository {
     return _map(value);
   }
 
+  Future<Map<String, dynamic>> discardDraft(String draftId) async {
+    final value = await _client.rpc(
+      'appgt_descartar_borrador_configuracion',
+      params: {'p_borrador_id': draftId},
+    );
+    return _map(value);
+  }
+
   Future<Map<String, dynamic>> loadFullFormatTemplate(
     String templateId,
   ) async {
@@ -123,15 +131,36 @@ class ConfigurationAdminRepository {
 
   Future<List<Map<String, dynamic>>> listPublishedNavigation() async {
     final results = await Future.wait(
-      const ['RUBRO', 'SECCION', 'MODULO', 'FORMATO'].map(
-        (type) => listTemplates(entityType: type, limit: 200),
-      ),
+      const ['RUBRO', 'SECCION', 'MODULO', 'FORMATO', 'TABLA']
+          .map(_listAllPublishedTemplates),
     );
     final items = <Map<String, dynamic>>[];
     for (final result in results) {
-      items.addAll(_list(result['items']));
+      items.addAll(result);
     }
     return items;
+  }
+
+  Future<List<Map<String, dynamic>>> _listAllPublishedTemplates(
+    String entityType,
+  ) async {
+    const pageSize = 200;
+    final rows = <Map<String, dynamic>>[];
+    var offset = 0;
+    while (true) {
+      final page = await listTemplates(
+        entityType: entityType,
+        limit: pageSize,
+        offset: offset,
+      );
+      final pageRows = _list(page['items']);
+      rows.addAll(pageRows);
+      final total =
+          int.tryParse('${page['total'] ?? rows.length}') ?? rows.length;
+      if (pageRows.isEmpty || rows.length >= total) break;
+      offset += pageRows.length;
+    }
+    return rows;
   }
 
   Future<Map<String, dynamic>> createDraftFromPublished(
@@ -170,6 +199,20 @@ class ConfigurationAdminRepository {
       },
     );
     return _map(value);
+  }
+
+  Future<List<Map<String, dynamic>>> searchBuilderFieldCatalog({
+    String? search,
+    int limit = 250,
+  }) async {
+    final value = await _client.rpc(
+      'appgt_catalogo_campos_constructor_v1',
+      params: {
+        'p_busqueda': search,
+        'p_limit': limit,
+      },
+    );
+    return _list(value);
   }
 
   Map<String, dynamic> _map(dynamic value) {

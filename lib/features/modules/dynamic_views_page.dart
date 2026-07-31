@@ -1575,7 +1575,6 @@ class _DynamicViewsPageState extends State<DynamicViewsPage> {
                 dense: true,
                 selected: selectedView?['id']?.toString() == v['id']?.toString(),
                 title: Text(_txt(v['nombre_vista']).isEmpty ? _txt(v['id']) : _txt(v['nombre_vista'])),
-                subtitle: Text(_txt(v['tabla_destino'])),
                 onTap: () async {
                   setState(() { selectedView = v; loading = true; filters.clear(); sortColumn = null; currentPage = 0; });
                   try { await _loadRows(); } finally { if (mounted) setState(() => loading = false); }

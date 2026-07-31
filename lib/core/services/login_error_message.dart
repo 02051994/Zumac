@@ -9,7 +9,7 @@ String friendlyLoginError(Object error) {
   if (msg.contains('over_email_send_rate_limit') ||
       msg.contains('email rate limit') ||
       msg.contains('429')) {
-    return 'Supabase bloqueó temporalmente el envío de correos por muchos intentos. Espera unos minutos y vuelve a probar.';
+    return 'El servicio bloqueó temporalmente el envío de correos por muchos intentos. Espera unos minutos y vuelve a probar.';
   }
   if (msg.contains('socketexception') ||
       msg.contains('failed host lookup') ||
@@ -18,7 +18,7 @@ String friendlyLoginError(Object error) {
       msg.contains('network is unreachable') ||
       msg.contains('timeout')) {
     final detail = raw.replaceFirst('Exception: ', '').trim();
-    return 'El teléfono tiene red, pero no pudo contactar a Supabase. Detalle: $detail';
+    return 'El teléfono tiene red, pero no pudo contactar al servicio en línea. Detalle: $detail';
   }
   if (msg.contains('no existe un usuario activo')) {
     return raw.replaceFirst('Exception: ', '');

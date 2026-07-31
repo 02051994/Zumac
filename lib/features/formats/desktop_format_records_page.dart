@@ -17,10 +17,13 @@ import 'package:open_filex/open_filex.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../config/supabase_config.dart';
+import '../../core/platform/file_download.dart';
+import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
 import '../../core/services/formula_engine.dart';
 import '../../core/services/sync_service.dart';
+import '../../core/widgets/responsive_layout.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
 import 'widgets/mobile_records_list.dart';
@@ -29,8 +32,10 @@ class _TableCellFormat {
   final Color? textColor;
   final Color? bgColor;
   final Color? borderColor;
+  final double? fontSize;
 
-  const _TableCellFormat({this.textColor, this.bgColor, this.borderColor});
+  const _TableCellFormat(
+      {this.textColor, this.bgColor, this.borderColor, this.fontSize});
 }
 
 class _DesktopRecordsResult {
@@ -38,7 +43,8 @@ class _DesktopRecordsResult {
   final List<Map<String, dynamic>> rows;
   final int? totalRows;
 
-  const _DesktopRecordsResult({required this.columns, required this.rows, this.totalRows});
+  const _DesktopRecordsResult(
+      {required this.columns, required this.rows, this.totalRows});
 }
 
 class DesktopFormatRecordsPage extends StatefulWidget {
@@ -47,6 +53,9 @@ class DesktopFormatRecordsPage extends StatefulWidget {
   final bool embedded;
   final Future<void> Function()? onLocalRecordsChanged;
   final bool mobileMode;
+  final String? initialTableName;
+  final String? initialRecordField;
+  final String? initialRecordValue;
 
   const DesktopFormatRecordsPage({
     super.key,
@@ -55,10 +64,14 @@ class DesktopFormatRecordsPage extends StatefulWidget {
     this.embedded = false,
     this.onLocalRecordsChanged,
     this.mobileMode = false,
+    this.initialTableName,
+    this.initialRecordField,
+    this.initialRecordValue,
   });
 
   @override
-  State<DesktopFormatRecordsPage> createState() => _DesktopFormatRecordsPageState();
+  State<DesktopFormatRecordsPage> createState() =>
+      _DesktopFormatRecordsPageState();
 }
 
 class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
@@ -66,20 +79,30 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   static const Color _appgtHeaderBorderColor = Color(0xFF314457);
   final local = LocalDb.instance;
   final supabase = Supabase.instance.client;
+  final experience = AppExperienceService();
   final ScrollController _horizontalTableController = ScrollController();
   final ScrollController _horizontalHeaderController = ScrollController();
   final ScrollController _verticalTableController = ScrollController();
   final ScrollController _fixedVerticalTableController = ScrollController();
   bool _syncingVerticalTableScroll = false;
   final Set<String> _highlightedRemoteRowKeys = <String>{};
-  final Map<String, Future<String>> _signedMediaUrlFutures = <String, Future<String>>{};
-  final Map<String, ImageProvider> _mediaImageProviders = <String, ImageProvider>{};
+  final Map<String, Future<String>> _signedMediaUrlFutures =
+      <String, Future<String>>{};
+  final Map<String, ImageProvider> _mediaImageProviders =
+      <String, ImageProvider>{};
   final Map<String, Uint8List> _decodedMediaBytes = <String, Uint8List>{};
   final Expando<String> _rowKeyCache = Expando<String>('appgt-row-key');
-  final Map<String, Map<String, dynamic>?> _fieldDefColumnCache = <String, Map<String, dynamic>?>{};
-  final Map<String, List<String>> _matrixColumnsCache = <String, List<String>>{};
+  final Map<String, Map<String, dynamic>?> _fieldDefColumnCache =
+      <String, Map<String, dynamic>?>{};
+  final Map<String, List<String>> _matrixColumnsCache =
+      <String, List<String>>{};
   Timer? _renderRowsTimer;
   Timer? _columnWidthDebounce;
+  Timer? _viewPersistenceTimer;
+  String? _recordViewFingerprint;
+  double? _restoredVerticalOffset;
+  double? _restoredHorizontalOffset;
+  final Set<String> _restoredSelectedRowKeys = <String>{};
 
   bool loading = true;
   String _loadingMessage = 'Cargando tabla...';
@@ -89,8 +112,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool canInsert = false;
   bool canUpdate = false;
   bool canDelete = false;
+  bool canReview = false;
+  bool canApprove = false;
   final Set<String> _selectedDeleteRowKeys = <String>{};
-  final Map<String, Map<String, dynamic>> _selectedDeleteRows = <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> _selectedDeleteRows =
+      <String, Map<String, dynamic>>{};
   final ValueNotifier<int> _deleteSelectionVersion = ValueNotifier<int>(0);
   final ValueNotifier<int> _tableRenderVersion = ValueNotifier<int>(0);
   final ValueNotifier<int> _filterControlsVersion = ValueNotifier<int>(0);
@@ -124,7 +150,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   static const int _pageSize = 200;
   static const double _virtualRowHeight = 46.0;
-  static const double _virtualCacheExtent = 276.0; // 6 filas extra aprox.; suficiente sin inflar widgets.
+  static const double _virtualCacheExtent =
+      276.0; // 6 filas extra aprox.; suficiente sin inflar widgets.
   int _currentPage = 0;
   bool _hasNextPage = false;
   int? _knownTotalRows;
@@ -144,6 +171,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   void dispose() {
     _renderRowsTimer?.cancel();
     _columnWidthDebounce?.cancel();
+    _viewPersistenceTimer?.cancel();
+    unawaited(_persistRecordView());
     _horizontalTableController.removeListener(_syncHeaderScroll);
     _verticalTableController.removeListener(_syncFixedVerticalScroll);
     _fixedVerticalTableController.removeListener(_syncMainVerticalScroll);
@@ -164,11 +193,189 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _horizontalTableController.addListener(_syncHeaderScroll);
     _verticalTableController.addListener(_syncFixedVerticalScroll);
     _fixedVerticalTableController.addListener(_syncMainVerticalScroll);
-    _load();
+    unawaited(_initializeRecordView());
+  }
+
+  String get _recordViewKey {
+    final moduleId = widget.module['id']?.toString().trim() ?? '';
+    final formatId = widget.format['id']?.toString().trim() ?? '';
+    return '${moduleId.isEmpty ? 'modulo' : moduleId}_'
+        '${formatId.isEmpty ? 'formato' : formatId}';
+  }
+
+  Future<void> _initializeRecordView() async {
+    await _restoreRecordView();
+    _applyRequestedRecordFocus();
+    if (!mounted) return;
+    await _load();
+    if (!mounted) return;
+    _highlightRequestedRecord();
+    _restoreRecordSelectionAndScroll();
+    _viewPersistenceTimer = Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(_persistRecordView()),
+    );
+  }
+
+  void _applyRequestedRecordFocus() {
+    final requestedTable = widget.initialTableName?.trim() ?? '';
+    final requestedField = widget.initialRecordField?.trim() ?? '';
+    final requestedValue = widget.initialRecordValue?.trim() ?? '';
+    if (requestedTable.isNotEmpty) selectedTableName = requestedTable;
+    if (requestedField.isNotEmpty && requestedValue.isNotEmpty) {
+      _columnFilters[requestedField] = jsonEncode({
+        'mode': 'equals',
+        'value': requestedValue,
+      });
+      _mobileSearchController.text = requestedValue;
+    }
+  }
+
+  void _highlightRequestedRecord() {
+    final requestedField = widget.initialRecordField?.trim() ?? '';
+    final requestedValue = widget.initialRecordValue?.trim() ?? '';
+    if (requestedField.isEmpty || requestedValue.isEmpty) return;
+    final normalizedField = _norm(requestedField);
+    final index = records.indexWhere((row) {
+      for (final entry in row.entries) {
+        if (_norm(entry.key) == normalizedField &&
+            entry.value?.toString().trim() == requestedValue) {
+          return true;
+        }
+      }
+      return false;
+    });
+    if (index < 0) return;
+    _highlightedRemoteRowKeys.add(
+      _remoteRowHighlightKey(records[index], index),
+    );
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_verticalTableController.hasClients) return;
+      final target = (index * _virtualRowHeight).clamp(
+        0.0,
+        _verticalTableController.position.maxScrollExtent,
+      );
+      _verticalTableController.animateTo(
+        target,
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+      );
+    });
+  }
+
+  Future<void> _restoreRecordView() async {
+    final saved = await experience.loadRecordView(_recordViewKey);
+    if (saved.isEmpty) return;
+    selectedTableName = _clean(saved['selected_table']);
+    final rawColumnFilters = saved['column_filters'];
+    if (rawColumnFilters is Map) {
+      _columnFilters
+        ..clear()
+        ..addAll(
+          rawColumnFilters.map(
+            (key, value) => MapEntry(key.toString(), value.toString()),
+          ),
+        );
+    }
+    yearFilter = _clean(saved['year_filter']);
+    weekFilter = _clean(saved['week_filter']);
+    monthFilter = _clean(saved['month_filter']);
+    dateFilter = _clean(saved['date_filter']);
+    startDateFilter = DateTime.tryParse(_clean(saved['start_date']) ?? '');
+    endDateFilter = DateTime.tryParse(_clean(saved['end_date']) ?? '');
+    varietyFilter = _clean(saved['variety_filter']);
+    loteFilter = _clean(saved['lote_filter']);
+    turnoFilter = _clean(saved['turno_filter']);
+    _sortColumn = _clean(saved['sort_column']);
+    _sortAscending = saved['sort_ascending'] != false;
+    _currentPage = int.tryParse('${saved['page'] ?? 0}') ?? 0;
+    _mobileSearchController.text = _clean(saved['search']) ?? '';
+    _restoredVerticalOffset =
+        double.tryParse('${saved['vertical_offset'] ?? ''}');
+    _restoredHorizontalOffset =
+        double.tryParse('${saved['horizontal_offset'] ?? ''}');
+    final pinned = saved['pinned_columns'];
+    if (pinned is List) {
+      _pinnedColumns.addAll(pinned.map((value) => value.toString()));
+    }
+    final selectedRows = saved['selected_row_keys'];
+    if (selectedRows is List) {
+      _restoredSelectedRowKeys
+          .addAll(selectedRows.map((value) => value.toString()));
+    }
+  }
+
+  Future<void> _persistRecordView() async {
+    final value = <String, dynamic>{
+      'selected_table': selectedTableName,
+      'column_filters': Map<String, String>.from(_columnFilters),
+      'year_filter': yearFilter,
+      'week_filter': weekFilter,
+      'month_filter': monthFilter,
+      'date_filter': dateFilter,
+      'start_date': startDateFilter?.toIso8601String(),
+      'end_date': endDateFilter?.toIso8601String(),
+      'variety_filter': varietyFilter,
+      'lote_filter': loteFilter,
+      'turno_filter': turnoFilter,
+      'sort_column': _sortColumn,
+      'sort_ascending': _sortAscending,
+      'page': _currentPage,
+      'search': _mobileSearchController.text,
+      'vertical_offset': _verticalTableController.hasClients
+          ? _verticalTableController.offset
+          : _restoredVerticalOffset,
+      'horizontal_offset': _horizontalTableController.hasClients
+          ? _horizontalTableController.offset
+          : _restoredHorizontalOffset,
+      'pinned_columns': _pinnedColumns.toList(growable: false),
+      'selected_row_keys': _selectedDeleteRowKeys.toList(growable: false),
+    };
+    final fingerprint = jsonEncode(value);
+    if (fingerprint == _recordViewFingerprint) return;
+    _recordViewFingerprint = fingerprint;
+    await experience.saveRecordView(_recordViewKey, value);
+  }
+
+  void _restoreRecordSelectionAndScroll() {
+    if (_restoredSelectedRowKeys.isNotEmpty) {
+      for (var index = 0; index < records.length; index++) {
+        final row = records[index];
+        final key = _remoteRowHighlightKey(row, index);
+        if (_restoredSelectedRowKeys.contains(key)) {
+          _selectedDeleteRowKeys.add(key);
+          _selectedDeleteRows[key] = row;
+        }
+      }
+      _notifyDeleteSelectionChanged();
+      _restoredSelectedRowKeys.clear();
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final verticalOffset = _restoredVerticalOffset;
+      if (verticalOffset != null && _verticalTableController.hasClients) {
+        _verticalTableController.jumpTo(
+          verticalOffset
+              .clamp(0.0, _verticalTableController.position.maxScrollExtent)
+              .toDouble(),
+        );
+      }
+      final horizontalOffset = _restoredHorizontalOffset;
+      if (horizontalOffset != null && _horizontalTableController.hasClients) {
+        _horizontalTableController.jumpTo(
+          horizontalOffset
+              .clamp(0.0, _horizontalTableController.position.maxScrollExtent)
+              .toDouble(),
+        );
+      }
+      _restoredVerticalOffset = null;
+      _restoredHorizontalOffset = null;
+    });
   }
 
   void _syncHeaderScroll() {
-    if (!_horizontalTableController.hasClients || !_horizontalHeaderController.hasClients) return;
+    if (!_horizontalTableController.hasClients ||
+        !_horizontalHeaderController.hasClients) return;
     final max = _horizontalHeaderController.position.maxScrollExtent;
     final offset = _horizontalTableController.offset.clamp(0.0, max).toDouble();
     if ((_horizontalHeaderController.offset - offset).abs() > 0.5) {
@@ -178,7 +385,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   void _syncFixedVerticalScroll() {
     if (_syncingVerticalTableScroll) return;
-    if (!_verticalTableController.hasClients || !_fixedVerticalTableController.hasClients) return;
+    if (!_verticalTableController.hasClients ||
+        !_fixedVerticalTableController.hasClients) return;
     _syncingVerticalTableScroll = true;
     final max = _fixedVerticalTableController.position.maxScrollExtent;
     final offset = _verticalTableController.offset.clamp(0.0, max).toDouble();
@@ -190,10 +398,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   void _syncMainVerticalScroll() {
     if (_syncingVerticalTableScroll) return;
-    if (!_verticalTableController.hasClients || !_fixedVerticalTableController.hasClients) return;
+    if (!_verticalTableController.hasClients ||
+        !_fixedVerticalTableController.hasClients) return;
     _syncingVerticalTableScroll = true;
     final max = _verticalTableController.position.maxScrollExtent;
-    final offset = _fixedVerticalTableController.offset.clamp(0.0, max).toDouble();
+    final offset =
+        _fixedVerticalTableController.offset.clamp(0.0, max).toDouble();
     if ((_verticalTableController.offset - offset).abs() > 0.5) {
       _verticalTableController.jumpTo(offset);
     }
@@ -206,12 +416,42 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return s;
   }
 
+  String _tableVisualName([String? physicalName]) {
+    final wanted = (physicalName ?? tableName ?? '').trim().toUpperCase();
+    for (final row in internalTableRows) {
+      final candidate = _clean(row['tabla_destino'])?.toUpperCase() ?? '';
+      if (wanted.isNotEmpty && candidate != wanted) continue;
+      final label = _clean(row['nombre_tabla']) ??
+          _clean(row['nombre']) ??
+          _clean(row['etiqueta']);
+      if (label != null) return label;
+    }
+    return _clean(widget.format['nombre']) ?? 'Registros';
+  }
+
   bool _boolValue(dynamic value) {
     if (value == true) return true;
     if (value == false || value == null) return false;
     final s = value.toString().trim().toUpperCase();
     return s == 'TRUE' || s == '1' || s == 'SI' || s == 'SÍ' || s == 'YES';
   }
+
+  bool get _approvalsEnabled {
+    if (_boolValue(widget.format['approvals_enabled'])) return true;
+    dynamic raw = widget.format['capacidades'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {}
+    }
+    if (raw is Map) {
+      return _boolValue(raw['aprobaciones']) || _boolValue(raw['approvals']);
+    }
+    return false;
+  }
+
+  bool get _canSelectRows =>
+      canDelete || (_approvalsEnabled && (canReview || canApprove));
 
   bool _isDeletedRecord(Map<String, dynamic> row) {
     // Regla de producción para tablas operativas:
@@ -225,12 +465,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // Fallback solo para tablas antiguas o payloads incompletos sin columna eliminado.
     final deletedAt = row['deleted_at']?.toString().trim() ?? '';
     if (deletedAt.isNotEmpty && deletedAt.toUpperCase() != 'NULL') return true;
-    final estadoSync = row['estado_sync']?.toString().trim().toLowerCase() ?? '';
+    final estadoSync =
+        row['estado_sync']?.toString().trim().toLowerCase() ?? '';
     if (estadoSync == 'eliminado' || estadoSync == 'deleted') return true;
     return false;
   }
 
-  List<Map<String, dynamic>> _withoutDeletedRecords(List<Map<String, dynamic>> rows) {
+  List<Map<String, dynamic>> _withoutDeletedRecords(
+      List<Map<String, dynamic>> rows) {
     if (rows.isEmpty) return rows;
     return rows.where((row) => !_isDeletedRecord(row)).toList();
   }
@@ -283,7 +525,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return false;
   }
 
-  Future<Map<String, bool>> _currentUserPermissionsForFormat(String formatId) async {
+  Future<Map<String, bool>> _currentUserPermissionsForFormat(
+      String formatId) async {
     final rows = await local.where(
       'local_permissions',
       'formato = ?',
@@ -294,12 +537,23 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     var insert = false;
     var update = false;
     var delete = false;
+    var review = false;
+    var approve = false;
     for (final row in rows) {
-      export = export || _boolValue(row['can_export']) || row['can_export'] == 1;
-      import = import || _boolValue(row['can_import']) || row['can_import'] == 1;
-      insert = insert || _boolValue(row['can_insert']) || row['can_insert'] == 1;
-      update = update || _boolValue(row['can_update']) || row['can_update'] == 1;
-      delete = delete || _boolValue(row['can_delete']) || row['can_delete'] == 1;
+      export =
+          export || _boolValue(row['can_export']) || row['can_export'] == 1;
+      import =
+          import || _boolValue(row['can_import']) || row['can_import'] == 1;
+      insert =
+          insert || _boolValue(row['can_insert']) || row['can_insert'] == 1;
+      update =
+          update || _boolValue(row['can_update']) || row['can_update'] == 1;
+      delete =
+          delete || _boolValue(row['can_delete']) || row['can_delete'] == 1;
+      review =
+          review || _boolValue(row['can_review']) || row['can_review'] == 1;
+      approve =
+          approve || _boolValue(row['can_approve']) || row['can_approve'] == 1;
     }
     return {
       'export': export,
@@ -307,6 +561,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'insert': insert,
       'update': update,
       'delete': delete,
+      'review': review,
+      'approve': approve,
     };
   }
 
@@ -317,9 +573,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   String _norm(String value) {
     var s = value.trim().toUpperCase();
-    const map = {'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U', 'Ü': 'U', 'Ñ': 'N'};
+    const map = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     map.forEach((k, v) => s = s.replaceAll(k, v));
-    return s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return s
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
   dynamic _value(Map<String, dynamic> row, List<String> candidates) {
@@ -375,7 +642,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (iso != null) return iso;
 
     final datePart = raw.split(RegExp(r'\s+')).first.trim();
-    final sep = datePart.contains('/') ? '/' : (datePart.contains('-') ? '-' : null);
+    final sep =
+        datePart.contains('/') ? '/' : (datePart.contains('-') ? '-' : null);
     if (sep == null) return null;
     final parts = datePart.split(sep).map((e) => int.tryParse(e)).toList();
     if (parts.length != 3 || parts.any((e) => e == null)) return null;
@@ -397,11 +665,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   int _isoWeek(DateTime date) {
     final thursday = date.add(Duration(days: 3 - ((date.weekday + 6) % 7)));
     final firstThursday = DateTime(thursday.year, 1, 4);
-    final week = 1 + ((thursday.difference(firstThursday).inDays + ((firstThursday.weekday + 6) % 7)) ~/ 7);
+    final week = 1 +
+        ((thursday.difference(firstThursday).inDays +
+                ((firstThursday.weekday + 6) % 7)) ~/
+            7);
     return week;
   }
 
-  String _dateKey(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+  String _dateKey(DateTime d) =>
+      '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
   dynamic _decodeJsonLike(dynamic data) {
     if (data == null) return null;
@@ -416,7 +688,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   List<Map<String, dynamic>> _normalizeRows(dynamic data) {
     final decoded = _decodeJsonLike(data);
     if (decoded is List) {
-      return decoded.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+      return decoded
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList();
     }
     return <Map<String, dynamic>>[];
   }
@@ -433,12 +708,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return columns;
   }
 
-  List<String> _normalizeColumns(dynamic data, List<Map<String, dynamic>> rows) {
+  List<String> _normalizeColumns(
+      dynamic data, List<Map<String, dynamic>> rows) {
     final decoded = _decodeJsonLike(data);
     if (decoded is Map) {
       final rawColumns = decoded['columns'];
       if (rawColumns is List) {
-        final columns = rawColumns.map((e) => e.toString()).where((e) => e.trim().isNotEmpty).toList();
+        final columns = rawColumns
+            .map((e) => e.toString())
+            .where((e) => e.trim().isNotEmpty)
+            .toList();
         if (columns.isNotEmpty) return columns;
       }
     }
@@ -450,11 +729,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (decoded is Map) {
       final rows = _withoutDeletedRecords(_normalizeRows(decoded['rows']));
       final columns = _normalizeColumns(decoded, rows);
-      return _DesktopRecordsResult(columns: columns, rows: rows, totalRows: rows.length);
+      return _DesktopRecordsResult(
+          columns: columns, rows: rows, totalRows: rows.length);
     }
     final rows = _normalizeRows(decoded);
     final cleanRows = _withoutDeletedRecords(rows);
-    return _DesktopRecordsResult(columns: _columnsFromRows(cleanRows), rows: cleanRows, totalRows: cleanRows.length);
+    return _DesktopRecordsResult(
+        columns: _columnsFromRows(cleanRows),
+        rows: cleanRows,
+        totalRows: cleanRows.length);
   }
 
   String? _remoteDateColumn() {
@@ -463,7 +746,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final def in fieldDefsById.values) {
       final tipo = def['tipo']?.toString().trim().toLowerCase() ?? '';
       final campo = def['campo']?.toString().trim() ?? '';
-      if (campo.isNotEmpty && (tipo == 'date' || tipo == 'datetime' || tipo == 'timestamp')) return campo;
+      if (campo.isNotEmpty &&
+          (tipo == 'date' || tipo == 'datetime' || tipo == 'timestamp'))
+        return campo;
     }
     return null;
   }
@@ -478,20 +763,27 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final dateColumn = _remoteDateColumn();
     if (dateColumn != null) {
       if (yearFilter != null) {
-        query = query.gte(dateColumn, '$yearFilter-01-01').lte(dateColumn, '$yearFilter-12-31');
+        query = query
+            .gte(dateColumn, '$yearFilter-01-01')
+            .lte(dateColumn, '$yearFilter-12-31');
       }
       if (monthFilter != null) {
         final year = yearFilter ?? DateTime.now().year.toString();
         final month = int.tryParse(monthFilter ?? '');
         if (month != null) {
           final start = DateTime(int.parse(year), month, 1);
-          final end = DateTime(start.year, start.month + 1, 1).subtract(const Duration(days: 1));
-          query = query.gte(dateColumn, _dateKey(start)).lte(dateColumn, _dateKey(end));
+          final end = DateTime(start.year, start.month + 1, 1)
+              .subtract(const Duration(days: 1));
+          query = query
+              .gte(dateColumn, _dateKey(start))
+              .lte(dateColumn, _dateKey(end));
         }
       }
       if (dateFilter != null) query = query.eq(dateColumn, dateFilter);
-      if (startDateFilter != null) query = query.gte(dateColumn, _dateKey(startDateFilter!));
-      if (endDateFilter != null) query = query.lte(dateColumn, _dateKey(endDateFilter!));
+      if (startDateFilter != null)
+        query = query.gte(dateColumn, _dateKey(startDateFilter!));
+      if (endDateFilter != null)
+        query = query.lte(dateColumn, _dateKey(endDateFilter!));
     }
 
     void applyEqualsFromCandidates(List<String> candidates, String? value) {
@@ -506,7 +798,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     applyEqualsFromCandidates(['VARIEDAD', 'VARIEDADES'], varietyFilter);
     applyEqualsFromCandidates(['LOTE', 'LOTES'], loteFilter);
-    applyEqualsFromCandidates(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO'], turnoFilter);
+    applyEqualsFromCandidates(
+        ['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO'], turnoFilter);
 
     for (final entry in _columnFilters.entries) {
       final column = entry.key;
@@ -528,7 +821,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       } else if (mode == 'contains' && _columnType(column) == 'text') {
         query = query.ilike(column, '%${value.replaceAll('%', '\%')}%');
       } else if (mode == 'multiple') {
-        final values = value.split(RegExp(r'[;|,]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
+        final values = value
+            .split(RegExp(r'[;|,]'))
+            .map((e) => e.trim())
+            .where((e) => e.isNotEmpty)
+            .toList();
         if (values.isNotEmpty) query = query.inFilter(column, values);
       } else if (mode == 'between_date') {
         final startDate = _dateFilterValue(start);
@@ -568,7 +865,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (!_isDeletedRecord(decoded)) rows.add(decoded);
       } catch (_) {}
     }
-    return _DesktopRecordsResult(columns: _columnsFromRows(rows), rows: rows, totalRows: rows.length);
+    return _DesktopRecordsResult(
+        columns: _columnsFromRows(rows), rows: rows, totalRows: rows.length);
   }
 
   Future<_DesktopRecordsResult> _fetchLocalMatrixRecordsPaged(
@@ -579,7 +877,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final cleanTable = table.trim();
     final total = await _localMatrixRowCount(cleanTable);
     if (total <= 0) {
-      return const _DesktopRecordsResult(columns: <String>[], rows: <Map<String, dynamic>>[], totalRows: 0);
+      return const _DesktopRecordsResult(
+          columns: <String>[], rows: <Map<String, dynamic>>[], totalRows: 0);
     }
     final database = await local.db;
     final localRows = await database.query(
@@ -598,7 +897,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (!_isDeletedRecord(decoded)) rows.add(decoded);
       } catch (_) {}
     }
-    return _DesktopRecordsResult(columns: _columnsFromRows(rows), rows: rows, totalRows: total);
+    return _DesktopRecordsResult(
+        columns: _columnsFromRows(rows), rows: rows, totalRows: total);
   }
 
   Future<_DesktopRecordsResult> _fetchDirectDesktopRecordsPaged(
@@ -623,13 +923,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     final cleanRows = _withoutDeletedRecords(rows);
-    return _DesktopRecordsResult(columns: _columnsFromRows(cleanRows), rows: cleanRows, totalRows: fetchAll ? cleanRows.length : null);
+    return _DesktopRecordsResult(
+        columns: _columnsFromRows(cleanRows),
+        rows: cleanRows,
+        totalRows: fetchAll ? cleanRows.length : null);
   }
 
-  _DesktopRecordsResult _largestDesktopResult(List<_DesktopRecordsResult> candidates) {
+  _DesktopRecordsResult _largestDesktopResult(
+      List<_DesktopRecordsResult> candidates) {
     final valid = candidates.where((e) => e.rows.isNotEmpty).toList();
     if (valid.isEmpty) {
-      return candidates.isEmpty ? const _DesktopRecordsResult(columns: <String>[], rows: <Map<String, dynamic>>[]) : candidates.first;
+      return candidates.isEmpty
+          ? const _DesktopRecordsResult(
+              columns: <String>[], rows: <Map<String, dynamic>>[])
+          : candidates.first;
     }
     valid.sort((a, b) => b.rows.length.compareTo(a.rows.length));
     return valid.first;
@@ -641,6 +948,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     required int page,
     int pageSize = _pageSize,
     bool fetchAll = false,
+    bool preferRemote = false,
   }) async {
     final cleanTable = table.trim();
     final cleanFormat = formatId.trim();
@@ -681,7 +989,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         candidates.add(await _fetchLocalMatrixRecords(cleanTable));
       } catch (_) {}
       try {
-        candidates.add(await _fetchDirectDesktopRecordsPaged(cleanTable, fetchAll: true));
+        candidates.add(
+            await _fetchDirectDesktopRecordsPaged(cleanTable, fetchAll: true));
       } catch (_) {}
       if (candidates.isNotEmpty) return _largestDesktopResult(candidates);
     }
@@ -691,7 +1000,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // evita el caso observado donde SELECT directo devolvía solo 56/59 filas,
     // mientras la exportación completa sí tenía miles de registros.
     // Si no hay caché local para la tabla, se usa SELECT directo/RPC como respaldo.
-    if (!fetchAll) {
+    if (!fetchAll && !preferRemote) {
       try {
         final localPaged = await _fetchLocalMatrixRecordsPaged(
           cleanTable,
@@ -710,7 +1019,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         );
         // Si SELECT directo devuelve una página sospechosamente pequeña, no cortamos
         // aquí: dejamos que el RPC fallback intente recuperar una página real.
-        if (directResult.rows.length >= pageSize || page > 0) return directResult;
+        if (directResult.rows.length >= pageSize || page > 0)
+          return directResult;
       } catch (_) {
         // Si RLS/policies bloquean SELECT directo, caemos al RPC SECURITY DEFINER.
       }
@@ -754,7 +1064,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           return result;
         }
         final fromIndex = page * pageSize;
-        final pageRows = result.rows.skip(fromIndex).take(pageSize + 1).toList();
+        final pageRows =
+            result.rows.skip(fromIndex).take(pageSize + 1).toList();
         if (pageRows.isNotEmpty) {
           return _DesktopRecordsResult(columns: result.columns, rows: pageRows);
         }
@@ -771,7 +1082,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
     if (fetchAll) {
       final localResult = await _fetchLocalMatrixRecords(cleanTable);
-      if (localResult.rows.length > directResult.rows.length) return localResult;
+      if (localResult.rows.length > directResult.rows.length)
+        return localResult;
     }
     if (directResult.rows.isNotEmpty || !fetchAll) return directResult;
     return _fetchLocalMatrixRecords(cleanTable);
@@ -819,14 +1131,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final text = value.trim();
     if (!text.startsWith('[') || !text.endsWith(']')) return false;
     final content = _unwrapCacheReference(text);
-    return content.contains(',') || content.contains(';') || content.contains('|');
+    return content.contains(',') ||
+        content.contains(';') ||
+        content.contains('|');
   }
 
-  Map<String, dynamic>? _cacheFieldByIdentifier(List<Map<String, dynamic>> fields, String identifier) {
+  Map<String, dynamic>? _cacheFieldByIdentifier(
+      List<Map<String, dynamic>> fields, String identifier) {
     final wanted = _norm(_unwrapCacheReference(identifier));
     if (wanted.isEmpty) return null;
     for (final field in fields) {
-      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']].any((value) => _norm(value?.toString() ?? '') == wanted);
+      final matches = [
+        field['id'],
+        field['campo'],
+        field['etiqueta'],
+        field['nombre_campo']
+      ].any((value) => _norm(value?.toString() ?? '') == wanted);
       if (matches) return field;
     }
     return null;
@@ -844,24 +1164,43 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final fieldTable = field['tabla_destino']?.toString().trim() ?? '';
       if (activeNorm.isNotEmpty && _norm(fieldTable) != activeNorm) continue;
 
-      final dropdownRaw = _value(field, ['id_campo_dropdown', 'id campo dropdown', 'id_dropdown', 'campo_dropdown', 'dropdown'])?.toString().trim() ?? '';
-      if (dropdownRaw.isNotEmpty && dropdownRaw.toUpperCase() != 'NULL' && !_isManualCacheDropdownLiteral(dropdownRaw)) {
+      final dropdownRaw = _value(field, [
+            'id_campo_dropdown',
+            'id campo dropdown',
+            'id_dropdown',
+            'campo_dropdown',
+            'dropdown'
+          ])?.toString().trim() ??
+          '';
+      if (dropdownRaw.isNotEmpty &&
+          dropdownRaw.toUpperCase() != 'NULL' &&
+          !_isManualCacheDropdownLiteral(dropdownRaw)) {
         final cleanDropdown = _unwrapCacheReference(dropdownRaw);
         if (cleanDropdown.contains('.')) {
           final table = cleanDropdown.split('.').first.trim();
           if (table.isNotEmpty) needed.add(table);
         } else {
           final sourceField = _cacheFieldByIdentifier(allFields, cleanDropdown);
-          final sourceTable = sourceField?['tabla_destino']?.toString().trim() ?? '';
+          final sourceTable =
+              sourceField?['tabla_destino']?.toString().trim() ?? '';
           if (sourceTable.isNotEmpty) needed.add(sourceTable);
         }
       }
 
-      final formula = _value(field, ['formula_funcion', 'formula funcion', 'formula', 'funcion_formula'])?.toString().trim() ?? '';
+      final formula = _value(field, [
+            'formula_funcion',
+            'formula funcion',
+            'formula',
+            'funcion_formula'
+          ])?.toString().trim() ??
+          '';
       if (formula.isNotEmpty && formula.toUpperCase() != 'NULL') {
-        final lookup = RegExp(r'(?:LOOKU[PR]|LOOKUP|BUSCAR)\s*\(\s*([^,;\)]+)', caseSensitive: false).firstMatch(formula);
+        final lookup = RegExp(r'(?:LOOKU[PR]|LOOKUP|BUSCAR)\s*\(\s*([^,;\)]+)',
+                caseSensitive: false)
+            .firstMatch(formula);
         final lookupTable = lookup?.group(1)?.trim() ?? '';
-        if (lookupTable.isNotEmpty && !lookupTable.startsWith('[')) needed.add(lookupTable);
+        if (lookupTable.isNotEmpty && !lookupTable.startsWith('['))
+          needed.add(lookupTable);
       }
     }
     return needed;
@@ -882,7 +1221,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _sharedCacheLoader = null;
 
     await Future<void>.delayed(Duration.zero);
-    final catalogRows = await local.getAll('local_catalog_values', orderBy: 'catalog_key, value');
+    final catalogRows = await local.getAll('local_catalog_values',
+        orderBy: 'catalog_key, value');
     final groupedCatalog = <String, List<String>>{};
     for (final row in catalogRows) {
       final key = row['catalog_key']?.toString() ?? '';
@@ -908,21 +1248,26 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     await Future<void>.delayed(Duration.zero);
-    final neededTables = _neededMatrixTablesForActiveTable(activeTable: activeTable, allFields: allFields);
+    final neededTables = _neededMatrixTablesForActiveTable(
+        activeTable: activeTable, allFields: allFields);
     final groupedMatrix = <String, List<Map<String, dynamic>>>{};
     var decodedMatrixCount = 0;
     for (final table in neededTables) {
-      final localRows = await local.where('local_matrix_rows', 'source_table = ?', [table]);
+      final localRows =
+          await local.where('local_matrix_rows', 'source_table = ?', [table]);
       for (final row in localRows) {
         final raw = row['payload_json']?.toString() ?? '{}';
         try {
           final decoded = jsonDecode(raw) as Map<String, dynamic>;
           if (!_isDeletedRecord(decoded)) {
-            groupedMatrix.putIfAbsent(table, () => <Map<String, dynamic>>[]).add(decoded);
+            groupedMatrix
+                .putIfAbsent(table, () => <Map<String, dynamic>>[])
+                .add(decoded);
           }
         } catch (_) {}
         decodedMatrixCount++;
-        if (decodedMatrixCount % 200 == 0) await Future<void>.delayed(Duration.zero);
+        if (decodedMatrixCount % 200 == 0)
+          await Future<void>.delayed(Duration.zero);
       }
     }
 
@@ -932,29 +1277,32 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     matrixRowsByTable = groupedMatrix;
   }
 
-  Future<void> _refreshTableSilentlyAfterLoad(String table, String formatId, int sourceSerial) async {
+  Future<void> _refreshTableSilentlyAfterLoad(
+      String table, String formatId, int sourceSerial) async {
     if (_silentTableRefreshRunning) return;
     _silentTableRefreshRunning = true;
     try {
       final connectivity = await Connectivity().checkConnectivity();
       if (connectivity.contains(ConnectivityResult.none)) return;
 
-      final changed = await SyncService().refreshFormatTableSilently(table);
-      if (!changed || !mounted || sourceSerial != _loadSerial || tableName != table) return;
+      if (!mounted || sourceSerial != _loadSerial || tableName != table) return;
 
-      final needsFullDatasetForView = _hasAnyActiveFilters || _sortColumn != null;
+      final needsFullDatasetForView =
+          _hasAnyActiveFilters || _sortColumn != null;
       final data = needsFullDatasetForView
           ? await _fetchDesktopRecords(
               table: table,
               formatId: formatId,
               page: 0,
               fetchAll: true,
+              preferRemote: true,
             )
           : await _fetchDesktopRecords(
               table: table,
               formatId: formatId,
               page: _currentPage,
               fetchAll: false,
+              preferRemote: true,
             );
       if (!mounted || sourceSerial != _loadSerial || tableName != table) return;
 
@@ -966,13 +1314,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final filteredAll = _filterAndSortRows(data.rows);
         totalRowsForView = filteredAll.length;
         final startIndex = _currentPage * _pageSize;
-        final pageRows = startIndex >= filteredAll.length ? <Map<String, dynamic>>[] : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
+        final pageRows = startIndex >= filteredAll.length
+            ? <Map<String, dynamic>>[]
+            : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
         hasNextPageForView = pageRows.length > _pageSize;
         loadedRows = pageRows.take(_pageSize).toList();
       } else {
         loadedRows = data.rows.take(_pageSize).toList();
         totalRowsForView = data.totalRows;
-        hasNextPageForView = data.rows.length > _pageSize || (data.totalRows != null && ((_currentPage + 1) * _pageSize) < data.totalRows!);
+        hasNextPageForView = data.rows.length > _pageSize ||
+            (data.totalRows != null &&
+                ((_currentPage + 1) * _pageSize) < data.totalRows!);
       }
 
       setState(() {
@@ -993,6 +1345,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         lastSortColumn: _sortColumn,
         lastSortAscending: _sortAscending,
       ));
+      unawaited(SyncService().refreshFormatTableSilently(table));
     } catch (_) {
       // Refresco silencioso: nunca debe interrumpir la operación normal de la tabla.
     } finally {
@@ -1027,6 +1380,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final insertAllowed = permissions['insert'] ?? false;
       final updateAllowed = permissions['update'] ?? false;
       final deleteAllowed = permissions['delete'] ?? false;
+      final reviewAllowed = permissions['review'] ?? false;
+      final approveAllowed = permissions['approve'] ?? false;
       _setLoadingMessage('Leyendo configuración del formato...');
       await Future<void>.delayed(Duration.zero);
       final internalTables = await local.where(
@@ -1040,15 +1395,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         'formato_id = ? and activo = 1',
         [formatId],
       );
-      if (special.isEmpty && (widget.format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
+      if (special.isEmpty &&
+          (widget.format['tabla_destino']?.toString() ?? '') ==
+              'GT-TAREO_PERSONAL') {
         special = [
           <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}
         ];
       }
 
-      final validInternalTables = internalTables.where((e) => _clean(e['tabla_destino']) != null).toList();
-      final selectedStillExists = selectedTableName != null && validInternalTables.any((e) => _clean(e['tabla_destino']) == selectedTableName);
-      final resolvedTable = selectedStillExists ? selectedTableName : (validInternalTables.isNotEmpty ? _clean(validInternalTables.first['tabla_destino']) : _clean(widget.format['tabla_destino']));
+      final validInternalTables = internalTables
+          .where((e) => _clean(e['tabla_destino']) != null)
+          .toList();
+      final selectedStillExists = selectedTableName != null &&
+          validInternalTables
+              .any((e) => _clean(e['tabla_destino']) == selectedTableName);
+      final resolvedTable = selectedStillExists
+          ? selectedTableName
+          : (validInternalTables.isNotEmpty
+              ? _clean(validInternalTables.first['tabla_destino'])
+              : _clean(widget.format['tabla_destino']));
       internalTableRows = validInternalTables;
       selectedTableName = resolvedTable;
 
@@ -1064,6 +1429,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           canInsert = insertAllowed;
           canUpdate = updateAllowed;
           canDelete = deleteAllowed;
+          canReview = reviewAllowed;
+          canApprove = approveAllowed;
           error = 'Este formato no tiene tabla destino configurada.';
         });
         return;
@@ -1075,12 +1442,37 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
       final connectivity = await Connectivity().checkConnectivity();
       if (connectivity.contains(ConnectivityResult.none)) {
+        final needsFullLocalDataset =
+            _hasAnyActiveFilters || _sortColumn != null;
+        final cachedData = needsFullLocalDataset
+            ? await _fetchLocalMatrixRecords(resolvedTable)
+            : await _fetchLocalMatrixRecordsPaged(
+                resolvedTable,
+                page: _currentPage,
+                pageSize: _pageSize,
+              );
+        final filteredCachedRows = needsFullLocalDataset
+            ? _filterAndSortRows(cachedData.rows)
+            : cachedData.rows;
+        final cachedRows = needsFullLocalDataset
+            ? filteredCachedRows
+                .skip(_currentPage * _pageSize)
+                .take(_pageSize)
+                .toList()
+            : filteredCachedRows.take(_pageSize).toList();
         if (!mounted) return;
         setState(() {
           tableName = resolvedTable;
-          records = [];
-          displayColumns = [];
-          _knownTotalRows = null;
+          records = cachedRows;
+          displayColumns =
+              _matrixColumnsForTable(resolvedTable, cachedData.columns);
+          _knownTotalRows = needsFullLocalDataset
+              ? filteredCachedRows.length
+              : cachedData.totalRows;
+          _hasNextPage = _knownTotalRows != null &&
+              ((_currentPage + 1) * _pageSize) < _knownTotalRows!;
+          _renderRowLimit = cachedRows.length;
+          _invalidateFilteredCache();
           loading = false;
           offline = true;
           canExport = exportAllowed;
@@ -1088,6 +1480,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           canInsert = insertAllowed;
           canUpdate = updateAllowed;
           canDelete = deleteAllowed;
+          canReview = reviewAllowed;
+          canApprove = approveAllowed;
         });
         return;
       }
@@ -1100,7 +1494,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       // 2) Con filtros/orden: filtrar/ordenar sobre el dataset completo y recién luego paginar.
       //    Antes se paginaba primero y se filtraba después; por eso un rango con 142 filas
       //    aparecía repartido en decenas de páginas con 3-5 filas por página.
-      final needsFullDatasetForView = _hasAnyActiveFilters || _sortColumn != null;
+      final needsFullDatasetForView =
+          _hasAnyActiveFilters || _sortColumn != null;
       final data = needsFullDatasetForView
           ? await _fetchDesktopRecords(
               table: resolvedTable,
@@ -1125,7 +1520,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final filteredAll = _filterAndSortRows(data.rows);
         totalRowsForView = filteredAll.length;
         final startIndex = _currentPage * _pageSize;
-        final pageRows = startIndex >= filteredAll.length ? <Map<String, dynamic>>[] : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
+        final pageRows = startIndex >= filteredAll.length
+            ? <Map<String, dynamic>>[]
+            : filteredAll.skip(startIndex).take(_pageSize + 1).toList();
         hasNextPageForView = pageRows.length > _pageSize;
         loadedRows = pageRows.take(_pageSize).toList();
         initialRows = loadedRows.length;
@@ -1133,7 +1530,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         loadedRows = data.rows.take(_pageSize).toList();
         initialRows = loadedRows.length;
         totalRowsForView = data.totalRows;
-        hasNextPageForView = data.rows.length > _pageSize || (data.totalRows != null && ((_currentPage + 1) * _pageSize) < data.totalRows!);
+        hasNextPageForView = data.rows.length > _pageSize ||
+            (data.totalRows != null &&
+                ((_currentPage + 1) * _pageSize) < data.totalRows!);
       }
 
       setState(() {
@@ -1152,6 +1551,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         canInsert = insertAllowed;
         canUpdate = updateAllowed;
         canDelete = deleteAllowed;
+        canReview = reviewAllowed;
+        canApprove = approveAllowed;
         _selectedDeleteRowKeys.clear();
         _selectedDeleteRows.clear();
       });
@@ -1172,14 +1573,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       // Fase 3A: después de mostrar la tabla local/paginada, revisar cambios
       // de esa tabla en segundo plano. No bloquea la apertura ni reemplaza
       // el botón Actualizar datos.
-      unawaited(_refreshTableSilentlyAfterLoad(resolvedTable, formatId, serial));
+      unawaited(
+          _refreshTableSilentlyAfterLoad(resolvedTable, formatId, serial));
       // No render progresivo: evita reconstrucciones repetidas al abrir/cambiar tablas.
     } catch (e) {
       if (!mounted) return;
       final msg = e.toString().toLowerCase();
       setState(() {
         loading = false;
-        if (msg.contains('socket') || msg.contains('network') || msg.contains('failed host') || msg.contains('connection')) {
+        if (msg.contains('socket') ||
+            msg.contains('network') ||
+            msg.contains('failed host') ||
+            msg.contains('connection')) {
           offline = true;
         } else {
           error = e.toString();
@@ -1238,27 +1643,41 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return out;
   }
 
-  List<Map<String, dynamic>> _filterAndSortRows(List<Map<String, dynamic>> sourceRows) {
+  List<Map<String, dynamic>> _filterAndSortRows(
+      List<Map<String, dynamic>> sourceRows) {
     final filtered = sourceRows.where((row) {
       if (_isDeletedRecord(row)) return false;
       final fecha = _dateValue(row);
-      final variedad = _value(row, ['VARIEDAD', 'VARIEDADES'])?.toString().trim() ?? '';
+      final variedad =
+          _value(row, ['VARIEDAD', 'VARIEDADES'])?.toString().trim() ?? '';
       final lote = _value(row, ['LOTE', 'LOTES'])?.toString().trim() ?? '';
-      final turno = _value(row, ['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO'])?.toString().trim() ?? '';
+      final turno =
+          _value(row, ['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO'])
+                  ?.toString()
+                  .trim() ??
+              '';
 
-      if (yearFilter != null && fecha?.year.toString() != yearFilter) return false;
-      if (weekFilter != null && fecha != null && _isoWeek(fecha).toString().padLeft(2, '0') != weekFilter) return false;
-      if (monthFilter != null && fecha?.month.toString().padLeft(2, '0') != monthFilter) return false;
-      if (dateFilter != null && (fecha == null || _dateKey(fecha) != dateFilter)) return false;
+      if (yearFilter != null && fecha?.year.toString() != yearFilter)
+        return false;
+      if (weekFilter != null &&
+          fecha != null &&
+          _isoWeek(fecha).toString().padLeft(2, '0') != weekFilter)
+        return false;
+      if (monthFilter != null &&
+          fecha?.month.toString().padLeft(2, '0') != monthFilter) return false;
+      if (dateFilter != null &&
+          (fecha == null || _dateKey(fecha) != dateFilter)) return false;
       if (startDateFilter != null) {
         if (fecha == null) return false;
-        final start = DateTime(startDateFilter!.year, startDateFilter!.month, startDateFilter!.day);
+        final start = DateTime(startDateFilter!.year, startDateFilter!.month,
+            startDateFilter!.day);
         final current = DateTime(fecha.year, fecha.month, fecha.day);
         if (current.isBefore(start)) return false;
       }
       if (endDateFilter != null) {
         if (fecha == null) return false;
-        final end = DateTime(endDateFilter!.year, endDateFilter!.month, endDateFilter!.day);
+        final end = DateTime(
+            endDateFilter!.year, endDateFilter!.month, endDateFilter!.day);
         final current = DateTime(fecha.year, fecha.month, fecha.day);
         if (current.isAfter(end)) return false;
       }
@@ -1286,7 +1705,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           if (ad != null && bd != null) {
             result = ad.compareTo(bd);
           } else {
-            result = (av?.toString() ?? '').toLowerCase().compareTo((bv?.toString() ?? '').toLowerCase());
+            result = (av?.toString() ?? '')
+                .toLowerCase()
+                .compareTo((bv?.toString() ?? '').toLowerCase());
           }
         }
         return _sortAscending ? result : -result;
@@ -1297,7 +1718,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   List<Map<String, dynamic>> get filteredRecords {
     final cacheKey = _currentFilterCacheKey();
-    if (_filteredCacheKey == cacheKey && _filteredCache != null) return _filteredCache!;
+    if (_filteredCacheKey == cacheKey && _filteredCache != null)
+      return _filteredCache!;
     final filtered = _filterAndSortRows(records);
     _filteredCacheKey = cacheKey;
     _filteredCache = filtered;
@@ -1352,12 +1774,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final tipo = def?['tipo']?.toString().trim().toLowerCase() ?? '';
     final tipoUi = def?['tipo_ui']?.toString().trim().toLowerCase() ?? '';
     if (_isNumericImportType(tipo)) return 'numeric';
-    if (tipo == 'date' || tipo == 'datetime' || tipo == 'timestamp') return 'date';
+    if (tipo == 'date' || tipo == 'datetime' || tipo == 'timestamp')
+      return 'date';
     if (tipo == 'time') return 'time';
 
     // Respaldo defensivo: si tipo vino vacío/incorrecto pero tipo_ui indica número
     // o fórmula numérica, mantener filtros numéricos.
-    if (tipoUi == 'number' || tipoUi == 'numeric' || tipoUi == 'decimal' || tipoUi == 'integer') return 'numeric';
+    if (tipoUi == 'number' ||
+        tipoUi == 'numeric' ||
+        tipoUi == 'decimal' ||
+        tipoUi == 'integer') return 'numeric';
     if (tipoUi == 'date') return 'date';
     return 'text';
   }
@@ -1366,24 +1792,34 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is Map) {
-        return decoded.map((key, value) => MapEntry(key.toString(), value?.toString() ?? ''));
+        return decoded.map(
+            (key, value) => MapEntry(key.toString(), value?.toString() ?? ''));
       }
     } catch (_) {}
     return {'mode': 'contains', 'value': raw};
   }
 
-  bool _matchesColumnFilter(Map<String, dynamic> row, String column, String rawFilter) {
+  bool _matchesColumnFilter(
+      Map<String, dynamic> row, String column, String rawFilter) {
     final filter = _decodeColumnFilter(rawFilter);
     final mode = filter['mode'] ?? 'contains';
     final value = filter['value'] ?? '';
     final cell = _valueByColumn(row, column);
     final text = cell?.toString().trim() ?? '';
-    if (value.trim().isEmpty && (filter['start'] ?? '').isEmpty && (filter['end'] ?? '').isEmpty) return true;
+    if (value.trim().isEmpty &&
+        (filter['start'] ?? '').isEmpty &&
+        (filter['end'] ?? '').isEmpty) return true;
 
-    if (mode == 'equals') return text.toLowerCase() == value.toLowerCase().trim();
-    if (mode == 'contains') return text.toLowerCase().contains(value.toLowerCase().trim());
+    if (mode == 'equals')
+      return text.toLowerCase() == value.toLowerCase().trim();
+    if (mode == 'contains')
+      return text.toLowerCase().contains(value.toLowerCase().trim());
     if (mode == 'multiple') {
-      final options = value.split(RegExp(r'[;|,]')).map((e) => e.trim().toLowerCase()).where((e) => e.isNotEmpty).toSet();
+      final options = value
+          .split(RegExp(r'[;|,]'))
+          .map((e) => e.trim().toLowerCase())
+          .where((e) => e.isNotEmpty)
+          .toSet();
       return options.contains(text.toLowerCase());
     }
     if (mode == 'between_date') {
@@ -1392,8 +1828,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final start = _parseDate(filter['start']);
       final end = _parseDate(filter['end']);
       final current = DateTime(d.year, d.month, d.day);
-      if (start != null && current.isBefore(DateTime(start.year, start.month, start.day))) return false;
-      if (end != null && current.isAfter(DateTime(end.year, end.month, end.day))) return false;
+      if (start != null &&
+          current.isBefore(DateTime(start.year, start.month, start.day)))
+        return false;
+      if (end != null &&
+          current.isAfter(DateTime(end.year, end.month, end.day))) return false;
       return true;
     }
     if (mode == 'between_numeric') {
@@ -1411,8 +1850,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<void> _showColumnFilterDialog(String column) async {
     final columnType = _columnType(column);
     final storedFilter = _columnFilters[column];
-    final current = storedFilter == null ? <String, String>{} : _decodeColumnFilter(storedFilter);
-    var mode = current['mode'] ?? (columnType == 'date' || columnType == 'numeric' ? 'between_${columnType == 'date' ? 'date' : 'numeric'}' : 'contains');
+    final current = storedFilter == null
+        ? <String, String>{}
+        : _decodeColumnFilter(storedFilter);
+    var mode = current['mode'] ??
+        (columnType == 'date' || columnType == 'numeric'
+            ? 'between_${columnType == 'date' ? 'date' : 'numeric'}'
+            : 'contains');
     final valueController = TextEditingController(text: current['value'] ?? '');
     final startController = TextEditingController(text: current['start'] ?? '');
     final endController = TextEditingController(text: current['end'] ?? '');
@@ -1446,7 +1890,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           final hint = mode == 'multiple'
               ? 'Ejemplo: T1;T2;T3'
               : mode == 'equals'
-                  ? (columnType == 'date' ? 'Ejemplo: 08/06/2026' : 'Ejemplo: valor exacto')
+                  ? (columnType == 'date'
+                      ? 'Ejemplo: 08/06/2026'
+                      : 'Ejemplo: valor exacto')
                   : columnType == 'numeric'
                       ? 'Ejemplo: 12.5'
                       : 'Ejemplo: sanidad';
@@ -1459,7 +1905,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 children: [
                   DropdownButtonFormField<String>(
                     value: mode,
-                    decoration: const InputDecoration(labelText: 'Modo de filtro', border: OutlineInputBorder()),
+                    decoration: const InputDecoration(
+                        labelText: 'Modo de filtro',
+                        border: OutlineInputBorder()),
                     items: modes(),
                     onChanged: (v) => setLocalState(() => mode = v ?? mode),
                   ),
@@ -1469,7 +1917,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       controller: startController,
                       decoration: InputDecoration(
                         labelText: 'Inicio',
-                        hintText: columnType == 'date' ? 'dd/mm/yyyy' : 'Ejemplo: 10',
+                        hintText:
+                            columnType == 'date' ? 'dd/mm/yyyy' : 'Ejemplo: 10',
                         border: const OutlineInputBorder(),
                       ),
                     ),
@@ -1478,7 +1927,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       controller: endController,
                       decoration: InputDecoration(
                         labelText: 'Fin',
-                        hintText: columnType == 'date' ? 'dd/mm/yyyy' : 'Ejemplo: 20',
+                        hintText:
+                            columnType == 'date' ? 'dd/mm/yyyy' : 'Ejemplo: 20',
                         border: const OutlineInputBorder(),
                       ),
                     ),
@@ -1495,7 +1945,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, ''), child: const Text('Limpiar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, ''),
+                  child: const Text('Limpiar')),
               FilledButton(
                 onPressed: () {
                   final payload = jsonEncode({
@@ -1534,7 +1986,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     await _load();
   }
 
-  double _autoWidthForColumn(String column, List<Map<String, dynamic>> sourceRows) {
+  double _autoWidthForColumn(
+      String column, List<Map<String, dynamic>> sourceRows) {
     var maxLen = column.length;
     for (final row in sourceRows.take(80)) {
       final len = _displayCellValue(_valueByColumn(row, column)).length;
@@ -1544,13 +1997,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _safeFileName(String value) {
-    final clean = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9_\-]+'), '_').replaceAll(RegExp(r'_+'), '_');
+    final clean = value
+        .trim()
+        .replaceAll(RegExp(r'[^A-Za-z0-9_\-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
     return clean.isEmpty ? 'exportacion' : clean;
   }
 
   Directory _downloadsDirectory() {
     final userProfile = Platform.environment['USERPROFILE'];
-    if (Platform.isWindows && userProfile != null && userProfile.trim().isNotEmpty) {
+    if (Platform.isWindows &&
+        userProfile != null &&
+        userProfile.trim().isNotEmpty) {
       final dir = Directory('$userProfile\\Downloads');
       if (dir.existsSync()) return dir;
     }
@@ -1582,7 +2040,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return text;
   }
 
-  Future<String> _exportHtmlCell(String column, Map<String, dynamic> row) async {
+  Future<String> _exportHtmlCell(
+      String column, Map<String, dynamic> row) async {
     String htmlEscape(String value) => const HtmlEscape().convert(value);
     final value = _valueByColumn(row, column);
     final text = _exportText(value);
@@ -1597,35 +2056,60 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _csvEscape(String value) {
-    final needsQuotes = value.contains(',') || value.contains('"') || value.contains('\n') || value.contains('\r') || value.contains(';');
+    final needsQuotes = value.contains(',') ||
+        value.contains('"') ||
+        value.contains('\n') ||
+        value.contains('\r') ||
+        value.contains(';');
     final escaped = value.replaceAll('"', '""');
     return needsQuotes ? '"$escaped"' : escaped;
   }
 
-  Future<File> _writeExportFile(String extension, Uint8List bytes) async {
-    final table = tableName ?? widget.format['tabla_destino']?.toString() ?? widget.format['id']?.toString() ?? 'tabla';
-    final stamp = DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\.]'), '-');
-    final file = File('${_downloadsDirectory().path}\\${_safeFileName(table)}_$stamp.$extension');
-    await file.writeAsBytes(bytes, flush: true);
-    return file;
+  String _exportFileName(String extension) {
+    final table = tableName ??
+        widget.format['tabla_destino']?.toString() ??
+        widget.format['id']?.toString() ??
+        'tabla';
+    final stamp =
+        DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\.]'), '-');
+    return '${_safeFileName(table)}_$stamp.$extension';
   }
 
-  Future<void> _exportCsv(List<String> columns, List<Map<String, dynamic>> rows) async {
+  Future<String> _writeExportFile(String extension, Uint8List bytes) async {
+    final fileName = _exportFileName(extension);
+    if (kIsWeb) {
+      await downloadFileBytes(
+        fileName: fileName,
+        bytes: bytes,
+      );
+      return fileName;
+    }
+    final file = File('${_downloadsDirectory().path}\\$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    return file.path;
+  }
+
+  Future<void> _exportCsv(
+      List<String> columns, List<Map<String, dynamic>> rows) async {
     final buffer = StringBuffer();
     buffer.writeln(_exportHeadersForColumns(columns).map(_csvEscape).join(','));
     for (final row in rows) {
-      buffer.writeln(columns.map((c) => _csvEscape(_exportCellText(c, row))).join(','));
+      buffer.writeln(
+          columns.map((c) => _csvEscape(_exportCellText(c, row))).join(','));
     }
     final bytes = Uint8List.fromList(utf8.encode('\uFEFF${buffer.toString()}'));
     final file = await _writeExportFile('csv', bytes);
     _showExportDone(file);
   }
 
-  Future<void> _exportExcel(List<String> columns, List<Map<String, dynamic>> rows) async {
+  Future<void> _exportExcel(
+      List<String> columns, List<Map<String, dynamic>> rows) async {
     String htmlEscape(String value) => const HtmlEscape().convert(value);
     final buffer = StringBuffer();
-    buffer.writeln('<html><head><meta charset="utf-8"></head><body><table border="1">');
-    buffer.writeln('<tr>${_exportHeadersForColumns(columns).map((c) => '<th>${htmlEscape(c)}</th>').join()}</tr>');
+    buffer.writeln(
+        '<html><head><meta charset="utf-8"></head><body><table border="1">');
+    buffer.writeln(
+        '<tr>${_exportHeadersForColumns(columns).map((c) => '<th>${htmlEscape(c)}</th>').join()}</tr>');
     for (final row in rows) {
       final cells = <String>[];
       for (final c in columns) {
@@ -1639,7 +2123,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _showExportDone(file);
   }
 
-  Future<void> _exportPdf(List<String> columns, List<Map<String, dynamic>> rows) async {
+  Future<void> _exportPdf(
+      List<String> columns, List<Map<String, dynamic>> rows) async {
     final pdf = pw.Document();
     final title = '${widget.format['nombre'] ?? widget.format['id']}';
     pdf.addPage(
@@ -1647,14 +2132,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         pageFormat: PdfPageFormat.a4.landscape,
         margin: const pw.EdgeInsets.all(18),
         build: (_) => [
-          pw.Text(title, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+          pw.Text(title,
+              style:
+                  pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
           pw.SizedBox(height: 10),
-          pw.Text('Tabla: ${tableName ?? ''} · Registros: ${rows.length}', style: const pw.TextStyle(fontSize: 8)),
+          pw.Text('${_tableVisualName()} · Registros: ${rows.length}',
+              style: const pw.TextStyle(fontSize: 8)),
           pw.SizedBox(height: 10),
           pw.Table.fromTextArray(
             headers: _exportHeadersForColumns(columns),
-            data: rows.map((row) => columns.map((c) => _exportCellText(c, row)).toList()).toList(),
-            headerStyle: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
+            data: rows
+                .map((row) =>
+                    columns.map((c) => _exportCellText(c, row)).toList())
+                .toList(),
+            headerStyle:
+                pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
             cellStyle: const pw.TextStyle(fontSize: 5),
             cellAlignment: pw.Alignment.centerLeft,
             headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
@@ -1667,10 +2159,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _showExportDone(file);
   }
 
-  void _showExportDone(File file) {
+  void _showExportDone(String path) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Archivo exportado: ${file.path}')),
+      SnackBar(
+        content: Text(
+          kIsWeb ? 'Descarga preparada: $path' : 'Archivo exportado: $path',
+        ),
+      ),
     );
   }
 
@@ -1692,7 +2188,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       _invalidateFilteredCache();
       exportColumns = _matrixColumnsForTable(tableName!, allData.columns);
     }
-    final columns = _matrixColumnsForTable(tableName ?? widget.format['tabla_destino']?.toString() ?? '', exportColumns.isNotEmpty ? exportColumns : _columnsFromRows(rows));
+    final columns = _matrixColumnsForTable(
+        tableName ?? widget.format['tabla_destino']?.toString() ?? '',
+        exportColumns.isNotEmpty ? exportColumns : _columnsFromRows(rows));
     if (rows.isEmpty || columns.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No hay registros para exportar.')),
@@ -1729,7 +2227,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       _invalidateFilteredCache();
       printColumns = _matrixColumnsForTable(tableName!, allData.columns);
     }
-    final columns = _matrixColumnsForTable(tableName ?? widget.format['tabla_destino']?.toString() ?? '', printColumns.isNotEmpty ? printColumns : _columnsFromRows(rows));
+    final columns = _matrixColumnsForTable(
+        tableName ?? widget.format['tabla_destino']?.toString() ?? '',
+        printColumns.isNotEmpty ? printColumns : _columnsFromRows(rows));
     if (rows.isEmpty || columns.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No hay registros para imprimir.')),
@@ -1744,27 +2244,35 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           pageFormat: PdfPageFormat.a4.landscape,
           margin: const pw.EdgeInsets.all(18),
           build: (_) => [
-            pw.Text(title, style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
+            pw.Text(title,
+                style:
+                    pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold)),
             pw.SizedBox(height: 10),
-            pw.Text('Tabla: ${tableName ?? ''} · Registros: ${rows.length}', style: const pw.TextStyle(fontSize: 8)),
+            pw.Text('${_tableVisualName()} · Registros: ${rows.length}',
+                style: const pw.TextStyle(fontSize: 8)),
             pw.SizedBox(height: 10),
             pw.Table.fromTextArray(
               headers: _exportHeadersForColumns(columns),
-              data: rows.map((row) => columns.map((c) => _exportCellText(c, row)).toList()).toList(),
-              headerStyle: pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
+              data: rows
+                  .map((row) =>
+                      columns.map((c) => _exportCellText(c, row)).toList())
+                  .toList(),
+              headerStyle:
+                  pw.TextStyle(fontSize: 6, fontWeight: pw.FontWeight.bold),
               cellStyle: const pw.TextStyle(fontSize: 5),
               cellAlignment: pw.Alignment.centerLeft,
-              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+              headerDecoration:
+                  const pw.BoxDecoration(color: PdfColors.grey300),
               border: pw.TableBorder.all(width: 0.25, color: PdfColors.grey600),
             ),
           ],
         ),
       );
-      final file = await _writeExportFile('pdf', await pdf.save());
-      await OpenFilex.open(file.path);
+      final filePath = await _writeExportFile('pdf', await pdf.save());
+      if (!kIsWeb) await OpenFilex.open(filePath);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('PDF listo para imprimir: ${file.path}')),
+        SnackBar(content: Text('PDF listo para imprimir: $filePath')),
       );
     } catch (e) {
       if (!mounted) return;
@@ -1779,7 +2287,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       height: 44,
       width: 48,
       child: OutlinedButton(
-        onPressed: (!loading && !offline && error == null && records.isNotEmpty) ? _printRecords : null,
+        onPressed: (!loading && !offline && error == null && records.isNotEmpty)
+            ? _printRecords
+            : null,
         style: OutlinedButton.styleFrom(
           foregroundColor: const Color(0xFF147A6E),
           side: const BorderSide(color: Color(0xFF147A6E)),
@@ -1795,7 +2305,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final campo = field['campo']?.toString().trim() ?? '';
     final tipoUi = field['tipo_ui']?.toString().trim().toLowerCase() ?? '';
     if (campo.isEmpty) return false;
-    final visibleTabla = _editBool(field['visible_tabla'] ?? field['visible'], defaultValue: true);
+    final visibleTabla = _editBool(field['visible_tabla'] ?? field['visible'],
+        defaultValue: true);
     if (!visibleTabla) return false;
     if (tipoUi == 'hidden' || tipoUi == 'hidden_id') return false;
     if (_isHiddenWindowsColumn(campo)) return false;
@@ -1827,10 +2338,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<List<String>> _templateColumns() async {
     final fields = await _templateFieldRows();
     if (fields.isNotEmpty) {
-      return fields.map((f) => f['campo']?.toString().trim() ?? '').where((campo) => campo.isNotEmpty && campo.toUpperCase() != 'NULL').toList();
+      return fields
+          .map((f) => f['campo']?.toString().trim() ?? '')
+          .where((campo) => campo.isNotEmpty && campo.toUpperCase() != 'NULL')
+          .toList();
     }
-    final fallbackColumns = displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
-    return _visibleWindowsColumns(fallbackColumns).map(_tableHeaderLabel).toList();
+    final fallbackColumns =
+        displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
+    return _visibleWindowsColumns(fallbackColumns)
+        .map(_tableHeaderLabel)
+        .toList();
   }
 
   Future<void> _downloadImportTemplate() async {
@@ -1838,7 +2355,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final columns = await _templateColumns();
       if (columns.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se encontraron columnas para generar plantilla.')),
+          const SnackBar(
+              content:
+                  Text('No se encontraron columnas para generar plantilla.')),
         );
         return;
       }
@@ -1853,7 +2372,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
 
       for (var i = 0; i < columns.length; i++) {
-        final cell = sheet.cell(xlsx.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
+        final cell = sheet
+            .cell(xlsx.CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0));
         cell.value = xlsx.TextCellValue(columns[i]);
       }
 
@@ -1877,7 +2397,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final numeric = RegExp(r'&#(x?[0-9A-Fa-f]+);');
     value = value.replaceAllMapped(numeric, (m) {
       final raw = m.group(1) ?? '';
-      final code = raw.toLowerCase().startsWith('x') ? int.tryParse(raw.substring(1), radix: 16) : int.tryParse(raw);
+      final code = raw.toLowerCase().startsWith('x')
+          ? int.tryParse(raw.substring(1), radix: 16)
+          : int.tryParse(raw);
       if (code == null) return m.group(0) ?? '';
       try {
         return String.fromCharCode(code);
@@ -1885,7 +2407,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         return '';
       }
     });
-    return value.replaceAll('&nbsp;', ' ').replaceAll('&amp;', '&').replaceAll('&lt;', '<').replaceAll('&gt;', '>').replaceAll('&quot;', '"').replaceAll('&apos;', "'");
+    return value
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'");
   }
 
   String _cleanImportText(String text) {
@@ -1902,7 +2430,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         .replaceAll(RegExp(r'[\u200B-\u200D\u2060]'), '')
         .trim();
     // Si un archivo de Excel dejó basura antes del primer encabezado, se elimina.
-    value = value.replaceFirst(RegExp(r'^[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+'), '').trim();
+    value =
+        value.replaceFirst(RegExp(r'^[^A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+'), '').trim();
     return value;
   }
 
@@ -1919,17 +2448,24 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   String _cleanImportHeader(String value) {
     var h = _stripHtml(value);
     h = _cleanImportText(h);
-    h = h.replaceAll('\u00A0', ' ').replaceAll(RegExp(r'[\u200B-\u200D\u2060]'), '').trim();
+    h = h
+        .replaceAll('\u00A0', ' ')
+        .replaceAll(RegExp(r'[\u200B-\u200D\u2060]'), '')
+        .trim();
     // Cuando algún conversor deja restos visibles del BOM al inicio.
     h = h.replaceFirst(RegExp(r'^(ï»¿|»¿|¿)+'), '').trim();
     return h;
   }
 
   String _headerKey(String value) {
-    return _norm(_cleanImportHeader(value)).replaceAll(RegExp(r'[^A-Z0-9ÑÁÉÍÓÚÜ]+'), '_').replaceAll(RegExp(r'_+'), '_').replaceAll(RegExp(r'^_|_$'), '');
+    return _norm(_cleanImportHeader(value))
+        .replaceAll(RegExp(r'[^A-Z0-9ÑÁÉÍÓÚÜ]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_')
+        .replaceAll(RegExp(r'^_|_$'), '');
   }
 
-  String? _resolveImportColumn(String rawHeader, Map<String, String> columnByKey) {
+  String? _resolveImportColumn(
+      String rawHeader, Map<String, String> columnByKey) {
     final key = _headerKey(rawHeader);
     final exact = columnByKey[key];
     if (exact != null) return exact;
@@ -1938,12 +2474,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final entry in columnByKey.entries) {
       final validKey = entry.key;
       if (validKey.isEmpty) continue;
-      if (key.endsWith(validKey) && key.length <= validKey.length + 12) return entry.value;
+      if (key.endsWith(validKey) && key.length <= validKey.length + 12)
+        return entry.value;
     }
     return null;
   }
 
-  ({int index, List<String?> headers, List<String> rawHeaders})? _detectImportHeaderRow(
+  ({int index, List<String?> headers, List<String> rawHeaders})?
+      _detectImportHeaderRow(
     List<List<String>> grid,
     Map<String, String> columnByKey,
   ) {
@@ -1952,11 +2490,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     List<String?> bestHeaders = const [];
     List<String> bestRawHeaders = const [];
 
-    for (var rowIndex = 0; rowIndex < grid.length && rowIndex < 25; rowIndex++) {
+    for (var rowIndex = 0;
+        rowIndex < grid.length && rowIndex < 25;
+        rowIndex++) {
       final rawHeaders = grid[rowIndex].map(_cleanImportHeader).toList();
       if (rawHeaders.every((h) => h.trim().isEmpty)) continue;
 
-      final headers = rawHeaders.map((h) => _resolveImportColumn(h, columnByKey)).toList();
+      final headers =
+          rawHeaders.map((h) => _resolveImportColumn(h, columnByKey)).toList();
       final matches = headers.whereType<String>().length;
       if (matches > bestMatches) {
         bestIndex = rowIndex;
@@ -1973,7 +2514,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<List<String>> _importableColumns() async {
     final cols = await _templateColumns();
     if (cols.isNotEmpty) return cols;
-    return displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
+    return displayColumns.isNotEmpty
+        ? displayColumns
+        : _columnsFromRows(records);
   }
 
   String _generateImportCode(String? prefix) {
@@ -1981,7 +2524,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final rnd = math.Random.secure();
     final cleanPrefix = (prefix ?? '').trim().toUpperCase();
     final safePrefix = cleanPrefix.isEmpty ? 'REGI' : cleanPrefix;
-    final suffix = List.generate(16, (_) => chars[rnd.nextInt(chars.length)]).join();
+    final suffix =
+        List.generate(16, (_) => chars[rnd.nextInt(chars.length)]).join();
     return '$safePrefix$suffix';
   }
 
@@ -2008,7 +2552,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   bool _isNumericImportType(String type) {
     final t = type.trim().toLowerCase();
-    return t == 'number' || t == 'numeric' || t == 'double' || t == 'decimal' || t == 'integer' || t == 'int';
+    return t == 'number' ||
+        t == 'numeric' ||
+        t == 'double' ||
+        t == 'decimal' ||
+        t == 'integer' ||
+        t == 'int';
   }
 
   bool _isDateImportType(String type) {
@@ -2028,17 +2577,32 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final h = int.tryParse(m24.group(1)!);
       final mi = int.tryParse(m24.group(2)!);
       final se = int.tryParse(m24.group(3) ?? '0') ?? 0;
-      if (h != null && mi != null && h >= 0 && h <= 23 && mi >= 0 && mi <= 59 && se >= 0 && se <= 59) {
+      if (h != null &&
+          mi != null &&
+          h >= 0 &&
+          h <= 23 &&
+          mi >= 0 &&
+          mi <= 59 &&
+          se >= 0 &&
+          se <= 59) {
         return '${h.toString().padLeft(2, '0')}:${mi.toString().padLeft(2, '0')}:${se.toString().padLeft(2, '0')}';
       }
     }
-    final mampm = RegExp(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?(am|pm)$').firstMatch(s);
+    final mampm =
+        RegExp(r'^(\d{1,2}):(\d{2})(?::(\d{2}))?(am|pm)$').firstMatch(s);
     if (mampm != null) {
       var h = int.tryParse(mampm.group(1)!);
       final mi = int.tryParse(mampm.group(2)!);
       final se = int.tryParse(mampm.group(3) ?? '0') ?? 0;
       final ap = mampm.group(4)!;
-      if (h != null && mi != null && h >= 1 && h <= 12 && mi >= 0 && mi <= 59 && se >= 0 && se <= 59) {
+      if (h != null &&
+          mi != null &&
+          h >= 1 &&
+          h <= 12 &&
+          mi >= 0 &&
+          mi <= 59 &&
+          se >= 0 &&
+          se <= 59) {
         if (ap == 'pm' && h != 12) h += 12;
         if (ap == 'am' && h == 12) h = 0;
         return '${h.toString().padLeft(2, '0')}:${mi.toString().padLeft(2, '0')}:${se.toString().padLeft(2, '0')}';
@@ -2067,23 +2631,37 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final tipoUi = field?['tipo_ui']?.toString().trim().toLowerCase() ?? tipo;
     final label = field == null ? campo : _fieldLabel(field, campo);
 
-    if (_isNumericImportType(tipo) && tipoUi != 'dropdown' && tipoUi != 'multiselect') {
+    if (_isNumericImportType(tipo) &&
+        tipoUi != 'dropdown' &&
+        tipoUi != 'multiselect') {
       final isPercent = value.contains('%');
       var numericText = value.replaceAll(' ', '').replaceAll(',', '.');
-      if (numericText.endsWith('%')) numericText = numericText.substring(0, numericText.length - 1);
+      if (numericText.endsWith('%'))
+        numericText = numericText.substring(0, numericText.length - 1);
       final parsed = num.tryParse(numericText);
       if (parsed == null) {
-        throw Exception('Fila $rowNumber: el campo "$label" debe ser numérico. Valor recibido: "$value".');
+        throw Exception(
+            'Fila $rowNumber: el campo "$label" debe ser numérico. Valor recibido: "$value".');
       }
       final finalValue = isPercent ? parsed / 100 : parsed;
       final decimals = field == null ? 0 : _editNumeroDecimales(field);
-      final decimalAllowed = field != null && tipo != 'integer' && tipo != 'int' && tipoUi != 'integer' && tipoUi != 'int' && decimals > 0;
-      final decimalPart = RegExp(r'[.,](\d+)').firstMatch(numericText)?.group(1) ?? '';
-      if (!decimalAllowed && decimalPart.isNotEmpty && int.tryParse(decimalPart) != 0) {
-        throw Exception('Fila $rowNumber: el campo "$label" no acepta decimales según MATRIZ_CAMPOS_FORMATO_APPGT.');
+      final decimalAllowed = field != null &&
+          tipo != 'integer' &&
+          tipo != 'int' &&
+          tipoUi != 'integer' &&
+          tipoUi != 'int' &&
+          decimals > 0;
+      final decimalPart =
+          RegExp(r'[.,](\d+)').firstMatch(numericText)?.group(1) ?? '';
+      if (!decimalAllowed &&
+          decimalPart.isNotEmpty &&
+          int.tryParse(decimalPart) != 0) {
+        throw Exception(
+            'Fila $rowNumber: el campo "$label" no acepta decimales según su configuración.');
       }
       if (decimalAllowed && decimalPart.length > decimals) {
-        throw Exception('Fila $rowNumber: el campo "$label" solo acepta $decimals decimal(es).');
+        throw Exception(
+            'Fila $rowNumber: el campo "$label" solo acepta $decimals decimal(es).');
       }
       return finalValue;
     }
@@ -2091,15 +2669,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (_isTimeImportType(tipo)) {
       final parsedTime = _normalizeImportTime(value);
       if (parsedTime == null) {
-        throw Exception('Fila $rowNumber: el campo "$label" debe ser hora. Usa formato HH:mm, HH:mm:ss, 7:00am o 7:00 pm. Valor recibido: "$value".');
+        throw Exception(
+            'Fila $rowNumber: el campo "$label" debe ser hora. Usa formato HH:mm, HH:mm:ss, 7:00am o 7:00 pm. Valor recibido: "$value".');
       }
       return parsedTime;
     }
 
     if (_isDateImportType(tipo)) {
       final parsed = DateTime.tryParse(value);
-      if (parsed == null && !RegExp(r'^\d{1,2}/\d{1,2}/\d{4}$').hasMatch(value)) {
-        throw Exception('Fila $rowNumber: el campo "$label" debe ser fecha. Usa formato YYYY-MM-DD o DD/MM/YYYY. Valor recibido: "$value".');
+      if (parsed == null &&
+          !RegExp(r'^\d{1,2}/\d{1,2}/\d{4}$').hasMatch(value)) {
+        throw Exception(
+            'Fila $rowNumber: el campo "$label" debe ser fecha. Usa formato YYYY-MM-DD o DD/MM/YYYY. Valor recibido: "$value".');
       }
       return value;
     }
@@ -2109,23 +2690,26 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   String _friendlyImportError(Object error) {
     final msg = error.toString();
-    final missingColumn = RegExp(r"Could not find the '([^']+)' column").firstMatch(msg);
+    final missingColumn =
+        RegExp(r"Could not find the '([^']+)' column").firstMatch(msg);
     if (missingColumn != null) {
-      return 'La columna "${missingColumn.group(1)}" no existe en la tabla de Supabase. Revisa que el campo de la matriz y la columna real de la tabla tengan exactamente el mismo nombre.';
+      return 'El campo "${missingColumn.group(1)}" no existe en el almacenamiento de esta vista. Revise la configuración del campo.';
     }
 
     final notNull = RegExp(r'null value in column "([^"]+)"').firstMatch(msg);
     if (notNull != null) {
-      return 'El campo "${notNull.group(1)}" está marcado como obligatorio en la tabla de Supabase y llegó vacío. Si no debe ser obligatorio, permite NULL en esa columna o márcalo correctamente en la matriz.';
+      return 'El campo "${notNull.group(1)}" está marcado como obligatorio y llegó vacío. Revise su configuración antes de importar.';
     }
 
-    final invalidDouble = RegExp(r'invalid input syntax for type double precision: "([^"]+)"').firstMatch(msg);
+    final invalidDouble =
+        RegExp(r'invalid input syntax for type double precision: "([^"]+)"')
+            .firstMatch(msg);
     if (invalidDouble != null) {
-      return 'Un campo numérico recibió el valor "${invalidDouble.group(1)}". Si quieres guardar porcentajes como 7.50%, la columna real en Supabase debe ser tipo text. Si la columna es numérica, guarda 7.50 y muestra el símbolo % solo en la app.';
+      return 'Un campo numérico recibió el valor "${invalidDouble.group(1)}". Guarde 7.50 como número y muestre el símbolo % solo en la aplicación.';
     }
 
     if (msg.contains('duplicate key value violates unique constraint')) {
-      return 'El archivo contiene registros que ya existen en Supabase o se intentaron importar dos veces. La app omitirá duplicados cuando la función SQL lo permita; revisa la restricción única de la tabla.';
+      return 'El archivo contiene registros que ya existen o se intentaron importar dos veces. Revise los datos duplicados antes de continuar.';
     }
 
     return msg.replaceFirst('Exception: ', '');
@@ -2180,7 +2764,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (ch == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++;
         current.add(cell.toString().trim());
         cell.clear();
-        if (current.any((e) => e.trim().isNotEmpty)) rows.add(List<String>.from(current));
+        if (current.any((e) => e.trim().isNotEmpty))
+          rows.add(List<String>.from(current));
         current.clear();
       } else {
         cell.write(ch);
@@ -2192,17 +2777,24 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _stripHtml(String value) {
-    final withoutTags = value.replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n').replaceAll(RegExp(r'<[^>]+>'), '');
+    final withoutTags = value
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<[^>]+>'), '');
     return _decodeHtmlEntities(withoutTags).trim();
   }
 
   List<List<String>> _parseHtmlTable(String html) {
     final rows = <List<String>>[];
-    final rowRegex = RegExp(r'<tr[^>]*>(.*?)</tr>', caseSensitive: false, dotAll: true);
-    final cellRegex = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>', caseSensitive: false, dotAll: true);
+    final rowRegex =
+        RegExp(r'<tr[^>]*>(.*?)</tr>', caseSensitive: false, dotAll: true);
+    final cellRegex = RegExp(r'<t[dh][^>]*>(.*?)</t[dh]>',
+        caseSensitive: false, dotAll: true);
     for (final rowMatch in rowRegex.allMatches(html)) {
       final rawRow = rowMatch.group(1) ?? '';
-      final cells = cellRegex.allMatches(rawRow).map((m) => _stripHtml(m.group(1) ?? '')).toList();
+      final cells = cellRegex
+          .allMatches(rawRow)
+          .map((m) => _stripHtml(m.group(1) ?? ''))
+          .toList();
       if (cells.any((e) => e.trim().isNotEmpty)) rows.add(cells);
     }
     return rows;
@@ -2227,7 +2819,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final sheet = book.tables[tableName];
       if (sheet == null) continue;
       for (final row in sheet.rows) {
-        final cells = row.map((cell) => _cleanImportText(_excelCellToText(cell?.value))).toList();
+        final cells = row
+            .map((cell) => _cleanImportText(_excelCellToText(cell?.value)))
+            .toList();
         if (cells.any((e) => e.trim().isNotEmpty)) rows.add(cells);
       }
       if (rows.isNotEmpty) break;
@@ -2263,12 +2857,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final table = tableName;
     if (table == null || table.trim().isEmpty) return;
 
-    final connectivity = await Connectivity().checkConnectivity();
-    if (connectivity.contains(ConnectivityResult.none)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Conéctate a una red de internet.')),
-      );
-      return;
+    // En web, el selector debe abrirse directamente desde el gesto del usuario.
+    // Esperar una comprobación de red antes de pickFiles puede hacer que el
+    // navegador bloquee silenciosamente el diálogo de archivos.
+    if (!kIsWeb) {
+      final connectivity = await Connectivity().checkConnectivity();
+      if (!SyncService.connectivityIndicatesNetwork(connectivity)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Conéctate a una red de internet.')),
+        );
+        return;
+      }
     }
 
     try {
@@ -2292,7 +2891,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       } else {
         final text = _decodeImportBytes(bytes);
         final decodedText = _decodeHtmlEntities(text);
-        if (lower.endsWith('.xls') || lower.endsWith('.html') || decodedText.toLowerCase().contains('<table')) {
+        if (lower.endsWith('.xls') ||
+            lower.endsWith('.html') ||
+            decodedText.toLowerCase().contains('<table')) {
           grid = _parseHtmlTable(decodedText);
         }
         if (grid.isEmpty) {
@@ -2302,7 +2903,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
       if (grid.length < 2) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('El archivo no tiene filas para importar.')),
+          const SnackBar(
+              content: Text('El archivo no tiene filas para importar.')),
         );
         return;
       }
@@ -2317,13 +2919,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         // Se acepta también etiqueta antigua para compatibilidad, pero se guarda por campo real.
         for (final c in validColumns) _headerKey(c): c,
         for (final f in importFields)
-          if ((f['campo']?.toString().trim() ?? '').isNotEmpty) _headerKey(f['campo'].toString()): f['campo'].toString(),
+          if ((f['campo']?.toString().trim() ?? '').isNotEmpty)
+            _headerKey(f['campo'].toString()): f['campo'].toString(),
         for (final f in importFields)
-          if ((f['etiqueta']?.toString().trim() ?? '').isNotEmpty && (f['campo']?.toString().trim() ?? '').isNotEmpty) _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
+          if ((f['etiqueta']?.toString().trim() ?? '').isNotEmpty &&
+              (f['campo']?.toString().trim() ?? '').isNotEmpty)
+            _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
       };
       final detected = _detectImportHeaderRow(grid, columnByKey);
       if (detected == null) {
-        throw Exception('No se reconocieron encabezados válidos. Descarga nuevamente la plantilla y no cambies los nombres de columna.');
+        throw Exception(
+            'No se reconocieron encabezados válidos. Descarga nuevamente la plantilla y no cambies los nombres de columna.');
       }
 
       final rawHeaders = detected.rawHeaders;
@@ -2333,11 +2939,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final h = rawHeaders[i];
         if (h.trim().isEmpty) continue;
         // Si la fila contiene restos de HTML/XML, los ignoramos.
-        if ({'HTML', 'HEAD', 'BODY', 'TABLE', 'TR', 'TH', 'TD', 'LT', 'GT'}.contains(_headerKey(h))) continue;
+        if ({'HTML', 'HEAD', 'BODY', 'TABLE', 'TR', 'TH', 'TD', 'LT', 'GT'}
+            .contains(_headerKey(h))) continue;
         if (headers[i] == null) unknownHeaders.add(h);
       }
       if (unknownHeaders.isNotEmpty) {
-        throw Exception('Columnas no reconocidas en la plantilla: ${unknownHeaders.take(5).join(', ')}');
+        throw Exception(
+            'Columnas no reconocidas en la plantilla: ${unknownHeaders.take(5).join(', ')}');
       }
 
       final hiddenGeneratedFields = await _importHiddenGeneratedFields();
@@ -2350,7 +2958,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           if (h == null || h.trim().isEmpty) continue;
           final raw = _cleanImportText(line[i]).trim();
           final field = fieldByCampo[h];
-          final formatted = _formatImportValue(rawValue: raw, campo: h, field: field, rowNumber: rowNumber);
+          final formatted = _formatImportValue(
+              rawValue: raw, campo: h, field: field, rowNumber: rowNumber);
           if (formatted != null) payload[h] = formatted;
         }
         if (payload.isEmpty) continue;
@@ -2360,7 +2969,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           if (campo.isEmpty) continue;
           if (_isRequiredField(f) && !payload.containsKey(campo)) {
             final label = _fieldLabel(f, campo);
-            throw Exception('Fila $rowNumber: llene el campo obligatorio "$label".');
+            throw Exception(
+                'Fila $rowNumber: llene el campo obligatorio "$label".');
           }
         }
 
@@ -2376,7 +2986,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         // pero algunas tablas las tienen como NOT NULL. Se generan aquí
         // para que la importación funcione en cualquier tabla dinámica.
         for (final entry in hiddenGeneratedFields.entries) {
-          payload.putIfAbsent(entry.key, () => _generateImportCode(entry.value));
+          payload.putIfAbsent(
+              entry.key, () => _generateImportCode(entry.value));
         }
 
         rows.add(payload);
@@ -2384,7 +2995,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
       if (rows.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('No se encontraron datos válidos para importar.')),
+          const SnackBar(
+              content: Text('No se encontraron datos válidos para importar.')),
         );
         return;
       }
@@ -2401,37 +3013,58 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       int insertadas = rows.length;
       int omitidas = 0;
 
-      if (importResult is List && importResult.isNotEmpty && importResult.first is Map) {
+      if (importResult is List &&
+          importResult.isNotEmpty &&
+          importResult.first is Map) {
         final r = Map<String, dynamic>.from(importResult.first as Map);
-        recibidas = int.tryParse(r['filas_recibidas']?.toString() ?? '') ?? recibidas;
-        insertadas = int.tryParse(r['filas_insertadas']?.toString() ?? '') ?? insertadas;
-        omitidas = int.tryParse(r['filas_omitidas']?.toString() ?? '') ?? omitidas;
+        recibidas =
+            int.tryParse(r['filas_recibidas']?.toString() ?? '') ?? recibidas;
+        insertadas =
+            int.tryParse(r['filas_insertadas']?.toString() ?? '') ?? insertadas;
+        omitidas =
+            int.tryParse(r['filas_omitidas']?.toString() ?? '') ?? omitidas;
       } else if (importResult is Map) {
         final r = Map<String, dynamic>.from(importResult);
-        recibidas = int.tryParse(r['filas_recibidas']?.toString() ?? '') ?? recibidas;
-        insertadas = int.tryParse(r['filas_insertadas']?.toString() ?? '') ?? insertadas;
-        omitidas = int.tryParse(r['filas_omitidas']?.toString() ?? '') ?? omitidas;
+        recibidas =
+            int.tryParse(r['filas_recibidas']?.toString() ?? '') ?? recibidas;
+        insertadas =
+            int.tryParse(r['filas_insertadas']?.toString() ?? '') ?? insertadas;
+        omitidas =
+            int.tryParse(r['filas_omitidas']?.toString() ?? '') ?? omitidas;
       }
 
       await _load();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Importación completada: $insertadas subidas, $omitidas omitidas de $recibidas filas.')),
+        SnackBar(
+            content: Text(
+                'Importación completada: $insertadas subidas, $omitidas omitidas de $recibidas filas.')),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo importar: ${_friendlyImportError(e)}')),
+        SnackBar(
+            content: Text('No se pudo importar: ${_friendlyImportError(e)}')),
       );
     }
   }
 
   Widget _importButton() {
+    final enabled = canImport && !loading && error == null && tableName != null;
+    if (!enabled) {
+      return _unavailableTransferButton(
+        icon: Icons.upload_file,
+        tooltip: 'Importar',
+        message: !canImport
+            ? 'No tienes permiso para importar en este formato.'
+            : 'La importación estará disponible cuando termine de cargar la tabla.',
+      );
+    }
     return SizedBox(
       height: 44,
       width: 48,
       child: PopupMenuButton<String>(
-        enabled: !loading && !offline && error == null && tableName != null,
+        enabled: true,
         tooltip: 'Importar',
         color: const Color(0xFF1B6A82),
         onSelected: (value) async {
@@ -2439,8 +3072,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           if (value == 'import') await _importFile();
         },
         itemBuilder: (_) => const [
-          PopupMenuItem(value: 'template', child: Text('Descargar plantilla Excel', style: TextStyle(color: Colors.white))),
-          PopupMenuItem(value: 'import', child: Text('Subir archivo Excel/CSV', style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'template',
+              child: Text('Descargar plantilla Excel',
+                  style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'import',
+              child: Text('Subir archivo Excel/CSV',
+                  style: TextStyle(color: Colors.white))),
         ],
         child: Container(
           height: 44,
@@ -2450,7 +3089,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             color: const Color(0xFF17677F),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFE8F3F5)),
-            boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))],
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))
+            ],
           ),
           child: const Icon(Icons.upload_file, color: Colors.white, size: 20),
         ),
@@ -2459,18 +3101,37 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   Widget _exportButton() {
+    final enabled = canExport && !loading && error == null && tableName != null;
+    if (!enabled) {
+      return _unavailableTransferButton(
+        icon: Icons.download,
+        tooltip: 'Exportar',
+        message: !canExport
+            ? 'No tienes permiso para exportar en este formato.'
+            : 'La exportación estará disponible cuando termine de cargar la tabla.',
+      );
+    }
     return SizedBox(
       height: 44,
       width: 48,
       child: PopupMenuButton<String>(
-        enabled: !loading && !offline && error == null && records.isNotEmpty,
+        enabled: true,
         tooltip: 'Exportar',
         color: const Color(0xFF1B6A82),
         onSelected: _exportRecords,
         itemBuilder: (_) => const [
-          PopupMenuItem(value: 'excel', child: Text('Exportar en Excel', style: TextStyle(color: Colors.white))),
-          PopupMenuItem(value: 'pdf', child: Text('Exportar en PDF', style: TextStyle(color: Colors.white))),
-          PopupMenuItem(value: 'csv', child: Text('Exportar en CSV', style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'excel',
+              child: Text('Exportar en Excel',
+                  style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'pdf',
+              child: Text('Exportar en PDF',
+                  style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'csv',
+              child: Text('Exportar en CSV',
+                  style: TextStyle(color: Colors.white))),
         ],
         child: Container(
           height: 44,
@@ -2480,7 +3141,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             color: const Color(0xFF17677F),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFE8F3F5)),
-            boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))],
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))
+            ],
           ),
           child: const Icon(Icons.download, color: Colors.white, size: 20),
         ),
@@ -2488,9 +3152,170 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
+  Widget _unavailableTransferButton({
+    required IconData icon,
+    required String tooltip,
+    required String message,
+  }) {
+    return SizedBox(
+      height: 44,
+      width: 48,
+      child: Tooltip(
+        message: '$tooltip · $message',
+        child: Material(
+          color: const Color(0xFFE8EEF0),
+          borderRadius: BorderRadius.circular(10),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(10),
+            onTap: () {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text(message)),
+              );
+            },
+            child: Icon(icon, color: const Color(0xFF71838A), size: 20),
+          ),
+        ),
+      ),
+    );
+  }
+
   bool get _isPersonalPlanillaTable {
-    final t = (tableName ?? widget.format['tabla_destino']?.toString() ?? '').trim().toUpperCase();
+    final t = (tableName ?? widget.format['tabla_destino']?.toString() ?? '')
+        .trim()
+        .toUpperCase();
     return t == 'GH-REGISTRO_PERSONAL_PLANILLA';
+  }
+
+  Widget _approvalToolbarButton({
+    required String state,
+    required IconData icon,
+    required String tooltip,
+  }) {
+    return ValueListenableBuilder<int>(
+      valueListenable: _deleteSelectionVersion,
+      builder: (context, _, __) {
+        final enabled = _selectedDeleteRows.isNotEmpty;
+        return SizedBox(
+          width: 44,
+          height: 44,
+          child: Tooltip(
+            message: tooltip,
+            child: OutlinedButton(
+              onPressed:
+                  enabled ? () => _setSelectedApprovalState(state) : null,
+              style: OutlinedButton.styleFrom(
+                foregroundColor: const Color(0xFF147A6E),
+                backgroundColor:
+                    enabled ? const Color(0xFFF2FAF8) : Colors.white,
+                side: BorderSide(
+                    color: enabled
+                        ? const Color(0xFF147A6E)
+                        : Colors.grey.shade300),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+                padding: EdgeInsets.zero,
+              ),
+              child: Icon(icon),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _mobileToolsMenu() {
+    return PopupMenuButton<String>(
+      enabled: !loading && error == null,
+      tooltip: 'Importar y exportar',
+      icon: const Icon(Icons.more_vert, color: Color(0xFF176B87)),
+      onSelected: (value) async {
+        if (value == 'template') await _downloadImportTemplate();
+        if (value == 'import') await _importFile();
+        if (value.startsWith('export:')) {
+          await _exportRecords(value.substring('export:'.length));
+        }
+        if (value == 'review') {
+          await _setSelectedApprovalState('REVISADO');
+        }
+        if (value == 'approve') {
+          await _setSelectedApprovalState('APROBADO');
+        }
+      },
+      itemBuilder: (_) => [
+        if (canImport)
+          const PopupMenuItem(
+            value: 'template',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.file_download_outlined),
+              title: Text('Descargar plantilla'),
+            ),
+          ),
+        if (canImport)
+          const PopupMenuItem(
+            value: 'import',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.upload_file),
+              title: Text('Importar Excel/CSV'),
+            ),
+          ),
+        if (canExport)
+          const PopupMenuItem(
+            value: 'export:excel',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.table_view_outlined),
+              title: Text('Exportar Excel'),
+            ),
+          ),
+        if (canExport)
+          const PopupMenuItem(
+            value: 'export:pdf',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.picture_as_pdf_outlined),
+              title: Text('Exportar PDF'),
+            ),
+          ),
+        if (canExport)
+          const PopupMenuItem(
+            value: 'export:csv',
+            child: ListTile(
+              dense: true,
+              leading: Icon(Icons.data_object),
+              title: Text('Exportar CSV'),
+            ),
+          ),
+        if (_approvalsEnabled && canReview)
+          PopupMenuItem(
+            value: 'review',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.fact_check_outlined),
+              title: Text('Marcar REVISADO'),
+            ),
+          ),
+        if (_approvalsEnabled && canApprove)
+          PopupMenuItem(
+            value: 'approve',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.verified_outlined),
+              title: Text('Marcar APROBADO'),
+            ),
+          ),
+        if (!canImport &&
+            !canExport &&
+            !(_approvalsEnabled && (canReview || canApprove)))
+          const PopupMenuItem(
+            enabled: false,
+            child: Text('Sin herramientas habilitadas'),
+          ),
+      ],
+    );
   }
 
   String _rowText(Map<String, dynamic> row, List<String> keys) {
@@ -2507,14 +3332,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Future<List<Map<String, dynamic>>> _fetchPersonalRowsForPhotocheck() async {
     try {
-      final res = await supabase.from('GH-REGISTRO_PERSONAL_PLANILLA').select().or('eliminado.is.null,eliminado.eq.false').order('DNI', ascending: true);
-      final rows = (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final res = await supabase
+          .from('GH-REGISTRO_PERSONAL_PLANILLA')
+          .select()
+          .or('eliminado.is.null,eliminado.eq.false')
+          .order('DNI', ascending: true);
+      final rows = (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       if (rows.isNotEmpty) return rows;
     } catch (_) {
       // Si Supabase bloquea la lectura por RLS o falla la conexión, se usa la
       // data que ya está cargada en la tabla para no dejar el botón sin acción.
     }
-    if (records.isNotEmpty) return records.map((e) => Map<String, dynamic>.from(e)).toList();
+    if (records.isNotEmpty)
+      return records.map((e) => Map<String, dynamic>.from(e)).toList();
     return <Map<String, dynamic>>[];
   }
 
@@ -2522,22 +3354,42 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     try {
       dynamic res;
       try {
-        res = await supabase.from('GT-DISEÑO_PHOTOCHEK').select().or('eliminado.is.null,eliminado.eq.false').order('DISEÑO', ascending: true);
+        res = await supabase
+            .from('GT-DISEÑO_PHOTOCHEK')
+            .select()
+            .or('eliminado.is.null,eliminado.eq.false')
+            .order('DISEÑO', ascending: true);
       } catch (_) {
-        res = await supabase.from('MATRIZ-PHOTOCHEK').select().or('eliminado.is.null,eliminado.eq.false').order('DISEÑO', ascending: true);
+        res = await supabase
+            .from('MATRIZ-PHOTOCHEK')
+            .select()
+            .or('eliminado.is.null,eliminado.eq.false')
+            .order('DISEÑO', ascending: true);
       }
-      final rows = (res as List).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      final rows = (res as List)
+          .map((e) => Map<String, dynamic>.from(e as Map))
+          .toList();
       if (rows.isNotEmpty) return rows;
     } catch (_) {}
     return <Map<String, dynamic>>[
-      {'DISEÑO': 1, 'CAMPOS': 'Logo,FOTO,Apellidos y Nombres,Dni,QR,Puesto', 'PUESTO': ''}
+      {
+        'DISEÑO': 1,
+        'CAMPOS': 'Logo,FOTO,Apellidos y Nombres,Dni,QR,Puesto',
+        'PUESTO': ''
+      }
     ];
   }
 
   List<String> _photocheckDesignFields(Map<String, dynamic> design) {
     final raw = _rowText(design, ['CAMPOS', 'Campos', 'campos']);
-    final fields = raw.split(RegExp(r'[,;|]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toList();
-    return fields.isEmpty ? <String>['Logo', 'FOTO', 'Apellidos y Nombres', 'Dni', 'QR', 'Puesto'] : fields;
+    final fields = raw
+        .split(RegExp(r'[,;|]'))
+        .map((e) => e.trim())
+        .where((e) => e.isNotEmpty)
+        .toList();
+    return fields.isEmpty
+        ? <String>['Logo', 'FOTO', 'Apellidos y Nombres', 'Dni', 'QR', 'Puesto']
+        : fields;
   }
 
   String _photocheckFieldKey(String label) {
@@ -2546,19 +3398,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (n == 'FOTO' || n == 'PHOTO' || n == 'PHOTO_URL') return 'FOTO';
     if (n == 'QR' || n == 'CODIGO_QR') return 'QR';
     if (n == 'DNI' || n == 'DOCUMENTO') return 'DNI';
-    if (n == 'APELLIDOSYNOMBRES' || n == 'APELLIDOSNOMBRES' || n == 'NOMBRE' || n == 'NOMBRES') return 'APELLIDOS Y NOMBRES';
+    if (n == 'APELLIDOSYNOMBRES' ||
+        n == 'APELLIDOSNOMBRES' ||
+        n == 'NOMBRE' ||
+        n == 'NOMBRES') return 'APELLIDOS Y NOMBRES';
     if (n == 'PUESTO' || n == 'CARGO') return 'PUESTO';
     if (n == 'AREA' || n == 'ÁREA') return 'AREA';
     return label.trim();
   }
 
-  String _workerValueByDesignField(Map<String, dynamic> worker, String fieldLabel) {
+  String _workerValueByDesignField(
+      Map<String, dynamic> worker, String fieldLabel) {
     final key = _photocheckFieldKey(fieldLabel);
     switch (key) {
       case 'DNI':
         return _rowText(worker, ['DNI', 'Dni', 'DOCUMENTO', 'Documento']);
       case 'APELLIDOS Y NOMBRES':
-        return _rowText(worker, ['APELLIDOS Y NOMBRES', 'Apellidos y Nombres', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
+        return _rowText(worker, [
+          'APELLIDOS Y NOMBRES',
+          'Apellidos y Nombres',
+          'APELLIDOS_NOMBRES',
+          'NOMBRE',
+          'NOMBRES'
+        ]);
       case 'PUESTO':
         return _rowText(worker, ['PUESTO', 'Puesto', 'CARGO', 'Cargo']);
       case 'AREA':
@@ -2570,42 +3432,64 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-  Map<String, dynamic> _designForWorker(Map<String, dynamic> worker, List<Map<String, dynamic>> designs) {
-    final puesto = _rowText(worker, ['PUESTO', 'Puesto', 'CARGO', 'Cargo']).trim().toUpperCase();
+  Map<String, dynamic> _designForWorker(
+      Map<String, dynamic> worker, List<Map<String, dynamic>> designs) {
+    final puesto = _rowText(worker, ['PUESTO', 'Puesto', 'CARGO', 'Cargo'])
+        .trim()
+        .toUpperCase();
     for (final d in designs) {
-      final designPuesto = _rowText(d, ['PUESTO', 'Puesto', 'tipo de trabajador', 'TIPO_TRABAJADOR', 'TIPO DE TRABAJADOR']).trim().toUpperCase();
+      final designPuesto = _rowText(d, [
+        'PUESTO',
+        'Puesto',
+        'tipo de trabajador',
+        'TIPO_TRABAJADOR',
+        'TIPO DE TRABAJADOR'
+      ]).trim().toUpperCase();
       if (designPuesto.isEmpty || puesto.isEmpty) continue;
-      final parts = designPuesto.split(RegExp(r'[,;|]')).map((e) => e.trim()).where((e) => e.isNotEmpty);
+      final parts = designPuesto
+          .split(RegExp(r'[,;|]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty);
       if (parts.any((p) => p == puesto)) return d;
     }
     return designs.firstWhere(
       (d) => _rowText(d, ['DISEÑO', 'Diseño']) == '1',
-      orElse: () => designs.isNotEmpty ? designs.first : <String, dynamic>{'DISEÑO': 1},
+      orElse: () =>
+          designs.isNotEmpty ? designs.first : <String, dynamic>{'DISEÑO': 1},
     );
   }
 
   String? _splitStoragePath(String value, {String? defaultBucket}) {
     var clean = value.trim();
     if (clean.isEmpty) return null;
-    if (clean.startsWith('storage://')) clean = clean.substring('storage://'.length);
+    if (clean.startsWith('storage://'))
+      clean = clean.substring('storage://'.length);
     clean = clean.replaceAll('\\', '/');
     clean = clean.replaceFirst(RegExp(r'^/+'), '');
-    if (clean.startsWith('object/public/')) clean = clean.substring('object/public/'.length);
-    if (clean.startsWith('object/sign/')) clean = clean.substring('object/sign/'.length);
-    if (clean.startsWith('storage/v1/object/public/')) clean = clean.substring('storage/v1/object/public/'.length);
-    if (clean.startsWith('storage/v1/object/sign/')) clean = clean.substring('storage/v1/object/sign/'.length);
+    if (clean.startsWith('object/public/'))
+      clean = clean.substring('object/public/'.length);
+    if (clean.startsWith('object/sign/'))
+      clean = clean.substring('object/sign/'.length);
+    if (clean.startsWith('storage/v1/object/public/'))
+      clean = clean.substring('storage/v1/object/public/'.length);
+    if (clean.startsWith('storage/v1/object/sign/'))
+      clean = clean.substring('storage/v1/object/sign/'.length);
     final parts = clean.split('/').where((e) => e.isNotEmpty).toList();
     if (parts.length >= 2) return '${parts.first}/${parts.skip(1).join('/')}';
-    if (defaultBucket != null && parts.isNotEmpty) return '$defaultBucket/${parts.first}';
+    if (defaultBucket != null && parts.isNotEmpty)
+      return '$defaultBucket/${parts.first}';
     return null;
   }
 
-  Future<String?> _resolveSupabaseMediaUrl(String value, {String? defaultBucket}) async {
+  Future<String?> _resolveSupabaseMediaUrl(String value,
+      {String? defaultBucket}) async {
     var clean = value.trim();
     if (clean.isEmpty || clean.toUpperCase() == 'NULL') return null;
     if (clean.toLowerCase().startsWith('http')) return clean;
-    if (clean.startsWith('/storage/v1/')) return '${SupabaseConfig.supabaseUrl}$clean';
-    if (clean.startsWith('storage/v1/')) return '${SupabaseConfig.supabaseUrl}/$clean';
+    if (clean.startsWith('/storage/v1/'))
+      return '${SupabaseConfig.supabaseUrl}$clean';
+    if (clean.startsWith('storage/v1/'))
+      return '${SupabaseConfig.supabaseUrl}/$clean';
 
     final storagePath = _splitStoragePath(clean, defaultBucket: defaultBucket);
     if (storagePath == null) return null;
@@ -2624,8 +3508,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-  Future<Uint8List?> _downloadBytesForPdf(String source, {String? defaultBucket}) async {
-    final url = await _resolveSupabaseMediaUrl(source, defaultBucket: defaultBucket);
+  Future<Uint8List?> _downloadBytesForPdf(String source,
+      {String? defaultBucket}) async {
+    final url =
+        await _resolveSupabaseMediaUrl(source, defaultBucket: defaultBucket);
     if (url == null || !url.toLowerCase().startsWith('http')) return null;
     try {
       final client = HttpClient();
@@ -2643,17 +3529,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-  Future<pw.Widget> _photocheckCard(Map<String, dynamic> worker, Map<String, dynamic> design) async {
+  Future<pw.Widget> _photocheckCard(
+      Map<String, dynamic> worker, Map<String, dynamic> design) async {
     final fields = _photocheckDesignFields(design);
     final fieldKeys = fields.map(_photocheckFieldKey).toList();
     final dni = _workerValueByDesignField(worker, 'DNI');
-    final qrValue = dni.isNotEmpty ? dni : _rowText(worker, ['id_local', 'CODIGO_PERSONAL']);
+    final qrValue = dni.isNotEmpty
+        ? dni
+        : _rowText(worker, ['id_local', 'CODIGO_PERSONAL']);
     final logoUrl = _rowText(design, ['LOGO', 'Logo']);
     final fotoUrl = _workerValueByDesignField(worker, 'FOTO');
     final showLogo = fieldKeys.contains('LOGO') && logoUrl.trim().isNotEmpty;
     final showFoto = fieldKeys.contains('FOTO') && fotoUrl.trim().isNotEmpty;
     final showQr = fieldKeys.contains('QR');
-    final logoBytes = showLogo ? await _downloadBytesForPdf(logoUrl, defaultBucket: 'imagenes_app') : null;
+    final logoBytes = showLogo
+        ? await _downloadBytesForPdf(logoUrl, defaultBucket: 'imagenes_app')
+        : null;
     final fotoBytes = showFoto ? await _downloadBytesForPdf(fotoUrl) : null;
 
     final textFields = <String>[];
@@ -2682,7 +3573,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             padding: const pw.EdgeInsets.symmetric(horizontal: 5, vertical: 3),
             decoration: pw.BoxDecoration(
               color: PdfColor(0.08, 0.48, 0.43),
-              borderRadius: pw.BorderRadius.only(topLeft: pw.Radius.circular(3), topRight: pw.Radius.circular(3)),
+              borderRadius: pw.BorderRadius.only(
+                  topLeft: pw.Radius.circular(3),
+                  topRight: pw.Radius.circular(3)),
             ),
             child: pw.Row(
               children: [
@@ -2690,7 +3583,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   child: pw.Text(
                     'PHOTOCHECK',
                     textAlign: pw.TextAlign.center,
-                    style: pw.TextStyle(color: PdfColors.white, fontSize: 10, fontWeight: pw.FontWeight.bold),
+                    style: pw.TextStyle(
+                        color: PdfColors.white,
+                        fontSize: 10,
+                        fontWeight: pw.FontWeight.bold),
                   ),
                 ),
                 if (logoBytes != null)
@@ -2698,7 +3594,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     width: 10 * PdfPageFormat.mm,
                     height: 9 * PdfPageFormat.mm,
                     alignment: pw.Alignment.centerRight,
-                    child: pw.Image(pw.MemoryImage(logoBytes), fit: pw.BoxFit.contain),
+                    child: pw.Image(pw.MemoryImage(logoBytes),
+                        fit: pw.BoxFit.contain),
                   )
                 else
                   pw.SizedBox(width: 10 * PdfPageFormat.mm),
@@ -2712,8 +3609,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 width: 24 * PdfPageFormat.mm,
                 height: 28 * PdfPageFormat.mm,
                 alignment: pw.Alignment.center,
-                decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.black, width: 0.7)),
-                child: fotoBytes != null ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover) : pw.SizedBox(),
+                decoration: pw.BoxDecoration(
+                    border: pw.Border.all(color: PdfColors.black, width: 0.7)),
+                child: fotoBytes != null
+                    ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover)
+                    : pw.SizedBox(),
               ),
             ),
           pw.SizedBox(height: 5),
@@ -2731,7 +3631,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       line,
                       textAlign: pw.TextAlign.center,
                       maxLines: isName ? 3 : 2,
-                      style: pw.TextStyle(fontSize: isName ? 8.2 : 6.8, fontWeight: isName ? pw.FontWeight.bold : pw.FontWeight.normal),
+                      style: pw.TextStyle(
+                          fontSize: isName ? 8.2 : 6.8,
+                          fontWeight: isName
+                              ? pw.FontWeight.bold
+                              : pw.FontWeight.normal),
                     ),
                   );
                 }).toList(),
@@ -2755,31 +3659,45 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-  Future<void> _generatePhotocheckPdf(List<Map<String, dynamic>> workers) async {
+  Future<void> _generatePhotocheckPdf(
+      List<Map<String, dynamic>> workers) async {
     if (workers.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Selecciona al menos un trabajador para generar el Photocheck.')));
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text(
+                'Selecciona al menos un trabajador para generar el Photocheck.')));
       }
       return;
     }
     try {
-      final inactiveCount = workers.where((w) => _rowText(w, ['Status', 'STATUS', 'ESTADO', 'ESTADO_PERSONAL']).toUpperCase() == 'INACTIVO').length;
+      final inactiveCount = workers
+          .where((w) =>
+              _rowText(w, ['Status', 'STATUS', 'ESTADO', 'ESTADO_PERSONAL'])
+                  .toUpperCase() ==
+              'INACTIVO')
+          .length;
       if (inactiveCount > 0 && mounted) {
         final ok = await showDialog<bool>(
           context: context,
           builder: (_) => AlertDialog(
             title: const Text('Personal inactivo'),
-            content: Text('Hay $inactiveCount personas que no son de planilla. ¿Deseas continuar?'),
+            content: Text(
+                'Hay $inactiveCount personas que no son de planilla. ¿Deseas continuar?'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Continuar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Continuar')),
             ],
           ),
         );
         if (ok != true) return;
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Generando Photocheck...')));
+        ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Generando Photocheck...')));
       }
       final designs = await _fetchPhotocheckDesigns();
       final cards = <pw.Widget>[];
@@ -2795,13 +3713,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           pw.Wrap(spacing: 8, runSpacing: 8, children: cards),
         ],
       ));
-      final file = await _writeExportFile('pdf', await pdf.save());
-      await OpenFilex.open(file.path);
+      final filePath = await _writeExportFile('pdf', await pdf.save());
+      if (!kIsWeb) await OpenFilex.open(filePath);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Photocheck generado: ${file.path}')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Photocheck generado: $filePath')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo generar el Photocheck: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('No se pudo generar el Photocheck: $e')));
     }
   }
 
@@ -2823,7 +3743,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           final filtered = all
               .where((r) {
                 final dni = _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']);
-                final nombre = _rowText(r, ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
+                final nombre = _rowText(r, [
+                  'APELLIDOS Y NOMBRES',
+                  'APELLIDOS_NOMBRES',
+                  'NOMBRE',
+                  'NOMBRES'
+                ]);
                 return q.isEmpty || '$dni $nombre'.toUpperCase().contains(q);
               })
               .take(100)
@@ -2834,7 +3759,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               width: 620,
               height: 520,
               child: Column(children: [
-                TextField(decoration: const InputDecoration(labelText: 'Buscar por DNI o nombres', border: OutlineInputBorder()), onChanged: (v) => setDialogState(() => query = v)),
+                TextField(
+                    decoration: const InputDecoration(
+                        labelText: 'Buscar por DNI o nombres',
+                        border: OutlineInputBorder()),
+                    onChanged: (v) => setDialogState(() => query = v)),
                 const SizedBox(height: 10),
                 Expanded(
                     child: ListView.builder(
@@ -2842,11 +3771,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   itemBuilder: (_, i) {
                     final r = filtered[i];
                     final dni = _rowText(r, ['DNI', 'Dni', 'DOCUMENTO']);
-                    final nombre = _rowText(r, ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
+                    final nombre = _rowText(r, [
+                      'APELLIDOS Y NOMBRES',
+                      'APELLIDOS_NOMBRES',
+                      'NOMBRE',
+                      'NOMBRES'
+                    ]);
                     final isSel = selected.containsKey(dni);
                     return ListTile(
                       dense: true,
-                      leading: Icon(isSel ? Icons.check_circle : Icons.person_outline, color: isSel ? const Color(0xFF147A6E) : null),
+                      leading: Icon(
+                          isSel ? Icons.check_circle : Icons.person_outline,
+                          color: isSel ? const Color(0xFF147A6E) : null),
                       title: Text('$dni - $nombre'),
                       onTap: () => setDialogState(() {
                         if (dni.isNotEmpty) selected[dni] = r;
@@ -2854,17 +3790,32 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     );
                   },
                 )),
-                Align(alignment: Alignment.centerLeft, child: Text('Seleccionados: ${selected.length}')),
+                Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Seleccionados: ${selected.length}')),
                 SizedBox(
                     height: 70,
                     child: ListView(
                         scrollDirection: Axis.horizontal,
-                        children: selected.keys.map((dni) => Padding(padding: const EdgeInsets.only(right: 6), child: Chip(label: Text(dni), onDeleted: () => setDialogState(() => selected.remove(dni))))).toList())),
+                        children: selected.keys
+                            .map((dni) => Padding(
+                                padding: const EdgeInsets.only(right: 6),
+                                child: Chip(
+                                    label: Text(dni),
+                                    onDeleted: () => setDialogState(
+                                        () => selected.remove(dni)))))
+                            .toList())),
               ]),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancelar')),
-              FilledButton(onPressed: selected.isEmpty ? null : () => Navigator.pop(dialogContext, true), child: const Text('Generar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(dialogContext, false),
+                  child: const Text('Cancelar')),
+              FilledButton(
+                  onPressed: selected.isEmpty
+                      ? null
+                      : () => Navigator.pop(dialogContext, true),
+                  child: const Text('Generar')),
             ],
           );
         },
@@ -2879,28 +3830,37 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     sheet.appendRow([xlsx.TextCellValue('DNI')]);
     final bytes = excel.encode();
     if (bytes == null) return;
-    final file = await _writeExportFile('xlsx', Uint8List.fromList(bytes));
-    await OpenFilex.open(file.path);
+    final filePath = await _writeExportFile('xlsx', Uint8List.fromList(bytes));
+    if (!kIsWeb) await OpenFilex.open(filePath);
   }
 
   Future<void> _importPhotocheckList() async {
-    final result = await FilePicker.platform.pickFiles(type: FileType.custom, allowedExtensions: ['xlsx', 'xls', 'csv']);
-    if (result == null || result.files.isEmpty || result.files.single.path == null) return;
-    final file = File(result.files.single.path!);
-    final ext = result.files.single.extension?.toLowerCase() ?? '';
+    final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['xlsx', 'xls', 'csv'],
+        withData: true);
+    if (result == null || result.files.isEmpty) return;
+    final picked = result.files.single;
+    final bytes = picked.bytes ??
+        (picked.path == null ? null : await File(picked.path!).readAsBytes());
+    if (bytes == null) return;
+    final ext = picked.extension?.toLowerCase() ?? '';
     final dnis = <String>{};
     if (ext == 'csv') {
-      final lines = await file.readAsLines();
+      final lines = const LineSplitter()
+          .convert(utf8.decode(bytes, allowMalformed: true));
       for (final line in lines.skip(1)) {
         final dni = line.split(',').first.trim();
         if (dni.isNotEmpty) dnis.add(dni);
       }
     } else {
-      final excel = xlsx.Excel.decodeBytes(await file.readAsBytes());
-      final table = excel.tables.values.isEmpty ? null : excel.tables.values.first;
+      final excel = xlsx.Excel.decodeBytes(bytes);
+      final table =
+          excel.tables.values.isEmpty ? null : excel.tables.values.first;
       if (table != null) {
         for (final row in table.rows.skip(1)) {
-          final dni = row.isNotEmpty ? (row[0]?.value?.toString().trim() ?? '') : '';
+          final dni =
+              row.isNotEmpty ? (row[0]?.value?.toString().trim() ?? '') : '';
           if (dni.isNotEmpty) dnis.add(dni);
         }
       }
@@ -2921,7 +3881,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
     }
     if (missing.isNotEmpty && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('DNI no encontrados: ${missing.take(8).join(', ')}${missing.length > 8 ? '...' : ''}')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(
+              'DNI no encontrados: ${missing.take(8).join(', ')}${missing.length > 8 ? '...' : ''}')));
     }
     await _generatePhotocheckPdf(workers);
   }
@@ -2939,7 +3901,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           try {
             if (value == 'generate') {
               if (_selectedDeleteRows.isNotEmpty) {
-                await _generatePhotocheckPdf(_selectedDeleteRows.values.map((e) => Map<String, dynamic>.from(e)).toList());
+                await _generatePhotocheckPdf(_selectedDeleteRows.values
+                    .map((e) => Map<String, dynamic>.from(e))
+                    .toList());
               } else {
                 await _showPhotocheckSelector();
               }
@@ -2948,13 +3912,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             if (value == 'import') await _importPhotocheckList();
           } catch (e) {
             if (!mounted) return;
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error en Photocheck: $e')));
+            ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error en Photocheck: $e')));
           }
         },
         itemBuilder: (_) => const [
-          PopupMenuItem(value: 'generate', child: Text('Generar Photocheck', style: TextStyle(color: Colors.white))),
-          PopupMenuItem(value: 'template', child: Text('Descargar plantilla', style: TextStyle(color: Colors.white))),
-          PopupMenuItem(value: 'import', child: Text('Importar', style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'generate',
+              child: Text('Generar Photocheck',
+                  style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'template',
+              child: Text('Descargar plantilla',
+                  style: TextStyle(color: Colors.white))),
+          PopupMenuItem(
+              value: 'import',
+              child: Text('Importar', style: TextStyle(color: Colors.white))),
         ],
         child: Container(
           height: 44,
@@ -2964,7 +3937,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             color: const Color(0xFF17677F),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(color: const Color(0xFFE8F3F5)),
-            boxShadow: const [BoxShadow(color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))],
+            boxShadow: const [
+              BoxShadow(
+                  color: Color(0x22000000), blurRadius: 7, offset: Offset(0, 2))
+            ],
           ),
           child: const Icon(Icons.qr_code_2, color: Colors.white, size: 21),
         ),
@@ -2984,12 +3960,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             format: widget.format,
           );
 
-    // Abrir/cerrar el formulario de nuevo registro NO debe invalidar ni recargar
-    // la tabla remota visible. La tabla solo debe recargarse por acciones
-    // explícitas: actualizar datos, sincronizar, filtros, paginación o cambio de tabla.
-    // Antes aquí se llamaba a _load() al cerrar el diálogo; eso provocaba que,
-    // al cancelar/retroceder/guardar local, la tabla volviera a consultar datos
-    // y recargara firmas/fotos, congelando la UI en Windows.
+    // El formulario se abre sin desmontar la tabla. Al cerrarlo se hace un
+    // refresco silencioso de sus filas, sin reconstruir fotos ni formularios.
     final compact = widget.mobileMode || MediaQuery.sizeOf(context).width < 760;
     if (compact) {
       // En móvil el formulario debe disponer de todo el ancho. Se conserva la
@@ -3007,7 +3979,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         builder: (dialogContext) {
           return LayoutBuilder(
             builder: (context, constraints) {
-              final width = math.min(1180.0, constraints.maxWidth - 32.0);
+              final width = math.min(
+                ZumacResponsiveLimits.formDialog,
+                constraints.maxWidth - 32.0,
+              );
               return Dialog(
                 insetPadding: const EdgeInsets.all(16),
                 backgroundColor: Colors.transparent,
@@ -3032,11 +4007,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       );
     }
 
-    // No llamar _load() aquí. Mantener la tabla actual intacta.
-    // Se conserva el aviso al contenedor padre para refrescar contadores/badges
-    // livianos de registros locales, sin reconstruir el dataset de la tabla.
+    // Refrescar contadores locales y luego la tabla activa automáticamente.
     if (mounted) {
       await widget.onLocalRecordsChanged?.call();
+      final activeTable = tableName?.trim() ?? '';
+      final formatId = widget.format['id']?.toString().trim() ?? '';
+      if (activeTable.isNotEmpty && formatId.isNotEmpty) {
+        await Future<void>.delayed(const Duration(milliseconds: 120));
+        await _refreshTableSilentlyAfterLoad(
+          activeTable,
+          formatId,
+          _loadSerial,
+        );
+      }
     }
   }
 
@@ -3053,10 +4036,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _applyTopFilter(() {
       if (isStart) {
         startDateFilter = picked;
-        if (endDateFilter != null && endDateFilter!.isBefore(picked)) endDateFilter = picked;
+        if (endDateFilter != null && endDateFilter!.isBefore(picked))
+          endDateFilter = picked;
       } else {
         endDateFilter = picked;
-        if (startDateFilter != null && startDateFilter!.isAfter(picked)) startDateFilter = picked;
+        if (startDateFilter != null && startDateFilter!.isAfter(picked))
+          startDateFilter = picked;
       }
     });
   }
@@ -3076,15 +4061,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         child: InputDecorator(
           decoration: InputDecoration(
             labelText: label,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             border: const OutlineInputBorder(),
-            enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFC8D4DF))),
+            enabledBorder: const OutlineInputBorder(
+                borderSide: BorderSide(color: Color(0xFFC8D4DF))),
             labelStyle: const TextStyle(color: Color(0xFF4A6075)),
             suffixIcon: value == null
-                ? const Icon(Icons.calendar_today, size: 16, color: Color(0xFF17324D))
+                ? const Icon(Icons.calendar_today,
+                    size: 16, color: Color(0xFF17324D))
                 : IconButton(
                     padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.close, size: 16, color: Color(0xFF17324D)),
+                    icon: const Icon(Icons.close,
+                        size: 16, color: Color(0xFF17324D)),
                     onPressed: onClear,
                   ),
           ),
@@ -3116,14 +4105,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         iconEnabledColor: const Color(0xFF17324D),
         decoration: InputDecoration(
           labelText: label,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          contentPadding:
+              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           border: const OutlineInputBorder(),
-          enabledBorder: const OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFC8D4DF))),
+          enabledBorder: const OutlineInputBorder(
+              borderSide: BorderSide(color: Color(0xFFC8D4DF))),
           labelStyle: const TextStyle(color: Color(0xFF4A6075)),
         ),
         items: [
           const DropdownMenuItem<String>(value: null, child: Text('Todos')),
-          ...values.map((e) => DropdownMenuItem<String>(value: e, child: Text(e))),
+          ...values
+              .map((e) => DropdownMenuItem<String>(value: e, child: Text(e))),
         ],
         onChanged: onChanged,
       ),
@@ -3134,7 +4126,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return Center(
       child: Text(
         message,
-        style: const TextStyle(color: Color(0xFF4A6075), fontSize: 20, fontWeight: FontWeight.w600),
+        style: const TextStyle(
+            color: Color(0xFF4A6075),
+            fontSize: 20,
+            fontWeight: FontWeight.w600),
         textAlign: TextAlign.center,
       ),
     );
@@ -3146,7 +4141,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   bool _isMediaColumn(String column) {
     final n = _norm(column);
-    return n.contains('FOTO') || n.contains('FIRMA') || n.contains('IMAGEN') || n.contains('EVIDENCIA');
+    return n.contains('FOTO') ||
+        n.contains('FIRMA') ||
+        n.contains('IMAGEN') ||
+        n.contains('EVIDENCIA');
   }
 
   bool _isSignatureColumn(String column) {
@@ -3154,7 +4152,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _sanitizeStoragePart(String value) {
-    final clean = value.trim().replaceAll(RegExp(r'[^A-Za-z0-9_\-]+'), '_').replaceAll(RegExp(r'_+'), '_');
+    final clean = value
+        .trim()
+        .replaceAll(RegExp(r'[^A-Za-z0-9_\-]+'), '_')
+        .replaceAll(RegExp(r'_+'), '_');
     return clean.isEmpty ? 'sin_valor' : clean;
   }
 
@@ -3168,12 +4169,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final safePk = _sanitizeStoragePart(pkValue.toString());
     final safeColumn = _sanitizeStoragePart(column);
     final stamp = DateTime.now().millisecondsSinceEpoch;
-    final path = 'firmas/desktop_updates/$safeTable/$safePk/${safeColumn}_$stamp.png';
+    final path =
+        'firmas/desktop_updates/$safeTable/$safePk/${safeColumn}_$stamp.png';
 
     await supabase.storage.from(EvidenceStorage.bucket).uploadBinary(
           path,
           bytes,
-          fileOptions: const FileOptions(contentType: 'image/png', upsert: true),
+          fileOptions:
+              const FileOptions(contentType: 'image/png', upsert: true),
         );
 
     return EvidenceStorage.toStorageUri(path);
@@ -3185,9 +4188,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (s.startsWith('data:image/')) return true;
     if (s.startsWith('http://') || s.startsWith('https://')) return true;
     if (EvidenceStorage.isStorageUri(value)) return true;
-    final imageExt = RegExp(r'\.(jpg|jpeg|png|webp|gif|bmp|heic|heif)(\?|$)', caseSensitive: false);
+    final imageExt = RegExp(r'\.(jpg|jpeg|png|webp|gif|bmp|heic|heif)(\?|$)',
+        caseSensitive: false);
     if (imageExt.hasMatch(s)) return true;
-    if (s.contains('/') && (s.contains('foto') || s.contains('firma') || s.contains('image') || s.contains('imagen') || s.contains('evidencia'))) return true;
+    if (s.contains('/') &&
+        (s.contains('foto') ||
+            s.contains('firma') ||
+            s.contains('image') ||
+            s.contains('imagen') ||
+            s.contains('evidencia'))) return true;
     return _tryDecodeImageBytes(value) != null;
   }
 
@@ -3215,7 +4224,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     Expanded(
                       child: Text(
                         column,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16),
                       ),
                     ),
                     IconButton(
@@ -3230,7 +4242,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     minScale: 0.5,
                     maxScale: 5,
                     child: Center(
-                      child: _networkMediaImage(url, fit: BoxFit.contain, preview: true),
+                      child: _networkMediaImage(url,
+                          fit: BoxFit.contain, preview: true),
                     ),
                   ),
                 ),
@@ -3244,11 +4257,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Future<String> _signedMediaUrlFuture(String value) {
     final key = value.trim();
-    return _signedMediaUrlFutures.putIfAbsent(key, () => EvidenceStorage.signedUrlForValue(key));
+    return _signedMediaUrlFutures.putIfAbsent(
+        key, () => EvidenceStorage.signedUrlForValue(key));
   }
 
   ImageProvider _mediaImageProvider(String signedUrl) {
-    return _mediaImageProviders.putIfAbsent(signedUrl, () => NetworkImage(signedUrl));
+    return _mediaImageProviders.putIfAbsent(
+        signedUrl, () => NetworkImage(signedUrl));
   }
 
   Uint8List? _tryDecodeImageBytes(String value) {
@@ -3280,11 +4295,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Widget _mediaFallback(String text, {double size = 20}) {
     return Tooltip(
       message: text,
-      child: Icon(Icons.broken_image, color: const Color(0xFF60758A), size: size),
+      child:
+          Icon(Icons.broken_image, color: const Color(0xFF60758A), size: size),
     );
   }
 
-  Widget _networkMediaImage(String value, {double? width, double? height, BoxFit fit = BoxFit.cover, bool preview = false}) {
+  Widget _networkMediaImage(String value,
+      {double? width,
+      double? height,
+      BoxFit fit = BoxFit.cover,
+      bool preview = false}) {
     final bytes = _tryDecodeImageBytes(value);
     if (bytes != null) {
       return Image.memory(
@@ -3293,7 +4313,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         height: height,
         fit: fit,
         gaplessPlayback: true,
-        errorBuilder: (_, __, ___) => _mediaFallback('No se pudo leer la imagen/firma.'),
+        errorBuilder: (_, __, ___) =>
+            _mediaFallback('No se pudo leer la imagen/firma.'),
       );
     }
 
@@ -3305,24 +4326,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           return SizedBox(
             width: width ?? 24,
             height: height ?? 24,
-            child: const Center(child: Icon(Icons.image, color: Color(0xFF60758A), size: 18)),
+            child: const Center(
+                child: Icon(Icons.image, color: Color(0xFF60758A), size: 18)),
           );
         }
         final resolved = snapshot.data?.trim() ?? '';
-        if (resolved.isEmpty) return _mediaFallback('Ruta vacía o no disponible.');
+        if (resolved.isEmpty)
+          return _mediaFallback('Ruta vacía o no disponible.');
         return Image(
           image: _mediaImageProvider(resolved),
           width: width,
           height: height,
           fit: fit,
           gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => _mediaFallback('No se pudo cargar: $resolved', size: preview ? 48 : 20),
+          errorBuilder: (_, __, ___) => _mediaFallback(
+              'No se pudo cargar: $resolved',
+              size: preview ? 48 : 20),
           loadingBuilder: (context, child, loadingProgress) {
             if (loadingProgress == null) return child;
             return SizedBox(
               width: width ?? 24,
               height: height ?? 24,
-              child: const Center(child: Icon(Icons.image, color: Color(0xFF60758A), size: 18)),
+              child: const Center(
+                  child: Icon(Icons.image, color: Color(0xFF60758A), size: 18)),
             );
           },
         );
@@ -3394,16 +4420,23 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'transparent': Colors.transparent,
     };
     if (names.containsKey(text)) return names[text];
-    final rgb = RegExp(r'^rgba?\s*\(\s*(\d{1,3})\s*[,;]\s*(\d{1,3})\s*[,;]\s*(\d{1,3})(?:\s*[,;]\s*([0-9.]+))?\s*\)$').firstMatch(text);
+    final rgb = RegExp(
+            r'^rgba?\s*\(\s*(\d{1,3})\s*[,;]\s*(\d{1,3})\s*[,;]\s*(\d{1,3})(?:\s*[,;]\s*([0-9.]+))?\s*\)$')
+        .firstMatch(text);
     if (rgb != null) {
       int clamp(String v) => (int.tryParse(v) ?? 0).clamp(0, 255).toInt();
       final alphaText = rgb.group(4);
-      final alpha = alphaText == null ? 255 : ((double.tryParse(alphaText) ?? 1).clamp(0, 1) * 255).round();
-      return Color.fromARGB(alpha, clamp(rgb.group(1)!), clamp(rgb.group(2)!), clamp(rgb.group(3)!));
+      final alpha = alphaText == null
+          ? 255
+          : ((double.tryParse(alphaText) ?? 1).clamp(0, 1) * 255).round();
+      return Color.fromARGB(alpha, clamp(rgb.group(1)!), clamp(rgb.group(2)!),
+          clamp(rgb.group(3)!));
     }
     text = text.replaceAll('#', '').replaceAll('0x', '');
-    if (RegExp(r'^[0-9a-f]{6}$', caseSensitive: false).hasMatch(text)) return Color(int.parse('ff$text', radix: 16));
-    if (RegExp(r'^[0-9a-f]{8}$', caseSensitive: false).hasMatch(text)) return Color(int.parse(text, radix: 16));
+    if (RegExp(r'^[0-9a-f]{6}$', caseSensitive: false).hasMatch(text))
+      return Color(int.parse('ff$text', radix: 16));
+    if (RegExp(r'^[0-9a-f]{8}$', caseSensitive: false).hasMatch(text))
+      return Color(int.parse(text, radix: 16));
     return null;
   }
 
@@ -3422,22 +4455,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-  dynamic _evalTableFormatExpression(String expression, Map<String, dynamic> row) {
+  dynamic _evalTableFormatExpression(
+      String expression, Map<String, dynamic> row) {
     var expr = expression.trim();
     if (expr.isEmpty) return '';
-    final call = RegExp(r'^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)\s*\((.*)\)$', dotAll: true).firstMatch(expr);
+    final call =
+        RegExp(r'^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_]+)\s*\((.*)\)$', dotAll: true)
+            .firstMatch(expr);
     if (call != null) {
       final name = _norm(call.group(1) ?? '');
       final args = _splitTableFormatArgs(call.group(2) ?? '');
       if ((name == 'IF' || name == 'SI') && args.length == 2) {
         final first = _evalTableFormatExpression(args[0], row);
-        return _truthyTableValue(first) ? first : _evalTableFormatExpression(args[1], row);
+        return _truthyTableValue(first)
+            ? first
+            : _evalTableFormatExpression(args[1], row);
       }
       if ((name == 'O' || name == 'OR') && args.length >= 3) {
         for (var i = 0; i + 1 < args.length; i += 2) {
-          if (_evalTableFormatBool(args[i], row)) return _evalTableFormatExpression(args[i + 1], row);
+          if (_evalTableFormatBool(args[i], row))
+            return _evalTableFormatExpression(args[i + 1], row);
         }
-        if (args.length.isOdd) return _evalTableFormatExpression(args.last, row);
+        if (args.length.isOdd)
+          return _evalTableFormatExpression(args.last, row);
         return '';
       }
     }
@@ -3450,7 +4490,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   bool _evalTableFormatBool(String condition, Map<String, dynamic> row) {
     try {
-      return _tableFormulaEngine(row).evaluateCondition(condition.replaceAll('<>', '!='));
+      return _tableFormulaEngine(row)
+          .evaluateCondition(condition.replaceAll('<>', '!='));
     } catch (_) {
       return _truthyTableValue(_evalTableFormatExpression(condition, row));
     }
@@ -3500,8 +4541,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return args.where((e) => e.isNotEmpty).toList();
   }
 
-  String? _tableConditionalResult(Map<String, dynamic> field, Map<String, dynamic> row, String column) {
-    final raw = _fieldMetaValueAny(field, ['formato_condicional_campo', 'formato condicional campo', 'condicion_formato', 'condición formato', 'formato_condicional']);
+  String? _tableConditionalResult(
+      Map<String, dynamic> field, Map<String, dynamic> row, String column) {
+    final raw = _fieldMetaValueAny(field, [
+      'formato_condicional_campo',
+      'formato condicional campo',
+      'condicion_formato',
+      'condición formato',
+      'formato_condicional'
+    ]);
     if (raw == null) return null;
     var condition = raw.toString().trim();
     if (condition.isEmpty || condition.toUpperCase() == 'NULL') return null;
@@ -3518,22 +4566,90 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (rawColor == null) return null;
     final text = rawColor.toString().trim();
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
-    final normalized = text.replaceAll('"', '').replaceAll("'", '').replaceFirst(RegExp(r'^\s*=\s*'), '').trim().toLowerCase();
+    final normalized = text
+        .replaceAll('"', '')
+        .replaceAll("'", '')
+        .replaceFirst(RegExp(r'^\s*=\s*'), '')
+        .trim()
+        .toLowerCase();
     if (normalized == 'formato_condicional_campo') return conditionalResult;
     return text;
+  }
+
+  bool _tableStyleConditionApplies(
+    dynamic raw,
+    Map<String, dynamic> row,
+    String column,
+  ) {
+    if (raw == null) return true;
+    var condition = raw.toString().trim();
+    if (condition.isEmpty || condition.toUpperCase() == 'NULL') return true;
+    if (RegExp(r'^(>=|<=|<>|!=|==|=|>|<)').hasMatch(condition)) {
+      condition = '[$column] $condition';
+    }
+    return _evalTableFormatBool(condition.replaceAll('<>', '!='), row);
   }
 
   _TableCellFormat _tableCellFormat(String column, Map<String, dynamic> row) {
     final field = _fieldDefForCurrentTableColumn(column);
     if (field == null) return const _TableCellFormat();
-    final apply = _editBool(_fieldMetaValueAny(field, ['aplicar_formato_condicional_tabla', 'aplicar formato condicional tabla', 'aplicar_condicional_tabla', 'formato_condicional_tabla']), defaultValue: false);
+    final apply = _editBool(
+        _fieldMetaValueAny(field, [
+          'aplicar_formato_condicional_tabla',
+          'aplicar formato condicional tabla',
+          'aplicar_condicional_tabla',
+          'formato_condicional_tabla'
+        ]),
+        defaultValue: false);
     if (!apply) return const _TableCellFormat();
+    final legacyCondition = _fieldMetaValueAny(field, [
+      'formato_condicional_campo',
+      'formato condicional campo',
+      'condicion_formato',
+      'condición formato',
+      'formato_condicional'
+    ]);
     final result = _tableConditionalResult(field, row, column);
-    if (result == null) return const _TableCellFormat();
-    final textColor = _parseTableMatrixColor(_resolveTableColorRaw(_fieldMetaValueAny(field, ['color_texto', 'color texto', 'texto_color']), result));
-    final bgColor = _parseTableMatrixColor(_resolveTableColorRaw(_fieldMetaValueAny(field, ['color_fondo', 'color fondo', 'fondo_color']), result));
-    final borderColor = _parseTableMatrixColor(_resolveTableColorRaw(_fieldMetaValueAny(field, ['color_borde', 'color borde', 'borde_color']), result));
-    return _TableCellFormat(textColor: textColor, bgColor: bgColor, borderColor: borderColor);
+    final textCondition = _fieldMetaValueAny(
+            field, ['condicion_color_texto', 'condicion color texto']) ??
+        legacyCondition;
+    final bgCondition = _fieldMetaValueAny(
+            field, ['condicion_color_fondo', 'condicion color fondo']) ??
+        legacyCondition;
+    final borderCondition = _fieldMetaValueAny(
+            field, ['condicion_color_borde', 'condicion color borde']) ??
+        legacyCondition;
+    final textColor = _tableStyleConditionApplies(textCondition, row, column)
+        ? _parseTableMatrixColor(_resolveTableColorRaw(
+            _fieldMetaValueAny(
+                field, ['color_texto', 'color texto', 'texto_color']),
+            result))
+        : null;
+    final bgColor = _tableStyleConditionApplies(bgCondition, row, column)
+        ? _parseTableMatrixColor(_resolveTableColorRaw(
+            _fieldMetaValueAny(
+                field, ['color_fondo', 'color fondo', 'fondo_color']),
+            result))
+        : null;
+    final borderColor =
+        _tableStyleConditionApplies(borderCondition, row, column)
+            ? _parseTableMatrixColor(_resolveTableColorRaw(
+                _fieldMetaValueAny(
+                    field, ['color_borde', 'color borde', 'borde_color']),
+                result))
+            : null;
+    final fontSizeRaw = _fieldMetaValueAny(
+        field, ['tamanio_letra', 'tamano_letra', 'tamaño_letra', 'font_size']);
+    final parsedFontSize = double.tryParse(fontSizeRaw?.toString() ?? '');
+    final fontSize =
+        parsedFontSize != null && parsedFontSize >= 8 && parsedFontSize <= 72
+            ? parsedFontSize
+            : null;
+    return _TableCellFormat(
+        textColor: textColor,
+        bgColor: bgColor,
+        borderColor: borderColor,
+        fontSize: fontSize);
   }
 
   DataCell _buildCell(String column, Map<String, dynamic> row) {
@@ -3573,7 +4689,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final currentTable = _norm(tableName ?? '');
     if (wanted.isEmpty) return null;
     final cacheKey = '$currentTable|$wanted';
-    if (_fieldDefColumnCache.containsKey(cacheKey)) return _fieldDefColumnCache[cacheKey];
+    if (_fieldDefColumnCache.containsKey(cacheKey))
+      return _fieldDefColumnCache[cacheKey];
 
     Map<String, dynamic>? fallback;
     // Usar allLocalFormFields, no fieldDefsById.values. fieldDefsById se indexa
@@ -3613,14 +4730,23 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final n = _norm(column);
       final def = _fieldDefForCurrentTableColumn(column);
       final tipoUi = def?['tipo_ui']?.toString().trim().toLowerCase() ?? '';
-      final visibleTabla = def == null ? false : _editBool(def['visible_tabla'] ?? def['visible'], defaultValue: true);
-      if (n.isEmpty || def == null || !visibleTabla || _isHiddenWindowsColumn(column) || tipoUi == 'hidden' || tipoUi == 'hidden_id') continue;
+      final visibleTabla = def == null
+          ? false
+          : _editBool(def['visible_tabla'] ?? def['visible'],
+              defaultValue: true);
+      if (n.isEmpty ||
+          def == null ||
+          !visibleTabla ||
+          _isHiddenWindowsColumn(column) ||
+          tipoUi == 'hidden' ||
+          tipoUi == 'hidden_id') continue;
       if (seen.add(n)) out.add(column);
     }
     return out;
   }
 
-  List<String> _matrixColumnsForTable(String table, List<String> fetchedColumns) {
+  List<String> _matrixColumnsForTable(
+      String table, List<String> fetchedColumns) {
     final wantedTable = _norm(table);
     final cacheKey = '$wantedTable|${fetchedColumns.map(_norm).join('|')}';
     final cached = _matrixColumnsCache[cacheKey];
@@ -3638,12 +4764,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final campo = def['campo']?.toString().trim() ?? '';
       if (campo.isEmpty) continue;
       final tipoUi = def['tipo_ui']?.toString().trim().toLowerCase() ?? '';
-      final visibleTabla = _editBool(def['visible_tabla'] ?? def['visible'], defaultValue: true);
-      if (!visibleTabla || tipoUi == 'hidden' || tipoUi == 'hidden_id' || _isHiddenWindowsColumn(campo)) continue;
+      final visibleTabla =
+          _editBool(def['visible_tabla'] ?? def['visible'], defaultValue: true);
+      if (!visibleTabla ||
+          tipoUi == 'hidden' ||
+          tipoUi == 'hidden_id' ||
+          _isHiddenWindowsColumn(campo)) continue;
       final norm = _norm(campo);
       if (seen.add(norm)) out.add(fetchedByNorm[norm] ?? campo);
     }
-    final result = out.isNotEmpty ? out : _visibleWindowsColumns(fetchedColumns);
+    final result =
+        out.isNotEmpty ? out : _visibleWindowsColumns(fetchedColumns);
     _matrixColumnsCache[cacheKey] = List<String>.unmodifiable(result);
     return _matrixColumnsCache[cacheKey]!;
   }
@@ -3653,8 +4784,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (custom != null) return custom;
     final clean = column.trim();
     if (clean.length > 28) return 230;
-    if (_norm(clean).contains('OBSERV') || _norm(clean).contains('DESCRIP')) return 260;
-    if (_norm(clean).contains('FOTO') || _norm(clean).contains('FIRMA')) return 180;
+    if (_norm(clean).contains('OBSERV') || _norm(clean).contains('DESCRIP'))
+      return 260;
+    if (_norm(clean).contains('FOTO') || _norm(clean).contains('FIRMA'))
+      return 180;
     return 150;
   }
 
@@ -3680,7 +4813,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       for (final entry in row.entries) {
         if (_norm(entry.key) != wanted) continue;
         final value = entry.value;
-        if (value != null && value.toString().trim().isNotEmpty && value.toString().trim().toUpperCase() != 'NULL') {
+        if (value != null &&
+            value.toString().trim().isNotEmpty &&
+            value.toString().trim().toUpperCase() != 'NULL') {
           return entry.key;
         }
       }
@@ -3689,7 +4824,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final key in row.keys) {
       final n = _norm(key);
       final value = row[key];
-      if ((n == 'ID' || n.endsWith('_ID')) && value != null && value.toString().trim().isNotEmpty && value.toString().trim().toUpperCase() != 'NULL') {
+      if ((n == 'ID' || n.endsWith('_ID')) &&
+          value != null &&
+          value.toString().trim().isNotEmpty &&
+          value.toString().trim().toUpperCase() != 'NULL') {
         return key;
       }
     }
@@ -3714,29 +4852,39 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return !_isHiddenWindowsColumn(column) && !blocked.contains(n);
   }
 
-  String _editRawFieldValue(Map<String, dynamic> field, List<String> candidates) {
+  String _editRawFieldValue(
+      Map<String, dynamic> field, List<String> candidates) {
     final value = _value(field, candidates);
     final text = value?.toString().trim() ?? '';
     return text.toUpperCase() == 'NULL' ? '' : text;
   }
 
   String _editTipo(Map<String, dynamic> field) {
-    final tipo = _editRawFieldValue(field, ['tipo', 'type', 'tipo_dato', 'data_type']);
+    final tipo =
+        _editRawFieldValue(field, ['tipo', 'type', 'tipo_dato', 'data_type']);
     return tipo.isEmpty ? 'text' : tipo.toLowerCase();
   }
 
   String _editUiType(Map<String, dynamic> field) {
-    final ui = _editRawFieldValue(field, ['tipo_ui', 'tipo ui', 'ui', 'tipo_control', 'control_ui']);
+    final ui = _editRawFieldValue(
+        field, ['tipo_ui', 'tipo ui', 'ui', 'tipo_control', 'control_ui']);
     if (ui.isNotEmpty) return ui.toLowerCase();
     return _editTipo(field);
   }
 
   String _editDropdownRaw(Map<String, dynamic> field) {
-    return _editRawFieldValue(field, ['id_campo_dropdown', 'id campo dropdown', 'id_dropdown', 'campo_dropdown', 'dropdown']);
+    return _editRawFieldValue(field, [
+      'id_campo_dropdown',
+      'id campo dropdown',
+      'id_dropdown',
+      'campo_dropdown',
+      'dropdown'
+    ]);
   }
 
   String _editFormulaRaw(Map<String, dynamic> field) {
-    return _editRawFieldValue(field, ['formula_funcion', 'formula funcion', 'formula', 'funcion_formula']);
+    return _editRawFieldValue(field,
+        ['formula_funcion', 'formula funcion', 'formula', 'funcion_formula']);
   }
 
   bool _editBool(dynamic value, {bool defaultValue = false}) {
@@ -3751,7 +4899,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool _editFieldEditable(Map<String, dynamic> field) {
     final ui = _editUiType(field);
     final tipo = _editTipo(field);
-    if (ui == 'formula' || ui == 'lookup' || tipo == 'calculated' || tipo == 'readonly') return false;
+    if (ui == 'formula' ||
+        ui == 'lookup' ||
+        tipo == 'calculated' ||
+        tipo == 'readonly') return false;
     final raw = field['editable'];
     if (raw == null) return true;
     return _editBool(raw, defaultValue: true);
@@ -3779,13 +4930,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool _editIsNumberField(Map<String, dynamic> field) {
     final tipo = _editTipo(field);
     final ui = _editUiType(field);
-    return tipo == 'number' || tipo == 'numeric' || tipo == 'decimal' || tipo == 'double' || tipo == 'integer' || tipo == 'int' || ui == 'number' || ui == 'numeric' || ui == 'decimal' || ui == 'double' || ui == 'integer' || ui == 'int';
+    return tipo == 'number' ||
+        tipo == 'numeric' ||
+        tipo == 'decimal' ||
+        tipo == 'double' ||
+        tipo == 'integer' ||
+        tipo == 'int' ||
+        ui == 'number' ||
+        ui == 'numeric' ||
+        ui == 'decimal' ||
+        ui == 'double' ||
+        ui == 'integer' ||
+        ui == 'int';
   }
 
   bool _editAllowsDecimal(Map<String, dynamic> field) {
     final tipo = _editTipo(field);
     final ui = _editUiType(field);
-    if (tipo == 'integer' || tipo == 'int' || ui == 'integer' || ui == 'int') return false;
+    if (tipo == 'integer' || tipo == 'int' || ui == 'integer' || ui == 'int')
+      return false;
     return _editNumeroDecimales(field) > 0;
   }
 
@@ -3799,7 +4962,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return parsed;
   }
 
-  List<TextInputFormatter> _editInputFormattersForField(Map<String, dynamic> field) {
+  List<TextInputFormatter> _editInputFormattersForField(
+      Map<String, dynamic> field) {
     final formatters = <TextInputFormatter>[];
     if (_editIsNumberField(field)) {
       final decimals = _editNumeroDecimales(field);
@@ -3807,23 +4971,27 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       formatters.add(TextInputFormatter.withFunction((oldValue, newValue) {
         final text = newValue.text.trim();
         if (text.isEmpty || text == '-') return newValue;
-        final pattern = decimal ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$') : RegExp(r'^-?\d*$');
+        final pattern = decimal
+            ? RegExp(r'^-?\d*([.,]\d{0,' + decimals.toString() + r'})?$')
+            : RegExp(r'^-?\d*$');
         return pattern.hasMatch(text) ? newValue : oldValue;
       }));
     }
     final maxChars = _editMaxCharacters(field);
-    if (maxChars != null) formatters.add(LengthLimitingTextInputFormatter(maxChars));
+    if (maxChars != null)
+      formatters.add(LengthLimitingTextInputFormatter(maxChars));
     return formatters;
   }
 
-  String? _editNumberValidationError(Map<String, dynamic> field, String raw, String label) {
+  String? _editNumberValidationError(
+      Map<String, dynamic> field, String raw, String label) {
     final text = raw.trim();
     if (text.isEmpty) return null;
     if (!_editIsNumberField(field)) return null;
     final number = num.tryParse(text.replaceAll(',', '.'));
     if (number == null) return 'El campo "$label" debe ser numérico.';
     if (!_editAllowsDecimal(field) && text.contains(RegExp(r'[.,]'))) {
-      return 'El campo "$label" no acepta decimales según MATRIZ_CAMPOS_FORMATO_APPGT.';
+      return 'El campo "$label" no acepta decimales según su configuración.';
     }
     final decimals = _editNumeroDecimales(field);
     final match = RegExp(r'[.,](\d+)$').firstMatch(text);
@@ -3835,7 +5003,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   String _editFieldLabel(Map<String, dynamic>? field, String campo) {
     final label = field?['etiqueta']?.toString().trim();
-    return (label == null || label.isEmpty || label.toUpperCase() == 'NULL') ? campo : label;
+    return (label == null || label.isEmpty || label.toUpperCase() == 'NULL')
+        ? campo
+        : label;
   }
 
   String _editUnwrapBracketReference(String value) {
@@ -3853,7 +5023,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // [a,b,c] o [a;b;c] es lista manual.
     // [uuid-del-campo] / [CAMPO] / [Etiqueta] es referencia dinámica.
     final content = _editUnwrapBracketReference(text);
-    return content.contains(',') || content.contains(';') || content.contains('|');
+    return content.contains(',') ||
+        content.contains(';') ||
+        content.contains('|');
   }
 
   List<String>? _editLiteralDropdownOptions(Map<String, dynamic> field) {
@@ -3880,7 +5052,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     Map<String, dynamic>? fallback;
     for (final field in allLocalFormFields) {
-      final matches = [field['id'], field['campo'], field['etiqueta'], field['nombre_campo']].any((value) => _norm(value?.toString() ?? '') == wanted);
+      final matches = [
+        field['id'],
+        field['campo'],
+        field['etiqueta'],
+        field['nombre_campo']
+      ].any((value) => _norm(value?.toString() ?? '') == wanted);
       if (!matches) continue;
       final fieldTable = _norm(field['tabla_destino']?.toString() ?? '');
       if (currentTable.isNotEmpty && fieldTable == currentTable) return field;
@@ -3918,7 +5095,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         }
       }
       final text = value?.toString().trim() ?? '';
-      if (text.isEmpty || text.toUpperCase() == 'NULL' || seen.contains(text)) continue;
+      if (text.isEmpty || text.toUpperCase() == 'NULL' || seen.contains(text))
+        continue;
       seen.add(text);
       out.add(text);
     }
@@ -3953,11 +5131,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
   }
 
-  Future<List<Map<String, dynamic>>> _editFieldRows(String table, Map<String, dynamic> row) async {
+  Future<List<Map<String, dynamic>>> _editFieldRows(
+      String table, Map<String, dynamic> row) async {
     final wanted = _norm(table);
     var rows = allLocalFormFields.where((field) {
       final activo = _editBool(field['activo'], defaultValue: true);
-      return activo && _norm(field['tabla_destino']?.toString() ?? '') == wanted;
+      return activo &&
+          _norm(field['tabla_destino']?.toString() ?? '') == wanted;
     }).toList();
     if (rows.isEmpty) {
       rows = await local.where(
@@ -3968,7 +5148,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       );
     }
 
-    final technical = {'ID', 'ID_LOCAL', 'ID_FILA_SERIAL', 'PK_ID', 'ID_PK', 'HASH_FILA_SIN_IDS', 'HASH_FILA_SIN_ID', 'ID_REGISTRO'};
+    final technical = {
+      'ID',
+      'ID_LOCAL',
+      'ID_FILA_SERIAL',
+      'PK_ID',
+      'ID_PK',
+      'HASH_FILA_SIN_IDS',
+      'HASH_FILA_SIN_ID',
+      'ID_REGISTRO'
+    };
     final normalizedRowKeys = row.keys.map(_norm).toSet();
     final result = <Map<String, dynamic>>[];
     final seen = <String>{};
@@ -3977,7 +5166,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (campo.isEmpty) continue;
       final n = _norm(campo);
       if (technical.contains(n)) continue;
-      if (_editUiType(field) == 'hidden_id' || _editUiType(field) == 'hidden') continue;
+      if (_editUiType(field) == 'hidden_id' || _editUiType(field) == 'hidden')
+        continue;
       if (!normalizedRowKeys.contains(n)) {
         // Permite campos de fórmula/lookup aunque no hayan venido en la consulta si están en matriz.
         final ui = _editUiType(field);
@@ -3987,14 +5177,24 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     if (result.isEmpty) {
-      for (final column in (displayColumns.isNotEmpty ? displayColumns : _columnsFromRows([row])).where(_isEditableColumn)) {
-        result.add({'campo': column, 'etiqueta': column, 'tipo': 'text', 'tipo_ui': 'text', 'editable': true});
+      for (final column in (displayColumns.isNotEmpty
+              ? displayColumns
+              : _columnsFromRows([row]))
+          .where(_isEditableColumn)) {
+        result.add({
+          'campo': column,
+          'etiqueta': column,
+          'tipo': 'text',
+          'tipo_ui': 'text',
+          'editable': true
+        });
       }
     }
     return result;
   }
 
-  String _editInitialValue(Map<String, dynamic> row, String campo, [Map<String, dynamic>? field]) {
+  String _editInitialValue(Map<String, dynamic> row, String campo,
+      [Map<String, dynamic>? field]) {
     String? value;
     if (row.containsKey(campo)) {
       value = _displayCellValue(row[campo]);
@@ -4008,8 +5208,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
     }
 
-    if (value != null && value.trim().isNotEmpty && value.toUpperCase() != 'NULL') {
-      if (field != null && (_editTipo(field) == 'time' || _editUiType(field) == 'time')) {
+    if (value != null &&
+        value.trim().isNotEmpty &&
+        value.toUpperCase() != 'NULL') {
+      if (field != null &&
+          (_editTipo(field) == 'time' || _editUiType(field) == 'time')) {
         return _editNormalizeTimeText(value);
       }
       return value;
@@ -4019,7 +5222,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (defaultValue.isNotEmpty && defaultValue.toUpperCase() != 'NULL') {
       final tipo = field == null ? '' : _editTipo(field);
       final ui = field == null ? '' : _editUiType(field);
-      if (field != null && (tipo == 'number' || tipo == 'numeric' || tipo == 'integer' || ui == 'number' || ui == 'numeric' || ui == 'integer')) {
+      if (field != null &&
+          (tipo == 'number' ||
+              tipo == 'numeric' ||
+              tipo == 'integer' ||
+              ui == 'number' ||
+              ui == 'numeric' ||
+              ui == 'integer')) {
         return _editFormatNumberText(defaultValue, field);
       }
       return defaultValue;
@@ -4028,7 +5237,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return value ?? '';
   }
 
-  void _editRecalculateFormulas({required List<Map<String, dynamic>> fields, required Map<String, TextEditingController> controllers}) {
+  void _editRecalculateFormulas(
+      {required List<Map<String, dynamic>> fields,
+      required Map<String, TextEditingController> controllers}) {
     String valueOf(String campo) {
       final wanted = _norm(campo);
       for (final entry in controllers.entries) {
@@ -4050,7 +5261,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final campo = field['campo']?.toString() ?? '';
         final formula = _editFormulaRaw(field);
         final controller = controllers[campo];
-        if (campo.isEmpty || formula.trim().isEmpty || controller == null) continue;
+        if (campo.isEmpty || formula.trim().isEmpty || controller == null)
+          continue;
         try {
           final result = engine.evaluateToText(formula);
           if (controller.text != result) controller.text = result;
@@ -4081,10 +5293,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         context: dialogContext,
         builder: (context) {
           var filtered = List<String>.from(uniqueOptions);
-          void applyFilter(String query, void Function(void Function()) setLocalState) {
+          void applyFilter(
+              String query, void Function(void Function()) setLocalState) {
             final q = query.trim().toLowerCase();
             setLocalState(() {
-              filtered = q.isEmpty ? List<String>.from(uniqueOptions) : uniqueOptions.where((e) => e.toLowerCase().contains(q)).toList();
+              filtered = q.isEmpty
+                  ? List<String>.from(uniqueOptions)
+                  : uniqueOptions
+                      .where((e) => e.toLowerCase().contains(q))
+                      .toList();
             });
           }
 
@@ -4124,7 +5341,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                 return ListTile(
                                   dense: true,
                                   title: Text(option),
-                                  trailing: selected ? const Icon(Icons.check) : null,
+                                  trailing:
+                                      selected ? const Icon(Icons.check) : null,
                                   onTap: () => Navigator.pop(context, option),
                                 );
                               },
@@ -4135,8 +5353,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-              TextButton(onPressed: () => Navigator.pop(context, ''), child: const Text('Limpiar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, ''),
+                  child: const Text('Limpiar')),
             ],
           );
         },
@@ -4176,7 +5398,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           border: const OutlineInputBorder(),
           isDense: true,
           suffixIcon: Icon(editable ? Icons.search : Icons.lock_outline),
-          helperText: options.isEmpty ? 'Sin opciones configuradas o descargadas.' : null,
+          helperText: options.isEmpty
+              ? 'Sin opciones configuradas o descargadas.'
+              : null,
         ),
         child: Text(
           hasValidValue ? current : 'Seleccione o busque...',
@@ -4202,17 +5426,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final editable = _editFieldEditable(field) && !_isMediaColumn(campo);
     final controller = controllers[campo] ??= TextEditingController();
 
-    void recalc() => setDialogState(() => _editRecalculateFormulas(fields: fields, controllers: controllers));
+    void recalc() => setDialogState(() =>
+        _editRecalculateFormulas(fields: fields, controllers: controllers));
 
     Set<String> parseMultiSelect(String raw) {
       if (raw.trim().isEmpty) return <String>{};
-      return raw.split(RegExp(r'[|,;]')).map((e) => e.trim()).where((e) => e.isNotEmpty).toSet();
+      return raw
+          .split(RegExp(r'[|,;]'))
+          .map((e) => e.trim())
+          .where((e) => e.isNotEmpty)
+          .toSet();
     }
 
     if (ui == 'multiselect') {
-      final options = _editLiteralDropdownOptions(field) ?? _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
+      final options = _editLiteralDropdownOptions(field) ??
+          _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
       final selected = parseMultiSelect(controller.text);
-      final selectedText = selected.isEmpty ? 'Seleccionar...' : (selected.toList()..sort()).join(', ');
+      final selectedText = selected.isEmpty
+          ? 'Seleccionar...'
+          : (selected.toList()..sort()).join(', ');
 
       Future<void> openPicker() async {
         if (!editable || options.isEmpty) return;
@@ -4253,9 +5485,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
-              TextButton(onPressed: () => Navigator.pop(context, <String>{}), child: const Text('Limpiar')),
-              FilledButton(onPressed: () => Navigator.pop(context, temp), child: const Text('Aplicar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Cancelar')),
+              TextButton(
+                  onPressed: () => Navigator.pop(context, <String>{}),
+                  child: const Text('Limpiar')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(context, temp),
+                  child: const Text('Aplicar')),
             ],
           ),
         );
@@ -4271,8 +5509,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             labelText: label,
             border: const OutlineInputBorder(),
             isDense: true,
-            helperText: options.isEmpty ? 'Sin opciones configuradas o descargadas.' : 'Toca para seleccionar uno o varios valores',
-            suffixIcon: Icon(editable ? Icons.arrow_drop_down : Icons.lock_outline),
+            helperText: options.isEmpty
+                ? 'Sin opciones configuradas o descargadas.'
+                : 'Toca para seleccionar uno o varios valores',
+            suffixIcon:
+                Icon(editable ? Icons.arrow_drop_down : Icons.lock_outline),
           ),
           child: Text(
             selectedText,
@@ -4285,7 +5526,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     if (ui == 'dropdown' || _editHasDropdownSource(field)) {
-      final options = _editLiteralDropdownOptions(field) ?? _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
+      final options = _editLiteralDropdownOptions(field) ??
+          _editOptionsForCatalog(_editDynamicDropdownCatalog(field) ?? '');
       if (options.isNotEmpty) {
         return _editSearchableDropdownField(
           dialogContext: dialogContext,
@@ -4316,7 +5558,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 if (parts.length >= 2) {
                   final hour = int.tryParse(parts[0]);
                   final minute = int.tryParse(parts[1]);
-                  if (hour != null && minute != null && hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+                  if (hour != null &&
+                      minute != null &&
+                      hour >= 0 &&
+                      hour <= 23 &&
+                      minute >= 0 &&
+                      minute <= 59) {
                     initial = TimeOfDay(hour: hour, minute: minute);
                   }
                 }
@@ -4324,12 +5571,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   context: dialogContext,
                   initialTime: initial,
                   builder: (context, child) => MediaQuery(
-                    data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+                    data: MediaQuery.of(context)
+                        .copyWith(alwaysUse24HourFormat: true),
                     child: child ?? const SizedBox.shrink(),
                   ),
                 );
                 if (picked == null) return;
-                controller.text = '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
+                controller.text =
+                    '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}';
                 recalc();
               }
             : null,
@@ -4348,7 +5597,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         ),
         onTap: editable
             ? () async {
-                final initial = DateTime.tryParse(controller.text.trim()) ?? DateTime.now();
+                final initial =
+                    DateTime.tryParse(controller.text.trim()) ?? DateTime.now();
                 final picked = await showDatePicker(
                   context: dialogContext,
                   initialDate: initial,
@@ -4366,22 +5616,31 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return TextField(
       controller: controller,
       readOnly: !editable || ui == 'formula' || ui == 'lookup',
-      keyboardType: _editIsNumberField(field) ? TextInputType.numberWithOptions(decimal: _editAllowsDecimal(field), signed: true) : TextInputType.text,
+      keyboardType: _editIsNumberField(field)
+          ? TextInputType.numberWithOptions(
+              decimal: _editAllowsDecimal(field), signed: true)
+          : TextInputType.text,
       inputFormatters: _editInputFormattersForField(field),
       minLines: _isMediaColumn(campo) ? 1 : 1,
       maxLines: _isMediaColumn(campo) ? 3 : 1,
-      onChanged: (_) => _editRecalculateFormulas(fields: fields, controllers: controllers),
+      onChanged: (_) =>
+          _editRecalculateFormulas(fields: fields, controllers: controllers),
       decoration: InputDecoration(
         labelText: label,
         border: const OutlineInputBorder(),
         isDense: true,
-        helperText: (ui == 'formula' || ui == 'lookup') ? 'Calculado según matriz' : null,
+        helperText: (ui == 'formula' || ui == 'lookup')
+            ? 'Calculado según matriz'
+            : null,
       ),
     );
   }
 
   int? _editGridNumber(Map<String, dynamic> field, String key) {
-    final raw = key == 'grid_fila' ? _value(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid']) : _value(field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
+    final raw = key == 'grid_fila'
+        ? _value(field, ['grid_fila', 'grid fila', 'fila', 'fila_grid'])
+        : _value(
+            field, ['grid_columna', 'grid columna', 'columna', 'columna_grid']);
     if (raw == null) return null;
     final text = raw.toString().trim();
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
@@ -4443,7 +5702,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 });
               },
               icon: const Icon(Icons.draw),
-              label: Text(hasNewSignature ? 'Volver a firmar' : 'Capturar nueva firma'),
+              label: Text(
+                  hasNewSignature ? 'Volver a firmar' : 'Capturar nueva firma'),
             ),
           ),
         ],
@@ -4497,7 +5757,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // aparezcan arriba aunque tu matriz los tenga en grid_fila=6.
     final rowBuckets = <int, List<Map<String, dynamic>>>{};
     for (final field in editFields) {
-      final fila = _editGridNumber(field, 'grid_fila') ?? _editFieldOrderNumber(field);
+      final fila =
+          _editGridNumber(field, 'grid_fila') ?? _editFieldOrderNumber(field);
       rowBuckets.putIfAbsent(fila, () => <Map<String, dynamic>>[]).add(field);
     }
 
@@ -4516,11 +5777,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ));
     }
 
-    for (final entry in rowBuckets.entries.toList()..sort((a, b) => a.key.compareTo(b.key))) {
+    for (final entry in rowBuckets.entries.toList()
+      ..sort((a, b) => a.key.compareTo(b.key))) {
       final rowFields = entry.value;
       rowFields.sort((a, b) {
-        final ca = _editGridNumber(a, 'grid_columna') ?? _editFieldOrderNumber(a);
-        final cb = _editGridNumber(b, 'grid_columna') ?? _editFieldOrderNumber(b);
+        final ca =
+            _editGridNumber(a, 'grid_columna') ?? _editFieldOrderNumber(a);
+        final cb =
+            _editGridNumber(b, 'grid_columna') ?? _editFieldOrderNumber(b);
         if (ca != cb) return ca.compareTo(cb);
         return _editFieldOrderNumber(a).compareTo(_editFieldOrderNumber(b));
       });
@@ -4557,7 +5821,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final table = tableName;
     if (!canUpdate) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No tienes permiso para actualizar este formato.')),
+        const SnackBar(
+            content: Text('No tienes permiso para actualizar este formato.')),
       );
       return;
     }
@@ -4566,20 +5831,28 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final pkColumn = _primaryKeyColumn(row);
     if (pkColumn == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No se pudo identificar una columna ID para actualizar el registro.')),
+        const SnackBar(
+            content: Text(
+                'No se pudo identificar una columna ID para actualizar el registro.')),
       );
       return;
     }
     final pkValue = row[pkColumn];
 
     final editFields = await _editFieldRows(table, row);
-    final columns = editFields.map((field) => field['campo']?.toString().trim() ?? '').where((c) => c.isNotEmpty).toList();
+    final columns = editFields
+        .map((field) => field['campo']?.toString().trim() ?? '')
+        .where((c) => c.isNotEmpty)
+        .toList();
     final fieldByColumn = <String, Map<String, dynamic>>{
       for (final field in editFields)
-        if ((field['campo']?.toString().trim() ?? '').isNotEmpty) field['campo'].toString(): field,
+        if ((field['campo']?.toString().trim() ?? '').isNotEmpty)
+          field['campo'].toString(): field,
     };
     final controllers = <String, TextEditingController>{
-      for (final column in columns) column: TextEditingController(text: _editInitialValue(row, column, fieldByColumn[column])),
+      for (final column in columns)
+        column: TextEditingController(
+            text: _editInitialValue(row, column, fieldByColumn[column])),
     };
     _editRecalculateFormulas(fields: editFields, controllers: controllers);
     final newSignatures = <String, Uint8List>{};
@@ -4633,18 +5906,23 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final payload = <String, dynamic>{};
     for (final entry in controllers.entries) {
       final column = entry.key;
-      if (_isSignatureColumn(column) && newSignatures.containsKey(column)) continue;
+      if (_isSignatureColumn(column) && newSignatures.containsKey(column))
+        continue;
       final raw = entry.value.text.trim();
       final field = fieldByColumn[column];
       final label = _editFieldLabel(field, column);
-      if (field != null && _editBool(field['requerido'], defaultValue: false) && raw.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Llene el campo obligatorio "$label".')));
+      if (field != null &&
+          _editBool(field['requerido'], defaultValue: false) &&
+          raw.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Llene el campo obligatorio "$label".')));
         return;
       }
       if (field != null) {
         final validationError = _editNumberValidationError(field, raw, label);
         if (validationError != null) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(validationError)));
+          ScaffoldMessenger.of(context)
+              .showSnackBar(SnackBar(content: Text(validationError)));
           return;
         }
         if (_editIsNumberField(field) && raw.isNotEmpty) {
@@ -4696,7 +5974,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (filtersChanged) _filterControlsVersion.value++;
   }
 
-  void _toggleDeleteSelection(Map<String, dynamic> row, int index, bool? selected) {
+  void _toggleDeleteSelection(
+      Map<String, dynamic> row, int index, bool? selected) {
     final key = _remoteRowHighlightKey(row, index);
     if (selected == true) {
       _selectedDeleteRowKeys.add(key);
@@ -4708,7 +5987,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     _notifyDeleteSelectionChanged();
   }
 
-  void _toggleSelectAllVisible(List<Map<String, dynamic>> rows, bool? selected) {
+  void _toggleSelectAllVisible(
+      List<Map<String, dynamic>> rows, bool? selected) {
     if (selected == true) {
       for (var i = 0; i < rows.length; i++) {
         final key = _remoteRowHighlightKey(rows[i], i);
@@ -4728,7 +6008,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Future<void> _deleteSelectedRows() async {
     final table = tableName;
-    if (!canDelete || table == null || table.trim().isEmpty || _selectedDeleteRows.isEmpty) return;
+    if (!canDelete ||
+        table == null ||
+        table.trim().isEmpty ||
+        _selectedDeleteRows.isEmpty) return;
     final count = _selectedDeleteRows.length;
     final ok = await showDialog<bool>(
       context: context,
@@ -4736,7 +6019,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         title: const Text('Confirmar borrado'),
         content: Text('¿Está seguro de borrar $count registro(s)?'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancelar')),
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancelar')),
           FilledButton.icon(
             icon: const Icon(Icons.delete_outline),
             label: const Text('Borrar'),
@@ -4763,10 +6048,105 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       _selectedDeleteRows.clear();
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Registro(s) eliminado(s).')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Registro(s) eliminado(s).')));
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No se pudo borrar: $e')));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('No se pudo borrar: $e')));
+    }
+  }
+
+  String _approvalColumnForRow(Map<String, dynamic> row) {
+    for (final key in row.keys) {
+      if (_norm(key) == 'ESTADO_APROBACION') return key;
+    }
+    final currentTable = _norm(tableName ?? '');
+    for (final field in allLocalFormFields) {
+      if (_norm(field['tabla_destino']?.toString() ?? '') != currentTable) {
+        continue;
+      }
+      final campo = field['campo']?.toString().trim() ?? '';
+      if (_norm(campo) == 'ESTADO_APROBACION') return campo;
+    }
+    return 'ESTADO_APROBACION';
+  }
+
+  Future<void> _setSelectedApprovalState(String nextState) async {
+    final table = tableName;
+    final desired = nextState.trim().toUpperCase();
+    final allowed = desired == 'REVISADO' ? canReview : canApprove;
+    if (!_approvalsEnabled ||
+        !allowed ||
+        table == null ||
+        table.trim().isEmpty ||
+        _selectedDeleteRows.isEmpty) {
+      return;
+    }
+
+    final eligible = <Map<String, dynamic>>[];
+    for (final row in _selectedDeleteRows.values) {
+      final column = _approvalColumnForRow(row);
+      final current = row[column]?.toString().trim().toUpperCase() ?? '';
+      if (desired == 'APROBADO') {
+        if (current == 'REVISADO') eligible.add(row);
+      } else if (current != 'APROBADO') {
+        eligible.add(row);
+      }
+    }
+    if (eligible.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(desired == 'APROBADO'
+            ? 'Para aprobar, seleccione registros que ya estén REVISADOS.'
+            : 'Los registros seleccionados ya tienen una aprobación posterior.'),
+      ));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(
+            desired == 'APROBADO' ? 'Aprobar registros' : 'Revisar registros'),
+        content: Text(
+            'Se marcarán ${eligible.length} registro(s) como $desired. ¿Continuar?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(desired == 'APROBADO' ? 'Aprobar' : 'Revisar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
+    try {
+      for (final row in eligible) {
+        final pkColumn = _primaryKeyColumn(row);
+        if (pkColumn == null) continue;
+        final column = _approvalColumnForRow(row);
+        await supabase
+            .from(table)
+            .update({column: desired}).eq(pkColumn, row[pkColumn]);
+      }
+      _selectedDeleteRowKeys.clear();
+      _selectedDeleteRows.clear();
+      _notifyDeleteSelectionChanged();
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Registro(s) marcados como $desired.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo actualizar la aprobación: $error')),
+      );
     }
   }
 
@@ -4818,8 +6198,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             ),
           ),
           actions: [
-            TextButton(onPressed: () => Navigator.pop(context, <String>{}), child: const Text('Quitar fijadas')),
-            FilledButton(onPressed: () => Navigator.pop(context, temp), child: const Text('Aplicar')),
+            TextButton(
+                onPressed: () => Navigator.pop(context, <String>{}),
+                child: const Text('Quitar fijadas')),
+            FilledButton(
+                onPressed: () => Navigator.pop(context, temp),
+                child: const Text('Aplicar')),
           ],
         ),
       ),
@@ -4836,7 +6220,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return DataCell(
       IconButton(
         tooltip: canUpdate ? 'Editar registro' : 'Actualización no permitida',
-        icon: Icon(Icons.edit, size: 18, color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
+        icon: Icon(Icons.edit,
+            size: 18, color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
         onPressed: canUpdate ? () => _editRemoteRecord(row) : null,
       ),
     );
@@ -4846,7 +6231,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final cached = _rowKeyCache[row];
     if (cached != null) return cached;
 
-    const candidates = ['id_local', 'ID_LOCAL', 'id', 'ID', 'hash_fila_sin_ids', 'HASH_FILA_SIN_IDS', 'ID_REGISTRO', 'id_registro'];
+    const candidates = [
+      'id_local',
+      'ID_LOCAL',
+      'id',
+      'ID',
+      'hash_fila_sin_ids',
+      'HASH_FILA_SIN_IDS',
+      'ID_REGISTRO',
+      'id_registro'
+    ];
     for (final key in candidates) {
       final value = row[key];
       if (value != null && value.toString().trim().isNotEmpty) {
@@ -4862,11 +6256,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   Widget _recordsTable(List<Map<String, dynamic>> rows) {
-    final visibleRows = rows.length > _renderRowLimit ? rows.take(_renderRowLimit).toList() : rows;
-    final rawColumns = displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records.isNotEmpty ? records : rows);
-    final allColumnsRaw = _matrixColumnsForTable(tableName ?? widget.format['tabla_destino']?.toString() ?? '', rawColumns);
-    final pinned = allColumnsRaw.where(_pinnedColumns.contains).toList(growable: false);
-    final unpinned = allColumnsRaw.where((c) => !_pinnedColumns.contains(c)).toList(growable: false);
+    final visibleRows = rows.length > _renderRowLimit
+        ? rows.take(_renderRowLimit).toList()
+        : rows;
+    final rawColumns = displayColumns.isNotEmpty
+        ? displayColumns
+        : _columnsFromRows(records.isNotEmpty ? records : rows);
+    final allColumnsRaw = _matrixColumnsForTable(
+        tableName ?? widget.format['tabla_destino']?.toString() ?? '',
+        rawColumns);
+    final pinned =
+        allColumnsRaw.where(_pinnedColumns.contains).toList(growable: false);
+    final unpinned = allColumnsRaw
+        .where((c) => !_pinnedColumns.contains(c))
+        .toList(growable: false);
     final allColumns = <String>[...pinned, ...unpinned];
     if (allColumns.isEmpty) return _emptyMessage('No hay columnas visibles');
 
@@ -4890,7 +6293,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         alignment: Alignment.centerLeft,
         decoration: const BoxDecoration(
           color: _appgtHeaderColor,
-          border: Border(right: BorderSide(color: Color(0x55314457), width: 0.8)),
+          border:
+              Border(right: BorderSide(color: Color(0x55314457), width: 0.8)),
         ),
         child: Row(
           children: [
@@ -4907,7 +6311,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   _invalidateFilteredCache();
                   unawaited(_load());
                 },
-                onDoubleTap: () => _setColumnWidth(column, _autoWidthForColumn(column, visibleRows)),
+                onDoubleTap: () => _setColumnWidth(
+                    column, _autoWidthForColumn(column, visibleRows)),
                 child: Row(
                   children: [
                     Expanded(
@@ -4915,10 +6320,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                         label,
                         overflow: TextOverflow.ellipsis,
                         maxLines: 2,
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5),
+                        style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12.5),
                       ),
                     ),
-                    if (sorted) Icon(_sortAscending ? Icons.arrow_upward : Icons.arrow_downward, size: 14, color: Colors.white),
+                    if (sorted)
+                      Icon(
+                          _sortAscending
+                              ? Icons.arrow_upward
+                              : Icons.arrow_downward,
+                          size: 14,
+                          color: Colors.white),
                   ],
                 ),
               ),
@@ -4927,13 +6341,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               onTap: () => _showColumnFilterDialog(column),
               child: Padding(
                 padding: const EdgeInsets.only(left: 4),
-                child: Icon(activeFilter ? Icons.filter_alt : Icons.filter_alt_outlined, size: 16, color: Colors.white),
+                child: Icon(
+                    activeFilter ? Icons.filter_alt : Icons.filter_alt_outlined,
+                    size: 16,
+                    color: Colors.white),
               ),
             ),
             GestureDetector(
               behavior: HitTestBehavior.translucent,
-              onHorizontalDragUpdate: (details) => _setColumnWidth(column, _tableColumnWidth(column) + details.delta.dx),
-              child: const SizedBox(width: 10, height: 36, child: Center(child: VerticalDivider(color: Color(0x99FFFFFF), thickness: 1))),
+              onHorizontalDragUpdate: (details) => _setColumnWidth(
+                  column, _tableColumnWidth(column) + details.delta.dx),
+              child: const SizedBox(
+                  width: 10,
+                  height: 36,
+                  child: Center(
+                      child: VerticalDivider(
+                          color: Color(0x99FFFFFF), thickness: 1))),
             ),
           ],
         ),
@@ -4947,14 +6370,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         alignment: Alignment.center,
         decoration: const BoxDecoration(
           color: _appgtHeaderColor,
-          border: Border(right: BorderSide(color: Color(0x55314457), width: 0.8)),
+          border:
+              Border(right: BorderSide(color: Color(0x55314457), width: 0.8)),
         ),
         child: child,
       );
     }
 
     Widget deleteHeader() {
-      final allVisibleSelected = visibleRows.isNotEmpty && visibleRows.asMap().entries.every((e) => _selectedDeleteRowKeys.contains(_remoteRowHighlightKey(e.value, e.key)));
+      final allVisibleSelected = visibleRows.isNotEmpty &&
+          visibleRows.asMap().entries.every((e) => _selectedDeleteRowKeys
+              .contains(_remoteRowHighlightKey(e.value, e.key)));
       return actionHeader(
         width: 54,
         child: Checkbox(
@@ -4975,9 +6401,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (text.isEmpty) {
         child = const SizedBox.shrink();
       } else if (_isMediaColumn(column) && _looksLikeUrl(text)) {
-        child = Align(alignment: Alignment.centerLeft, child: _mediaCell(column, text));
+        child = Align(
+            alignment: Alignment.centerLeft, child: _mediaCell(column, text));
       } else {
-        child = Text(text, overflow: TextOverflow.ellipsis, maxLines: 2, style: TextStyle(color: fmt.textColor ?? Colors.black87, fontSize: 12.5));
+        child = Text(text,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 2,
+            style: TextStyle(
+                color: fmt.textColor ?? Colors.black87,
+                fontSize: fmt.fontSize ?? 12.5));
       }
       return Container(
         width: width,
@@ -4987,9 +6419,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         decoration: BoxDecoration(
           color: fmt.bgColor,
           border: Border(
-            right: BorderSide(color: fmt.borderColor ?? const Color(0xFFE7EDF3), width: fmt.borderColor == null ? 0.8 : 1.4),
-            top: fmt.borderColor == null ? BorderSide.none : BorderSide(color: fmt.borderColor!, width: 1.0),
-            bottom: fmt.borderColor == null ? BorderSide.none : BorderSide(color: fmt.borderColor!, width: 1.0),
+            right: BorderSide(
+                color: fmt.borderColor ?? const Color(0xFFE7EDF3),
+                width: fmt.borderColor == null ? 0.8 : 1.4),
+            top: fmt.borderColor == null
+                ? BorderSide.none
+                : BorderSide(color: fmt.borderColor!, width: 1.0),
+            bottom: fmt.borderColor == null
+                ? BorderSide.none
+                : BorderSide(color: fmt.borderColor!, width: 1.0),
           ),
         ),
         child: child,
@@ -5002,7 +6440,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         width: 54,
         height: 46,
         alignment: Alignment.center,
-        decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
+        decoration: const BoxDecoration(
+            border: Border(
+                right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
         child: StatefulBuilder(
           builder: (context, setLocalState) {
             final selected = _selectedDeleteRowKeys.contains(key);
@@ -5023,10 +6463,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         width: 72,
         height: 46,
         alignment: Alignment.center,
-        decoration: const BoxDecoration(border: Border(right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
+        decoration: const BoxDecoration(
+            border: Border(
+                right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
         child: IconButton(
           tooltip: canUpdate ? 'Editar registro' : 'Actualización no permitida',
-          icon: Icon(Icons.edit, size: 18, color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
+          icon: Icon(Icons.edit,
+              size: 18,
+              color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
           onPressed: canUpdate ? () => _editRemoteRecord(row) : null,
           splashRadius: 18,
         ),
@@ -5036,8 +6480,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     Widget headerRow() {
       return Row(
         children: [
-          if (canDelete) deleteHeader(),
-          if (canUpdate) actionHeader(width: 72, child: const Text('Editar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5))),
+          if (_canSelectRows) deleteHeader(),
+          if (canUpdate)
+            actionHeader(
+                width: 72,
+                child: const Text('Editar',
+                    style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12.5))),
           ...allColumns.map((c) => headerCell(c, _tableColumnWidth(c))),
         ],
       );
@@ -5052,7 +6503,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
           child: Row(
             children: [
-              if (canDelete) deleteCell(r, index),
+              if (_canSelectRows) deleteCell(r, index),
               if (canUpdate) editCell(r),
               ...allColumns.map((c) => rowCell(r, index, c)),
             ],
@@ -5063,8 +6514,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final actionWidth = (canDelete ? 54.0 : 0.0) + (canUpdate ? 72.0 : 0.0);
-        final pinnedWidth = pinned.fold<double>(0.0, (sum, c) => sum + _tableColumnWidth(c));
+        final actionWidth =
+            (_canSelectRows ? 54.0 : 0.0) + (canUpdate ? 72.0 : 0.0);
+        final pinnedWidth =
+            pinned.fold<double>(0.0, (sum, c) => sum + _tableColumnWidth(c));
         final fixedRawWidth = actionWidth + pinnedWidth;
         final scrollWidth = math.max(
           constraints.maxWidth + 420.0,
@@ -5074,8 +6527,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (pinned.isNotEmpty) {
           Widget fixedHeaderRow() => Row(
                 children: [
-                  if (canDelete) deleteHeader(),
-                  if (canUpdate) actionHeader(width: 72, child: const Text('Editar', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12.5))),
+                  if (_canSelectRows) deleteHeader(),
+                  if (canUpdate)
+                    actionHeader(
+                        width: 72,
+                        child: const Text('Editar',
+                            style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 12.5))),
                   ...pinned.map((c) => headerCell(c, _tableColumnWidth(c))),
                 ],
               );
@@ -5089,7 +6549,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
                 child: Row(
                   children: [
-                    if (canDelete) deleteCell(r, index),
+                    if (_canSelectRows) deleteCell(r, index),
                     if (canUpdate) editCell(r),
                     ...pinned.map((c) => rowCell(r, index, c)),
                   ],
@@ -5098,7 +6558,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             );
           }
 
-          Widget scrollHeaderRow() => Row(children: unpinned.map((c) => headerCell(c, _tableColumnWidth(c))).toList());
+          Widget scrollHeaderRow() => Row(
+              children: unpinned
+                  .map((c) => headerCell(c, _tableColumnWidth(c)))
+                  .toList());
 
           Widget scrollDataRow(int index) {
             final r = visibleRows[index];
@@ -5107,12 +6570,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             return RepaintBoundary(
               child: Container(
                 color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
-                child: Row(children: unpinned.map((c) => rowCell(r, index, c)).toList()),
+                child: Row(
+                    children:
+                        unpinned.map((c) => rowCell(r, index, c)).toList()),
               ),
             );
           }
 
-          final fixedWidth = math.min(fixedRawWidth, math.max(160.0, constraints.maxWidth - 180.0));
+          final fixedWidth = math.min(
+              fixedRawWidth, math.max(160.0, constraints.maxWidth - 180.0));
           return Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -5136,7 +6602,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                             cacheExtent: _virtualCacheExtent,
                             addAutomaticKeepAlives: false,
                             addSemanticIndexes: false,
-                            itemBuilder: (context, index) => fixedDataRow(index),
+                            itemBuilder: (context, index) =>
+                                fixedDataRow(index),
                           ),
                         ),
                       ],
@@ -5152,7 +6619,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   interactive: true,
                   thickness: 12,
                   radius: const Radius.circular(10),
-                  notificationPredicate: (notification) => notification.metrics.axis == Axis.vertical,
+                  notificationPredicate: (notification) =>
+                      notification.metrics.axis == Axis.vertical,
                   child: RawScrollbar(
                     controller: _horizontalTableController,
                     thumbVisibility: true,
@@ -5160,7 +6628,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     interactive: true,
                     thickness: 12,
                     radius: const Radius.circular(10),
-                    notificationPredicate: (notification) => notification.metrics.axis == Axis.horizontal,
+                    notificationPredicate: (notification) =>
+                        notification.metrics.axis == Axis.horizontal,
                     child: SingleChildScrollView(
                       controller: _horizontalTableController,
                       scrollDirection: Axis.horizontal,
@@ -5181,7 +6650,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                 cacheExtent: _virtualCacheExtent,
                                 addAutomaticKeepAlives: false,
                                 addSemanticIndexes: false,
-                                itemBuilder: (context, index) => scrollDataRow(index),
+                                itemBuilder: (context, index) =>
+                                    scrollDataRow(index),
                               ),
                             ),
                           ],
@@ -5197,7 +6667,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
         final tableWidth = math.max(
           constraints.maxWidth + 420.0,
-          actionWidth + allColumns.fold<double>(0.0, (sum, c) => sum + _tableColumnWidth(c)),
+          actionWidth +
+              allColumns.fold<double>(
+                  0.0, (sum, c) => sum + _tableColumnWidth(c)),
         );
 
         // El scrollbar vertical queda fuera del scroll horizontal para que se vea
@@ -5209,7 +6681,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           interactive: true,
           thickness: 12,
           radius: const Radius.circular(10),
-          notificationPredicate: (notification) => notification.metrics.axis == Axis.vertical,
+          notificationPredicate: (notification) =>
+              notification.metrics.axis == Axis.vertical,
           child: RawScrollbar(
             controller: _horizontalTableController,
             thumbVisibility: true,
@@ -5217,7 +6690,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             interactive: true,
             thickness: 12,
             radius: const Radius.circular(10),
-            notificationPredicate: (notification) => notification.metrics.axis == Axis.horizontal,
+            notificationPredicate: (notification) =>
+                notification.metrics.axis == Axis.horizontal,
             child: SingleChildScrollView(
               controller: _horizontalTableController,
               scrollDirection: Axis.horizontal,
@@ -5260,18 +6734,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Widget _paginationControls(int shownRows) {
     final total = _knownTotalRows;
     final rangeStart = shownRows == 0 ? 0 : (_currentPage * _pageSize) + 1;
-    final rangeEnd = shownRows == 0 ? 0 : (_currentPage * _pageSize) + shownRows;
-    final rowsLabel = total != null && total > 0 ? 'Mostrando $rangeStart-$rangeEnd de $total filas' : 'Mostrando $shownRows filas';
+    final rangeEnd =
+        shownRows == 0 ? 0 : (_currentPage * _pageSize) + shownRows;
+    final rowsLabel = total != null && total > 0
+        ? 'Mostrando $rangeStart-$rangeEnd de $total filas'
+        : 'Mostrando $shownRows filas';
     return Row(
       children: [
         Expanded(
           child: Text(
-            tableName == null ? 'Tabla no configurada' : 'Tabla: $tableName · $rowsLabel',
+            tableName == null
+                ? 'Vista no configurada'
+                : '${_tableVisualName()} · $rowsLabel',
             style: const TextStyle(color: Color(0xFF60758A), fontSize: 12),
           ),
         ),
         TextButton.icon(
-          onPressed: loading || _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
+          onPressed: loading || _currentPage == 0
+              ? null
+              : () => _goToPage(_currentPage - 1),
           icon: const Icon(Icons.chevron_left, size: 18),
           label: const Text('Anterior'),
         ),
@@ -5281,10 +6762,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             border: Border.all(color: const Color(0xFFE1E8EF)),
             borderRadius: BorderRadius.circular(6),
           ),
-          child: Text('${_currentPage + 1}', style: const TextStyle(fontWeight: FontWeight.w700)),
+          child: Text('${_currentPage + 1}',
+              style: const TextStyle(fontWeight: FontWeight.w700)),
         ),
         TextButton.icon(
-          onPressed: loading || !_hasNextPage ? null : () => _goToPage(_currentPage + 1),
+          onPressed: loading || !_hasNextPage
+              ? null
+              : () => _goToPage(_currentPage + 1),
           icon: const Icon(Icons.chevron_right, size: 18),
           label: const Text('Siguiente'),
         ),
@@ -5302,16 +6786,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return (value?.toString().trim() ?? '').toUpperCase();
   }
 
-  bool _hasAnyHeaderValue(Map<String, String> meta) {
-    return meta.values.any((value) => value.trim().isNotEmpty);
+  bool _hasAnyHeaderValue(Map<String, dynamic> meta) {
+    return ['titulo1', 'titulo2', 'codigo1', 'codigo2']
+        .any((key) => _cleanHeaderValue(meta[key]).isNotEmpty);
   }
 
-  Map<String, String> _formatHeaderMeta() {
+  Map<String, dynamic> _formatHeaderMeta() {
     final table = tableName;
     final tableKey = _normHeaderTable(table);
-    final rows = table == null ? <Map<String, dynamic>>[] : (matrixRowsByTable[table] ?? <Map<String, dynamic>>[]);
+    final rows = table == null
+        ? <Map<String, dynamic>>[]
+        : (matrixRowsByTable[table] ?? <Map<String, dynamic>>[]);
     final fields = <Map<String, dynamic>>[
-      ...allLocalFormFields.where((f) => _normHeaderTable(f['tabla_destino']) == tableKey),
+      ...allLocalFormFields
+          .where((f) => _normHeaderTable(f['tabla_destino']) == tableKey),
       ...rows,
     ];
 
@@ -5325,9 +6813,30 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       return '';
     }
 
+    dynamic firstValue(String key) {
+      for (final row in fields) {
+        final value = row[key];
+        if (value != null && value.toString().trim().isNotEmpty) return value;
+      }
+      return widget.format[key];
+    }
+
     return {
       'titulo1': firstNonEmpty('titulo1'),
+      'titulo2': firstNonEmpty('titulo2'),
       'codigo1': firstNonEmpty('codigo1'),
+      'codigo2': firstNonEmpty('codigo2'),
+      for (final key in [
+        'titulo1_alineacion',
+        'titulo1_tamanio_letra',
+        'titulo1_color',
+        'titulo1_padding',
+        'titulo2_alineacion',
+        'titulo2_tamanio_letra',
+        'titulo2_color',
+        'titulo2_padding',
+      ])
+        key: firstValue(key),
     };
   }
 
@@ -5343,8 +6852,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       context: context,
       builder: (context) {
         return Dialog(
-          insetPadding: const EdgeInsets.symmetric(horizontal: 260, vertical: 180),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 260, vertical: 180),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 520, minWidth: 360),
             child: Padding(
@@ -5356,20 +6867,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   const Text(
                     'Código del formato',
                     textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Color(0xFF147A6E)),
+                    style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                        color: Color(0xFF147A6E)),
                   ),
                   const SizedBox(height: 14),
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 14),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF4FAF8),
-                      border: Border.all(color: const Color(0xFF147A6E), width: 1),
+                      border:
+                          Border.all(color: const Color(0xFF147A6E), width: 1),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: SelectableText(
                       cleanCode,
                       textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700, height: 1.28, color: Color(0xFF17324D)),
+                      style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          height: 1.28,
+                          color: Color(0xFF17324D)),
                     ),
                   ),
                   const SizedBox(height: 14),
@@ -5389,9 +6909,55 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-  Widget _formatDocumentHeader(Map<String, String> meta) {
+  Alignment _headerAlignment(dynamic raw) {
+    final value = raw?.toString().trim().toLowerCase() ?? '';
+    if (value == 'right' || value == 'derecha') return Alignment.centerRight;
+    if (value == 'left' || value == 'izquierda') return Alignment.centerLeft;
+    return Alignment.center;
+  }
+
+  TextAlign _headerTextAlign(dynamic raw) {
+    final alignment = _headerAlignment(raw);
+    if (alignment == Alignment.centerRight) return TextAlign.right;
+    if (alignment == Alignment.centerLeft) return TextAlign.left;
+    return TextAlign.center;
+  }
+
+  EdgeInsets _headerPadding(dynamic raw) {
+    final values = raw
+        ?.toString()
+        .split(RegExp(r'[,; ]+'))
+        .map((value) => double.tryParse(value.trim()))
+        .whereType<double>()
+        .toList();
+    if (values == null || values.isEmpty) {
+      return const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
+    }
+    if (values.length == 1) return EdgeInsets.all(values.first);
+    if (values.length == 2) {
+      return EdgeInsets.symmetric(horizontal: values[0], vertical: values[1]);
+    }
+    if (values.length >= 4) {
+      return EdgeInsets.fromLTRB(values[0], values[1], values[2], values[3]);
+    }
+    return const EdgeInsets.symmetric(horizontal: 8, vertical: 3);
+  }
+
+  Widget _formatDocumentHeader(Map<String, dynamic> meta) {
     final selectedTitle = _headerLineBreaks(meta['titulo1'] ?? '');
+    final selectedTitle2 = _headerLineBreaks(meta['titulo2'] ?? '');
     final selectedCode = _headerLineBreaks(meta['codigo1'] ?? '');
+    final selectedCode2 = _headerLineBreaks(meta['codigo2'] ?? '');
+    final title1Color =
+        _parseTableMatrixColor(meta['titulo1_color']) ?? Colors.white;
+    final title2Color =
+        _parseTableMatrixColor(meta['titulo2_color']) ?? Colors.white;
+    final title1Size =
+        double.tryParse(meta['titulo1_tamanio_letra']?.toString() ?? '') ??
+            15.5;
+    final title2Size =
+        double.tryParse(meta['titulo2_tamanio_letra']?.toString() ?? '') ??
+            12.5;
 
     return Container(
       height: 104,
@@ -5410,10 +6976,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             padding: const EdgeInsets.all(3),
             child: ClipOval(
               child: Image.asset(
-                'assets/images/logo_zumac.jpeg',
+                'assets/images/logo_app.png',
                 width: 56,
                 height: 56,
+                cacheWidth: 168,
+                cacheHeight: 168,
                 fit: BoxFit.cover,
+                filterQuality: FilterQuality.high,
               ),
             ),
           ),
@@ -5421,18 +6990,46 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           Expanded(
             flex: 8,
             child: Container(
-              alignment: Alignment.center,
+              alignment: _headerAlignment(meta['titulo1_alineacion']),
               decoration: BoxDecoration(
                 color: _appgtHeaderColor,
                 border: Border.all(color: _appgtHeaderBorderColor, width: 1.2),
               ),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              child: Text(
-                selectedTitle,
-                textAlign: TextAlign.center,
-                maxLines: 4,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 15.5, height: 1.12),
+              padding: _headerPadding(meta['titulo1_padding']),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    selectedTitle,
+                    textAlign: _headerTextAlign(meta['titulo1_alineacion']),
+                    maxLines: selectedTitle2.isEmpty ? 4 : 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                        color: title1Color,
+                        fontWeight: FontWeight.w800,
+                        fontSize: title1Size,
+                        height: 1.12),
+                  ),
+                  if (selectedTitle2.isNotEmpty) ...[
+                    const SizedBox(height: 3),
+                    Padding(
+                      padding: _headerPadding(meta['titulo2_padding']),
+                      child: Text(
+                        selectedTitle2,
+                        textAlign: _headerTextAlign(meta['titulo2_alineacion']),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: title2Color,
+                          fontWeight: FontWeight.w700,
+                          fontSize: title2Size,
+                          height: 1.08,
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
           ),
@@ -5440,20 +7037,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           Expanded(
             flex: 2,
             child: InkWell(
-              onTap: selectedCode.isEmpty ? null : () => _showHeaderCodeDialog(selectedCode),
+              onTap: selectedCode.isEmpty
+                  ? null
+                  : () => _showHeaderCodeDialog(selectedCode),
               child: Container(
                 alignment: Alignment.center,
                 decoration: BoxDecoration(
                   color: _appgtHeaderColor,
-                  border: Border.all(color: _appgtHeaderBorderColor, width: 1.2),
+                  border:
+                      Border.all(color: _appgtHeaderBorderColor, width: 1.2),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 3),
                 child: Text(
-                  selectedCode,
+                  [selectedCode, selectedCode2]
+                      .where((value) => value.isNotEmpty)
+                      .join('\n'),
                   textAlign: TextAlign.center,
                   maxLines: 5,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 10.5, height: 1.08),
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 10.5,
+                      height: 1.08),
                 ),
               ),
             ),
@@ -5468,7 +7074,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final hasDate = _firstDateColumn() != null;
     final hasVariety = _hasColumn(['VARIEDAD', 'VARIEDADES']);
     final hasLote = _hasColumn(['LOTE', 'LOTES']);
-    final hasTurno = _hasColumn(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']);
+    final hasTurno =
+        _hasColumn(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']);
     final headerMeta = _formatHeaderMeta();
 
     return Container(
@@ -5478,7 +7085,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         color: Colors.white,
         border: Border.all(color: const Color(0xFFE1E8EF), width: 1.0),
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 8))],
+        boxShadow: const [
+          BoxShadow(
+              color: Color(0x14000000), blurRadius: 18, offset: Offset(0, 8))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -5499,14 +7109,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       SizedBox(
                         height: 34,
                         child: OutlinedButton.icon(
-                          onPressed: _hasAnyActiveFilters ? _clearAllFilters : null,
+                          onPressed:
+                              _hasAnyActiveFilters ? _clearAllFilters : null,
                           icon: const Icon(Icons.filter_alt_off, size: 16),
                           label: const Text('Limpiar filtros'),
                           style: OutlinedButton.styleFrom(
                             foregroundColor: const Color(0xFF147A6E),
                             backgroundColor: const Color(0xFFF2FAF8),
                             side: const BorderSide(color: Color(0xFFB7DDD6)),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
                             padding: const EdgeInsets.symmetric(horizontal: 12),
                           ),
                         ),
@@ -5517,35 +7129,40 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                           label: 'FECHA INICIO',
                           value: startDateFilter,
                           onTap: () => _pickRangeDate(isStart: true),
-                          onClear: () => _applyTopFilter(() => startDateFilter = null),
+                          onClear: () =>
+                              _applyTopFilter(() => startDateFilter = null),
                           width: 145,
                         ),
                         _dateRangeFilter(
                           label: 'FECHA FIN',
                           value: endDateFilter,
                           onTap: () => _pickRangeDate(isStart: false),
-                          onClear: () => _applyTopFilter(() => endDateFilter = null),
+                          onClear: () =>
+                              _applyTopFilter(() => endDateFilter = null),
                           width: 135,
                         ),
                         _dropdownFilter(
                           label: 'AÑO',
                           value: yearFilter,
                           values: _uniqueYears(),
-                          onChanged: (v) => _applyTopFilter(() => yearFilter = v),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => yearFilter = v),
                           width: 86,
                         ),
                         _dropdownFilter(
                           label: 'SEMANA',
                           value: weekFilter,
                           values: _uniqueWeeks(),
-                          onChanged: (v) => _applyTopFilter(() => weekFilter = v),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => weekFilter = v),
                           width: 105,
                         ),
                         _dropdownFilter(
                           label: 'MES',
                           value: monthFilter,
                           values: _uniqueMonths(),
-                          onChanged: (v) => _applyTopFilter(() => monthFilter = v),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => monthFilter = v),
                           width: 92,
                         ),
                       ],
@@ -5554,7 +7171,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                           label: 'VARIEDAD',
                           value: varietyFilter,
                           values: _unique(['VARIEDAD', 'VARIEDADES']),
-                          onChanged: (v) => _applyTopFilter(() => varietyFilter = v),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => varietyFilter = v),
                           width: 140,
                         ),
                       if (hasLote)
@@ -5562,15 +7180,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                           label: 'LOTE',
                           value: loteFilter,
                           values: _unique(['LOTE', 'LOTES']),
-                          onChanged: (v) => _applyTopFilter(() => loteFilter = v),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => loteFilter = v),
                           width: 120,
                         ),
                       if (hasTurno)
                         _dropdownFilter(
                           label: 'TURNO',
                           value: turnoFilter,
-                          values: _unique(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']),
-                          onChanged: (v) => _applyTopFilter(() => turnoFilter = v),
+                          values: _unique([
+                            'TURNO',
+                            'TURNOS',
+                            'FECHA O TURNO',
+                            'FECHA_O_TURNO'
+                          ]),
+                          onChanged: (v) =>
+                              _applyTopFilter(() => turnoFilter = v),
                           width: 130,
                         ),
                     ],
@@ -5591,13 +7216,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                       ),
                       items: internalTableRows.map((row) {
                         final table = _clean(row['tabla_destino']) ?? '';
-                        final label = _clean(row['nombre_tabla']) ?? _clean(row['nombre']) ?? table;
-                        return DropdownMenuItem<String>(value: table, child: Text(label, overflow: TextOverflow.ellipsis));
+                        final label = _clean(row['nombre_tabla']) ??
+                            _clean(row['nombre']) ??
+                            'Vista ${internalTableRows.indexOf(row) + 1}';
+                        return DropdownMenuItem<String>(
+                            value: table,
+                            child:
+                                Text(label, overflow: TextOverflow.ellipsis));
                       }).toList(),
                       onChanged: loading
                           ? null
                           : (value) async {
-                              if (value == null || value == selectedTableName) return;
+                              if (value == null || value == selectedTableName)
+                                return;
                               setState(() {
                                 selectedTableName = value;
                                 _currentPage = 0;
@@ -5616,15 +7247,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   width: 44,
                   height: 44,
                   child: OutlinedButton(
-                    onPressed: displayColumns.isEmpty ? null : () => _showPinColumnsDialog(_visibleWindowsColumns(displayColumns)),
+                    onPressed: displayColumns.isEmpty
+                        ? null
+                        : () => _showPinColumnsDialog(
+                            _visibleWindowsColumns(displayColumns)),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: const Color(0xFF147A6E),
                       side: const BorderSide(color: Color(0xFF147A6E)),
                       backgroundColor: const Color(0xFFF2FAF8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
                       padding: EdgeInsets.zero,
                     ),
-                    child: Icon(_pinnedColumns.isEmpty ? Icons.push_pin_outlined : Icons.push_pin),
+                    child: Icon(_pinnedColumns.isEmpty
+                        ? Icons.push_pin_outlined
+                        : Icons.push_pin),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -5640,15 +7277,37 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                           onPressed: hasSelection ? _deleteSelectedRows : null,
                           style: OutlinedButton.styleFrom(
                             foregroundColor: Colors.red.shade700,
-                            side: BorderSide(color: hasSelection ? Colors.red.shade700 : Colors.grey.shade300),
-                            backgroundColor: hasSelection ? const Color(0xFFFFF4F4) : Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                            side: BorderSide(
+                                color: hasSelection
+                                    ? Colors.red.shade700
+                                    : Colors.grey.shade300),
+                            backgroundColor: hasSelection
+                                ? const Color(0xFFFFF4F4)
+                                : Colors.white,
+                            shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
                             padding: EdgeInsets.zero,
                           ),
                           child: const Icon(Icons.delete_outline),
                         ),
                       );
                     },
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (_approvalsEnabled && canReview) ...[
+                  _approvalToolbarButton(
+                    state: 'REVISADO',
+                    icon: Icons.fact_check_outlined,
+                    tooltip: 'Marcar seleccionados como REVISADO',
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (_approvalsEnabled && canApprove) ...[
+                  _approvalToolbarButton(
+                    state: 'APROBADO',
+                    icon: Icons.verified_outlined,
+                    tooltip: 'Marcar seleccionados como APROBADO',
                   ),
                   const SizedBox(width: 10),
                 ],
@@ -5673,7 +7332,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                         foregroundColor: const Color(0xFF147A6E),
                         backgroundColor: const Color(0xFFF2FAF8),
                         side: const BorderSide(color: Color(0xFFB7DDD6)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
                         padding: EdgeInsets.zero,
                       ),
                       child: const Icon(Icons.add),
@@ -5697,19 +7357,26 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                         children: [
                           const CircularProgressIndicator(),
                           const SizedBox(height: 12),
-                          Text(_loadingMessage, style: const TextStyle(color: Colors.black54, fontWeight: FontWeight.w600)),
+                          Text(_loadingMessage,
+                              style: const TextStyle(
+                                  color: Colors.black54,
+                                  fontWeight: FontWeight.w600)),
                         ],
                       ),
                     )
                   : offline
                       ? _emptyMessage('Sin conexión a Internet')
                       : error != null
-                          ? Center(child: Text(error!, style: const TextStyle(color: Colors.black87)))
+                          ? Center(
+                              child: Text(error!,
+                                  style:
+                                      const TextStyle(color: Colors.black87)))
                           : ValueListenableBuilder<int>(
                               valueListenable: _tableRenderVersion,
                               builder: (context, _, __) {
                                 final currentRows = filteredRecords;
-                                return RepaintBoundary(child: _recordsTable(currentRows));
+                                return RepaintBoundary(
+                                    child: _recordsTable(currentRows));
                               },
                             ),
             ),
@@ -5717,7 +7384,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           const SizedBox(height: 8),
           ValueListenableBuilder<int>(
             valueListenable: _tableRenderVersion,
-            builder: (context, _, __) => _paginationControls(filteredRecords.length),
+            builder: (context, _, __) =>
+                _paginationControls(filteredRecords.length),
           ),
         ],
       ),
@@ -5726,7 +7394,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Widget _mobileBody() {
     List<String> mobileColumns() {
-      final rawColumns = displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records.isNotEmpty ? records : filteredRecords);
+      final rawColumns = displayColumns.isNotEmpty
+          ? displayColumns
+          : _columnsFromRows(records.isNotEmpty ? records : filteredRecords);
       return _matrixColumnsForTable(
         tableName ?? widget.format['tabla_destino']?.toString() ?? '',
         rawColumns,
@@ -5759,17 +7429,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         );
       }
       return Container(
-        padding: format.bgColor == null ? EdgeInsets.zero : const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+        padding: format.bgColor == null
+            ? EdgeInsets.zero
+            : const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
         decoration: BoxDecoration(
           color: format.bgColor,
-          border: format.borderColor == null ? null : Border.all(color: format.borderColor!),
+          border: format.borderColor == null
+              ? null
+              : Border.all(color: format.borderColor!),
           borderRadius: BorderRadius.circular(5),
         ),
         child: Text(
           text.isEmpty ? '—' : text,
           style: TextStyle(
             color: format.textColor ?? const Color(0xFF17324D),
-            fontSize: 13,
+            fontSize: format.fontSize ?? 13,
           ),
         ),
       );
@@ -5785,7 +7459,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               : offline
                   ? _emptyMessage('Sin conexión a Internet')
                   : error != null
-                      ? Center(child: Text(error!, style: const TextStyle(color: Colors.black87)))
+                      ? Center(
+                          child: Text(error!,
+                              style: const TextStyle(color: Colors.black87)))
                       : ValueListenableBuilder<int>(
                           valueListenable: _tableRenderVersion,
                           builder: (context, _, __) {
@@ -5798,7 +7474,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                   children: [
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             '${widget.format['nombre'] ?? 'Registros'}',
@@ -5811,7 +7488,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                             ),
                                           ),
                                           Text(
-                                            '${tableName ?? 'Tabla no configurada'} · ${rows.length} registro(s)',
+                                            '${tableName == null ? 'Vista no configurada' : _tableVisualName()} · ${rows.length} registro(s)',
                                             maxLines: 1,
                                             overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
@@ -5825,18 +7502,26 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                     IconButton(
                                       tooltip: 'Actualizar tabla',
                                       onPressed: _load,
-                                      icon: const Icon(Icons.refresh, color: Color(0xFF176B87)),
+                                      icon: const Icon(Icons.refresh,
+                                          color: Color(0xFF176B87)),
                                     ),
+                                    _mobileToolsMenu(),
                                     if (canDelete)
                                       ValueListenableBuilder<int>(
-                                        valueListenable: _deleteSelectionVersion,
+                                        valueListenable:
+                                            _deleteSelectionVersion,
                                         builder: (context, _, __) => IconButton(
                                           tooltip: 'Eliminar seleccionados',
-                                          onPressed: _selectedDeleteRows.isEmpty ? null : _deleteSelectedRows,
+                                          onPressed: _selectedDeleteRows.isEmpty
+                                              ? null
+                                              : _deleteSelectedRows,
                                           icon: Badge(
-                                            isLabelVisible: _selectedDeleteRows.isNotEmpty,
-                                            label: Text('${_selectedDeleteRows.length}'),
-                                            child: const Icon(Icons.delete_outline),
+                                            isLabelVisible:
+                                                _selectedDeleteRows.isNotEmpty,
+                                            label: Text(
+                                                '${_selectedDeleteRows.length}'),
+                                            child: const Icon(
+                                                Icons.delete_outline),
                                           ),
                                         ),
                                       ),
@@ -5850,7 +7535,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                   decoration: InputDecoration(
                                     hintText: 'Buscar en esta tabla',
                                     prefixIcon: const Icon(Icons.search),
-                                    suffixIcon: _mobileSearchController.text.isEmpty
+                                    suffixIcon: _mobileSearchController
+                                            .text.isEmpty
                                         ? null
                                         : IconButton(
                                             tooltip: 'Limpiar búsqueda',
@@ -5865,33 +7551,48 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                     isDense: true,
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: Color(0xFFDCE6EC)),
+                                      borderSide: const BorderSide(
+                                          color: Color(0xFFDCE6EC)),
                                     ),
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: Color(0xFFDCE6EC)),
+                                      borderSide: const BorderSide(
+                                          color: Color(0xFFDCE6EC)),
                                     ),
                                   ),
                                 ),
                                 const SizedBox(height: 10),
                                 Expanded(
                                   child: columns.isEmpty
-                                      ? _emptyMessage('No hay columnas visibles')
+                                      ? _emptyMessage(
+                                          'No hay columnas visibles')
                                       : ValueListenableBuilder<int>(
-                                          valueListenable: _deleteSelectionVersion,
-                                          builder: (context, _, __) => MobileRecordsList(
+                                          valueListenable:
+                                              _deleteSelectionVersion,
+                                          builder: (context, _, __) =>
+                                              MobileRecordsList(
                                             records: rows,
                                             columns: columns,
-                                            rowNumberOffset: _currentPage * _pageSize,
+                                            rowNumberOffset:
+                                                _currentPage * _pageSize,
                                             labelFor: _tableHeaderLabel,
-                                            textFor: (row, column) => _displayCellValue(
+                                            textFor: (row, column) =>
+                                                _displayCellValue(
                                               _valueByColumn(row, column),
                                             ),
                                             cellBuilder: mobileCell,
-                                            onEdit: canUpdate ? _editRemoteRecord : null,
-                                            selectionEnabled: canDelete,
-                                            isSelected: (row, index) => _selectedDeleteRowKeys.contains(_remoteRowHighlightKey(row, index)),
-                                            onSelected: (row, index, selected) => _toggleDeleteSelection(row, index, selected),
+                                            onEdit: canUpdate
+                                                ? _editRemoteRecord
+                                                : null,
+                                            selectionEnabled: _canSelectRows,
+                                            isSelected: (row, index) =>
+                                                _selectedDeleteRowKeys.contains(
+                                                    _remoteRowHighlightKey(
+                                                        row, index)),
+                                            onSelected:
+                                                (row, index, selected) =>
+                                                    _toggleDeleteSelection(
+                                                        row, index, selected),
                                           ),
                                         ),
                                 ),
@@ -5926,12 +7627,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           ),
           IconButton(
             tooltip: 'Página anterior',
-            onPressed: loading || _currentPage == 0 ? null : () => _goToPage(_currentPage - 1),
+            onPressed: loading || _currentPage == 0
+                ? null
+                : () => _goToPage(_currentPage - 1),
             icon: const Icon(Icons.chevron_left),
           ),
           IconButton(
             tooltip: 'Página siguiente',
-            onPressed: loading || !_hasNextPage ? null : () => _goToPage(_currentPage + 1),
+            onPressed: loading || !_hasNextPage
+                ? null
+                : () => _goToPage(_currentPage + 1),
             icon: const Icon(Icons.chevron_right),
           ),
         ],
@@ -5947,7 +7652,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.format['nombre'] ?? widget.format['id']}')),
+      appBar: AppBar(
+          title: Text('${widget.format['nombre'] ?? widget.format['id']}')),
       body: _desktopBody(),
     );
   }
