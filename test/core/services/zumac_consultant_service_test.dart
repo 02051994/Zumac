@@ -308,6 +308,121 @@ void main() {
     );
   });
 
+  test('separa matrices de asistencia como tablas relacionadas', () async {
+    final today = DateTime.now().toIso8601String();
+    await configureCustomFormat(
+      table: 'asistencia_personal',
+      formatId: 'attendance-main',
+      formatName: 'Asistencia de personal',
+      fields: const {
+        'fecha': 'Fecha',
+        'nombre_completo': 'Persona',
+        'hora_salida': 'Hora de salida',
+      },
+    );
+    await configureCustomFormat(
+      table: 'matriz_conceptos_asistencia',
+      formatId: 'attendance-concepts',
+      formatName: 'Matriz Conceptos de Asistencia',
+      fields: const {
+        'concepto': 'Concepto',
+        'tipo_concepto': 'Tipo de concepto',
+      },
+    );
+    await configureCustomFormat(
+      table: 'matriz_tipos_ausencia',
+      formatId: 'absence-types',
+      formatName: 'Matriz Tipos de Ausencia',
+      fields: const {
+        'nombre': 'Nombre',
+        'tipo_concepto': 'Tipo de concepto',
+      },
+    );
+    await insertMatrixRow('asistencia_personal', 'attendance-1', {
+      'id': 'attendance-1',
+      'fecha': today,
+      'nombre_completo': 'Ana Torres',
+      'hora_salida': '',
+    });
+    await insertMatrixRow('matriz_conceptos_asistencia', 'concept-1', {
+      'id': 'concept-1',
+      'concepto': 'Asistencia',
+      'tipo_concepto': 'ASISTENCIA',
+    });
+    await insertMatrixRow('matriz_tipos_ausencia', 'absence-1', {
+      'id': 'absence-1',
+      'nombre': 'Descanso médico',
+      'tipo_concepto': 'AUSENCIA',
+    });
+
+    final result = await consultant.ask('¿Cuántas asistencias hay hoy?');
+
+    expect(
+      result.reportTables.map((report) => report.tableName),
+      equals(<String>['asistencia_personal']),
+    );
+    expect(
+      result.relatedTables.map((related) => related.title).toSet(),
+      containsAll(<String>{
+        'Matriz Conceptos de Asistencia',
+        'Matriz Tipos de Ausencia',
+      }),
+    );
+  });
+
+  test('calcula trabajadores únicos que asistieron durante un mes escrito',
+      () async {
+    const table = 'asistencia_personal';
+    await configureCustomFormat(
+      table: table,
+      formatId: 'attendance-by-month',
+      formatName: 'Asistencia de personal',
+      fields: const {
+        'fecha': 'Fecha',
+        'dni': 'DNI',
+        'nombre_completo': 'Persona',
+        'estado_asistencia': 'Estado de asistencia',
+      },
+    );
+    final year = DateTime.now().year;
+    await insertMatrixRow(table, 'july-ana-1', {
+      'id': 'july-ana-1',
+      'fecha': DateTime(year, 7, 2).toIso8601String(),
+      'dni': '11111111',
+      'nombre_completo': 'Ana Torres',
+      'estado_asistencia': 'Presente',
+    });
+    await insertMatrixRow(table, 'july-ana-2', {
+      'id': 'july-ana-2',
+      'fecha': DateTime(year, 7, 3).toIso8601String(),
+      'dni': '11111111',
+      'nombre_completo': 'Ana Torres',
+      'estado_asistencia': 'Presente',
+    });
+    await insertMatrixRow(table, 'july-luis', {
+      'id': 'july-luis',
+      'fecha': DateTime(year, 7, 4).toIso8601String(),
+      'dni': '22222222',
+      'nombre_completo': 'Luis Rojas',
+      'estado_asistencia': 'Presente',
+    });
+    await insertMatrixRow(table, 'june-worker', {
+      'id': 'june-worker',
+      'fecha': DateTime(year, 6, 30).toIso8601String(),
+      'dni': '33333333',
+      'nombre_completo': 'Persona de junio',
+      'estado_asistencia': 'Presente',
+    });
+
+    final result = await consultant
+        .ask('¿Cuántos trabajadores asistieron en total en el mes de julio?');
+
+    expect(result.intent, ZumacConsultantIntent.attendance);
+    expect(result.answer, contains('2 personas con asistencia'));
+    expect(result.answer, contains('julio de $year'));
+    expect(result.findings, hasLength(3));
+  });
+
   test('entiende una fecha histórica exacta y solo devuelve ese día', () async {
     const table = 'camara_humeda';
     await configureCustomFormat(
@@ -692,5 +807,138 @@ void main() {
       whereArgs: [table],
     );
     expect(cachedRows, hasLength(1));
+  });
+
+  test('mantiene el tema de una consulta operativa de seguimiento', () async {
+    const table = 'asistencia_personal';
+    await configureFormat(
+      table: table,
+      field: 'estado_asistencia',
+      label: 'Estado de asistencia',
+    );
+    final yesterday = DateTime.now().subtract(const Duration(days: 1));
+    await insertMatrixRow(table, 'today-worker', {
+      'id': 'today-worker',
+      'fecha': DateTime.now().toIso8601String(),
+      'nombre_completo': 'Persona de hoy',
+      'estado_asistencia': 'Presente',
+    });
+    await insertMatrixRow(table, 'yesterday-worker', {
+      'id': 'yesterday-worker',
+      'fecha': yesterday.toIso8601String(),
+      'nombre_completo': 'Persona de ayer',
+      'estado_asistencia': 'Presente',
+    });
+
+    await consultant.ask(
+      '¿Quién tuvo asistencia hoy?',
+      conversationId: 'operational-memory',
+    );
+    final followUp = await consultant.ask(
+      '¿Y ayer?',
+      conversationId: 'operational-memory',
+    );
+
+    expect(followUp.intent, ZumacConsultantIntent.attendance);
+    expect(followUp.findings, hasLength(1));
+    expect(followUp.findings.single.title, 'Persona de ayer');
+  });
+
+  test('pide fuente y periodo antes de responder una consulta de pH ambigua',
+      () async {
+    await configureCustomFormat(
+      table: 'ph_sustrato',
+      formatId: 'ph-substrate',
+      formatName: 'pH y CE de sustrato',
+      fields: const {
+        'fecha': 'Fecha',
+        'lote': 'Lote',
+        'ph': 'pH',
+      },
+    );
+    await configureCustomFormat(
+      table: 'ph_agua',
+      formatId: 'ph-water',
+      formatName: 'pH de agua',
+      fields: const {
+        'fecha': 'Fecha',
+        'sector': 'Sector',
+        'ph': 'pH',
+      },
+    );
+    await insertMatrixRow('ph_sustrato', 'substrate-july', {
+      'id': 'substrate-july',
+      'fecha': '2026-07-15',
+      'lote': 'Lote 4',
+      'ph': 6.4,
+    });
+    await insertMatrixRow('ph_agua', 'water-july', {
+      'id': 'water-july',
+      'fecha': '2026-07-15',
+      'sector': 'Pozo 2',
+      'ph': 7.1,
+    });
+
+    final sourceQuestion = await consultant.ask(
+      '¿Qué pHs estuvieron mayores a 6 y en qué lotes?',
+      conversationId: 'ph-dialogue',
+    );
+    expect(sourceQuestion.needsClarification, isTrue);
+    expect(sourceQuestion.answer, contains('registro'));
+    expect(sourceQuestion.options, hasLength(2));
+
+    final selected = sourceQuestion.options.firstWhere(
+      (option) => option.sourceTable == 'ph_sustrato',
+    );
+    final periodQuestion = await consultant.ask(
+      selected.query,
+      conversationId: 'ph-dialogue',
+      selectedSourceTable: selected.sourceTable,
+    );
+    expect(periodQuestion.needsClarification, isTrue);
+    expect(periodQuestion.answer, contains('fecha'));
+
+    final answer = await consultant.ask(
+      'En julio de 2026',
+      conversationId: 'ph-dialogue',
+    );
+    expect(answer.findings, hasLength(1));
+    expect(answer.findings.single.tableName, 'ph_sustrato');
+    expect(answer.answer, contains('Lote 4'));
+    expect(answer.detailLines.single, contains('Lote 4'));
+    expect(answer.followUpPrompt, isNotEmpty);
+  });
+
+  test('entiende un rango de fechas escrito con inicio y fin', () async {
+    await configureCustomFormat(
+      table: 'ph_rango',
+      formatId: 'ph-range',
+      formatName: 'Control de pH por rango',
+      fields: const {
+        'fecha': 'Fecha',
+        'lote': 'Lote',
+        'ph': 'pH',
+      },
+    );
+    await insertMatrixRow('ph_rango', 'inside', {
+      'id': 'inside',
+      'fecha': '2026-07-15',
+      'lote': 'Lote incluido',
+      'ph': 6.3,
+    });
+    await insertMatrixRow('ph_rango', 'outside', {
+      'id': 'outside',
+      'fecha': '2026-08-02',
+      'lote': 'Lote excluido',
+      'ph': 6.8,
+    });
+
+    final result = await consultant.ask(
+      '¿Qué pHs fueron mayores a 6 del 01/07/2026 al 31/07/2026?',
+      selectedSourceTable: 'ph_rango',
+    );
+    expect(result.findings, hasLength(1));
+    expect(result.findings.single.recordValue, 'inside');
+    expect(result.answer, contains('Lote incluido'));
   });
 }

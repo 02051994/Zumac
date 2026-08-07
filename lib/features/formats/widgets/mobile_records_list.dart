@@ -29,6 +29,7 @@ class MobileRecordsList extends StatefulWidget {
   final void Function(Map<String, dynamic> record, int index, bool selected)?
       onSelected;
   final int rowNumberOffset;
+  final String layout;
 
   const MobileRecordsList({
     super.key,
@@ -42,6 +43,7 @@ class MobileRecordsList extends StatefulWidget {
     this.isSelected,
     this.onSelected,
     this.rowNumberOffset = 0,
+    this.layout = 'TABLA',
   });
 
   @override
@@ -122,6 +124,10 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
         ),
       );
     }
+
+    final layout = widget.layout.trim().toUpperCase();
+    if (layout == 'TARJETAS') return _cardLayout();
+    if (layout == 'LISTA') return _listLayout();
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -227,6 +233,114 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
         );
       },
     );
+  }
+
+  Widget _cardLayout() {
+    return ListView.builder(
+      key: const Key('mobile-records-cards'),
+      padding: const EdgeInsets.only(bottom: 84),
+      itemCount: widget.records.length,
+      itemBuilder: (context, index) {
+        final record = widget.records[index];
+        final selected = widget.isSelected?.call(record, index) == true;
+        return Card(
+          margin: const EdgeInsets.only(bottom: 10),
+          color: selected ? const Color(0xFFE6F5EE) : null,
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      child: Text('${widget.rowNumberOffset + index + 1}'),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        _primaryText(record),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                    ),
+                    if (widget.selectionEnabled)
+                      Checkbox(
+                        value: selected,
+                        onChanged: (value) => widget.onSelected
+                            ?.call(record, index, value == true),
+                      ),
+                    if (widget.onEdit != null)
+                      IconButton(
+                        tooltip: 'Editar',
+                        onPressed: () => widget.onEdit!(record),
+                        icon: const Icon(Icons.edit_outlined),
+                      ),
+                  ],
+                ),
+                const Divider(),
+                for (final column in widget.columns.take(8))
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 5),
+                    child: Text.rich(
+                      TextSpan(
+                        children: [
+                          TextSpan(
+                            text: '${widget.labelFor(column)}: ',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          TextSpan(text: widget.textFor(record, column)),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _listLayout() {
+    return ListView.separated(
+      key: const Key('mobile-records-compact-list'),
+      padding: const EdgeInsets.only(bottom: 84),
+      itemCount: widget.records.length,
+      separatorBuilder: (_, __) => const Divider(height: 1),
+      itemBuilder: (context, index) {
+        final record = widget.records[index];
+        final selected = widget.isSelected?.call(record, index) == true;
+        final secondary = widget.columns.skip(1).take(3).map((column) {
+          return '${widget.labelFor(column)}: ${widget.textFor(record, column)}';
+        }).join(' · ');
+        return ListTile(
+          selected: selected,
+          selectedTileColor: const Color(0xFFE6F5EE),
+          leading: CircleAvatar(
+            child: Text('${widget.rowNumberOffset + index + 1}'),
+          ),
+          title: Text(_primaryText(record)),
+          subtitle: secondary.isEmpty ? null : Text(secondary),
+          onTap: widget.onEdit == null ? null : () => widget.onEdit!(record),
+          trailing: widget.selectionEnabled
+              ? Checkbox(
+                  value: selected,
+                  onChanged: (value) =>
+                      widget.onSelected?.call(record, index, value == true),
+                )
+              : widget.onEdit == null
+                  ? null
+                  : const Icon(Icons.chevron_right),
+        );
+      },
+    );
+  }
+
+  String _primaryText(Map<String, dynamic> record) {
+    if (widget.columns.isEmpty) return 'Registro';
+    final value = widget.textFor(record, widget.columns.first).trim();
+    return value.isEmpty ? 'Registro' : value;
   }
 
   Widget _numberHeader() {

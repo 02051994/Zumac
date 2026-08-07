@@ -3,7 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  Widget subject({VoidCallback? onEdit, bool selectionEnabled = false}) {
+  Widget subject({
+    VoidCallback? onEdit,
+    bool selectionEnabled = false,
+    String layout = 'TABLA',
+  }) {
     final rows = [
       {
         'codigo': 'REG-001',
@@ -24,6 +28,7 @@ void main() {
           textFor: (record, column) => record[column]?.toString() ?? '',
           cellBuilder: (context, record, column) => Text('${record[column]}'),
           selectionEnabled: selectionEnabled,
+          layout: layout,
           onEdit: onEdit == null ? null : (_) => onEdit(),
         ),
       ),
@@ -75,5 +80,30 @@ void main() {
     expect(tester.getTopLeft(numberCell).dx, closeTo(initialNumberX, 0.1));
     expect(tester.getTopLeft(find.text('REG-001')).dx, lessThan(initialValueX));
     expect(find.text('Elegir'), findsOneWidget);
+  });
+
+  testWidgets('presenta los registros como tarjetas cuando fue configurado',
+      (tester) async {
+    await tester.pumpWidget(subject(layout: 'TARJETAS'));
+
+    expect(find.byKey(const Key('mobile-records-cards')), findsOneWidget);
+    expect(find.text('REG-001'), findsWidgets);
+    expect(find.textContaining('PRODUCTO:'), findsOneWidget);
+    expect(find.byKey(const Key('mobile-table-header')), findsNothing);
+  });
+
+  testWidgets('presenta una lista compacta y conserva la edición',
+      (tester) async {
+    var edits = 0;
+    await tester.pumpWidget(subject(
+      layout: 'LISTA',
+      onEdit: () => edits++,
+    ));
+
+    expect(
+        find.byKey(const Key('mobile-records-compact-list')), findsOneWidget);
+    await tester.tap(find.text('REG-001'));
+    await tester.pump();
+    expect(edits, 1);
   });
 }

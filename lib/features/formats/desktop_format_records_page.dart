@@ -22,8 +22,11 @@ import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
 import '../../core/services/formula_engine.dart';
+import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/responsive_layout.dart';
+import '../../core/widgets/configuration_icon_catalog.dart';
+import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
 import 'widgets/mobile_records_list.dart';
@@ -131,6 +134,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   static List<Map<String, dynamic>>? _sharedAllLocalFormFields;
   static Map<String, List<Map<String, dynamic>>>? _sharedMatrixRowsByTable;
   static Future<void>? _sharedCacheLoader;
+  static final Map<String, bool> _adminTransferPermissionCache = {};
   String? error;
   String? tableName;
   List<Map<String, dynamic>> records = [];
@@ -144,6 +148,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Map<String, List<Map<String, dynamic>>> matrixRowsByTable = {};
   final Map<String, double> _columnWidths = {};
   final Map<String, String> _columnFilters = {};
+  final Set<String> _visibleFilterFields = <String>{};
+  final Set<String> _periodFilterKeys = <String>{};
+  final Map<String, String?> _periodFilterValues = <String, String?>{};
   final TextEditingController _mobileSearchController = TextEditingController();
   String? _sortColumn;
   bool _sortAscending = true;
@@ -156,6 +163,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool _hasNextPage = false;
   int? _knownTotalRows;
   bool _silentTableRefreshRunning = false;
+  bool _contractLifecycleChecked = false;
+  bool _contractRenewalDialogScheduled = false;
+  int _pendingContractRenewals = 0;
+  bool _payrollDailyRefreshChecked = false;
 
   String? yearFilter;
   String? weekFilter;
@@ -276,16 +287,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             (key, value) => MapEntry(key.toString(), value.toString()),
           ),
         );
+      _visibleFilterFields.addAll(_columnFilters.keys);
     }
-    yearFilter = _clean(saved['year_filter']);
-    weekFilter = _clean(saved['week_filter']);
-    monthFilter = _clean(saved['month_filter']);
-    dateFilter = _clean(saved['date_filter']);
-    startDateFilter = DateTime.tryParse(_clean(saved['start_date']) ?? '');
-    endDateFilter = DateTime.tryParse(_clean(saved['end_date']) ?? '');
-    varietyFilter = _clean(saved['variety_filter']);
-    loteFilter = _clean(saved['lote_filter']);
-    turnoFilter = _clean(saved['turno_filter']);
+    final rawPeriodFilters = saved['period_filters'];
+    if (rawPeriodFilters is Map) {
+      for (final entry in rawPeriodFilters.entries) {
+        final key = entry.key.toString();
+        if (key.trim().isEmpty) continue;
+        _periodFilterKeys.add(key);
+        _periodFilterValues[key] = _clean(entry.value);
+      }
+    }
     _sortColumn = _clean(saved['sort_column']);
     _sortAscending = saved['sort_ascending'] != false;
     _currentPage = int.tryParse('${saved['page'] ?? 0}') ?? 0;
@@ -309,15 +321,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final value = <String, dynamic>{
       'selected_table': selectedTableName,
       'column_filters': Map<String, String>.from(_columnFilters),
-      'year_filter': yearFilter,
-      'week_filter': weekFilter,
-      'month_filter': monthFilter,
-      'date_filter': dateFilter,
-      'start_date': startDateFilter?.toIso8601String(),
-      'end_date': endDateFilter?.toIso8601String(),
-      'variety_filter': varietyFilter,
-      'lote_filter': loteFilter,
-      'turno_filter': turnoFilter,
+      'period_filters': {
+        for (final key in _periodFilterKeys) key: _periodFilterValues[key],
+      },
       'sort_column': _sortColumn,
       'sort_ascending': _sortAscending,
       'page': _currentPage,
@@ -477,61 +483,28 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return rows.where((row) => !_isDeletedRecord(row)).toList();
   }
 
-  Future<bool> _canCurrentUserExport(String formatId) async {
-    final rows = await local.where(
-      'local_permissions',
-      'formato = ?',
-      [formatId],
-    );
-    for (final row in rows) {
-      if (_boolValue(row['can_export']) || row['can_export'] == 1) return true;
-    }
-    return false;
-  }
-
-  Future<bool> _canCurrentUserImport(String formatId) async {
-    final rows = await local.where(
-      'local_permissions',
-      'formato = ?',
-      [formatId],
-    );
-    for (final row in rows) {
-      if (_boolValue(row['can_import']) || row['can_import'] == 1) return true;
-    }
-    return false;
-  }
-
-  Future<bool> _canCurrentUserDelete(String formatId) async {
-    final rows = await local.where(
-      'local_permissions',
-      'formato = ?',
-      [formatId],
-    );
-    for (final row in rows) {
-      if (_boolValue(row['can_delete']) || row['can_delete'] == 1) return true;
-    }
-    return false;
-  }
-
-  Future<bool> _canCurrentUserUpdate(String formatId) async {
-    final rows = await local.where(
-      'local_permissions',
-      'formato = ?',
-      [formatId],
-    );
-    for (final row in rows) {
-      if (_boolValue(row['can_update']) || row['can_update'] == 1) return true;
-    }
-    return false;
-  }
-
   Future<Map<String, bool>> _currentUserPermissionsForFormat(
       String formatId) async {
-    final rows = await local.where(
-      'local_permissions',
-      'formato = ?',
-      [formatId],
-    );
+    final authUserId = supabase.auth.currentUser?.id.trim() ?? '';
+    final cachedUserId = (await LocalSession().cachedUserId())?.trim() ?? '';
+    final activeUserId = authUserId.isNotEmpty ? authUserId : cachedUserId;
+    final activeEmpresaId = (await LocalSession().cachedEmpresaId()).trim();
+    final candidateKeys = <String>{
+      _norm(formatId),
+      _norm(widget.format['id']?.toString() ?? ''),
+      _norm(widget.format['tabla_destino']?.toString() ?? ''),
+      _norm(selectedTableName ?? ''),
+      _norm(tableName ?? ''),
+    }..removeWhere((value) => value.isEmpty);
+    final rows = (await local.getAll('local_permissions')).where((row) {
+      final rowUserId = row['user_id']?.toString().trim() ?? '';
+      final rowEmpresaId = row['empresa_id']?.toString().trim() ?? '';
+      if (activeUserId.isNotEmpty && rowUserId != activeUserId) return false;
+      if (activeEmpresaId.isNotEmpty &&
+          rowEmpresaId.isNotEmpty &&
+          rowEmpresaId != activeEmpresaId) return false;
+      return candidateKeys.contains(_norm(row['formato']?.toString() ?? ''));
+    });
     var export = false;
     var import = false;
     var insert = false;
@@ -554,6 +527,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           review || _boolValue(row['can_review']) || row['can_review'] == 1;
       approve =
           approve || _boolValue(row['can_approve']) || row['can_approve'] == 1;
+    }
+    // Los administradores de empresa conservan las herramientas operativas
+    // aunque todavía no exista una fila de permiso granular para el formato.
+    // El contexto remoto es autoritativo y se cachea por usuario/empresa para
+    // no añadir una llamada en cada cambio de página o filtro.
+    if ((!export || !import) && activeUserId.isNotEmpty) {
+      final adminKey = '$activeEmpresaId::$activeUserId';
+      var isCompanyAdmin = _adminTransferPermissionCache[adminKey];
+      if (isCompanyAdmin == null) {
+        try {
+          final context = await ConfigurationAdminRepository()
+              .loadContext()
+              .timeout(const Duration(seconds: 5));
+          isCompanyAdmin = context['puede_gestionar_empresa'] == true;
+          _adminTransferPermissionCache[adminKey] = isCompanyAdmin;
+        } catch (_) {
+          isCompanyAdmin = false;
+        }
+      }
+      if (isCompanyAdmin) {
+        export = true;
+        import = true;
+      }
     }
     return {
       'export': export,
@@ -589,6 +585,114 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         .replaceAll(RegExp(r'^_|_$'), '');
   }
 
+  bool _isNamedTable(String? table, String expected) =>
+      _norm(table ?? '') == _norm(expected);
+
+  Future<void> _preparePayrollLifecycle(String resolvedTable) async {
+    if (_isNamedTable(resolvedTable, 'GH-REGISTRO_PERSONAL_PLANILLA') &&
+        !_contractLifecycleChecked) {
+      _contractLifecycleChecked = true;
+      try {
+        final result =
+            await supabase.rpc('appgt_marcar_contratos_vencidos_zumac');
+        _pendingContractRenewals =
+            result is num ? result.toInt() : int.tryParse('$result') ?? 0;
+      } catch (error) {
+        // La tabla debe seguir abriendo si el RPC aun no se ha sincronizado.
+        debugPrint('No se pudo revisar contratos vencidos: $error');
+      }
+    }
+
+    if (_isNamedTable(resolvedTable, 'PLANILLA_TRABAJADORES_ZUMAC') &&
+        !_payrollDailyRefreshChecked) {
+      _payrollDailyRefreshChecked = true;
+      try {
+        await supabase.rpc('appgt_refrescar_planilla_zumac');
+      } catch (error) {
+        debugPrint('No se pudo refrescar la planilla diaria: $error');
+      }
+    }
+  }
+
+  String? _personalStatusColumn() {
+    const candidates = ['Status', 'ESTADO', 'ESTADO_PERSONAL'];
+    final wanted = candidates.map(_norm).toSet();
+    for (final column in displayColumns) {
+      if (wanted.contains(_norm(column))) return column;
+    }
+    for (final row in records) {
+      for (final column in row.keys) {
+        if (wanted.contains(_norm(column))) return column;
+      }
+    }
+    for (final field in allLocalFormFields) {
+      if (!_isNamedTable(
+          field['tabla_destino']?.toString(), 'GH-REGISTRO_PERSONAL_PLANILLA'))
+        continue;
+      final column = field['campo']?.toString().trim() ?? '';
+      if (wanted.contains(_norm(column))) return column;
+    }
+    return null;
+  }
+
+  void _scheduleContractRenewalDialog() {
+    if (_pendingContractRenewals <= 0 ||
+        _contractRenewalDialogScheduled ||
+        !_isPersonalPlanillaTable) return;
+    _contractRenewalDialogScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_showContractRenewalDialog());
+    });
+  }
+
+  Future<void> _showContractRenewalDialog() async {
+    final count = _pendingContractRenewals;
+    if (!mounted || count <= 0) return;
+    final renew = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Contratos pendientes de renovación'),
+        content: Text(
+          '$count trabajador${count == 1 ? '' : 'es'} '
+          '${count == 1 ? 'tiene' : 'tienen'} el contrato vencido.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Omitir'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.event_repeat_outlined),
+            label: const Text('Renovar'),
+          ),
+        ],
+      ),
+    );
+    if (renew != true || !mounted) return;
+
+    final statusColumn = _personalStatusColumn();
+    if (statusColumn == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('No se encontró el campo Status para aplicar el filtro.'),
+        ),
+      );
+      return;
+    }
+    _columnFilters[statusColumn] = jsonEncode({
+      'mode': 'equals',
+      'value': 'pendiente renovación',
+    });
+    _visibleFilterFields.add(statusColumn);
+    _currentPage = 0;
+    _invalidateFilteredCache();
+    _notifyTableRenderChanged(filtersChanged: true);
+    await _load();
+  }
+
   dynamic _value(Map<String, dynamic> row, List<String> candidates) {
     final wanted = candidates.map(_norm).toSet();
     for (final entry in row.entries) {
@@ -615,16 +719,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
     }
     return null;
-  }
-
-  bool _hasColumn(List<String> candidates) {
-    final wanted = candidates.map(_norm).toSet();
-    for (final row in records) {
-      for (final key in row.keys) {
-        if (wanted.contains(_norm(key))) return true;
-      }
-    }
-    return false;
   }
 
   DateTime? _dateValue(Map<String, dynamic> row) {
@@ -1110,6 +1204,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'lote': loteFilter,
       'turno': turnoFilter,
       'colFilters': _columnFilters,
+      'periodFilters': {
+        for (final key in _periodFilterKeys) key: _periodFilterValues[key],
+      },
     });
   }
 
@@ -1494,6 +1591,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       // 2) Con filtros/orden: filtrar/ordenar sobre el dataset completo y recién luego paginar.
       //    Antes se paginaba primero y se filtraba después; por eso un rango con 142 filas
       //    aparecía repartido en decenas de páginas con 3-5 filas por página.
+      await _preparePayrollLifecycle(resolvedTable);
+
       final needsFullDatasetForView =
           _hasAnyActiveFilters || _sortColumn != null;
       final data = needsFullDatasetForView
@@ -1557,6 +1656,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         _selectedDeleteRows.clear();
       });
       _notifyDeleteSelectionChanged();
+      _scheduleContractRenewalDialog();
       // Fase 3B: caché inteligente por tabla.
       // Guarda metadata liviana de la tabla abierta sin cambiar la fuente de datos.
       // Esto permite saber cuándo se abrió, cuántas filas conoce, página/filtros/sort
@@ -1593,54 +1693,444 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-  List<String> _unique(List<String> candidates) {
-    final values = <String>{};
-    for (final row in records) {
-      final v = _value(row, candidates)?.toString().trim() ?? '';
-      if (v.isNotEmpty) values.add(v);
+  List<String> _dateColumns() {
+    final output = <String>[];
+    final seen = <String>{};
+    for (final column in displayColumns) {
+      final type = _columnType(column);
+      final normalized = _norm(column);
+      if ((type == 'date' || normalized.contains('FECHA')) &&
+          seen.add(normalized)) {
+        output.add(column);
+      }
     }
-    final out = values.toList()..sort();
-    return out;
+    final currentTable = _norm(tableName ?? selectedTableName ?? '');
+    for (final field in allLocalFormFields) {
+      if (currentTable.isNotEmpty &&
+          _norm(field['tabla_destino']?.toString() ?? '') != currentTable) {
+        continue;
+      }
+      final type = field['tipo']?.toString().trim().toLowerCase() ?? '';
+      final uiType = field['tipo_ui']?.toString().trim().toLowerCase() ?? '';
+      final column = field['campo']?.toString().trim() ?? '';
+      if (column.isEmpty) continue;
+      if ((type == 'date' ||
+              type == 'datetime' ||
+              type == 'timestamp' ||
+              uiType == 'date' ||
+              uiType == 'datetime') &&
+          seen.add(_norm(column))) {
+        output.add(column);
+      }
+    }
+    return output;
   }
 
-  List<String> _uniqueYears() {
-    final values = <String>{};
-    for (final row in records) {
-      final d = _dateValue(row);
-      if (d != null) values.add(d.year.toString());
+  static const Map<String, String> _periodLabels = {
+    'year': 'Año',
+    'month_name': 'Nombre del mes',
+    'month_number': 'Número de mes',
+    'week': 'Semana del año',
+    'weekday_number': 'Día de semana',
+    'weekday_name': 'Nombre del día',
+  };
+
+  String _periodValue(DateTime date, String dimension) {
+    const monthNames = [
+      'Enero',
+      'Febrero',
+      'Marzo',
+      'Abril',
+      'Mayo',
+      'Junio',
+      'Julio',
+      'Agosto',
+      'Septiembre',
+      'Octubre',
+      'Noviembre',
+      'Diciembre',
+    ];
+    const weekdayNames = [
+      'Lunes',
+      'Martes',
+      'Miércoles',
+      'Jueves',
+      'Viernes',
+      'Sábado',
+      'Domingo',
+    ];
+    switch (dimension) {
+      case 'month_name':
+        return monthNames[date.month - 1];
+      case 'month_number':
+        return date.month.toString().padLeft(2, '0');
+      case 'week':
+        return _isoWeek(date).toString().padLeft(2, '0');
+      case 'weekday_number':
+        return date.weekday.toString();
+      case 'weekday_name':
+        return weekdayNames[date.weekday - 1];
+      default:
+        return date.year.toString();
     }
-    final out = values.toList()..sort();
-    return out;
   }
 
-  List<String> _uniqueWeeks() {
+  List<String> _periodValues(String key) {
+    final parts = key.split('::');
+    if (parts.length != 2) return const [];
     final values = <String>{};
     for (final row in records) {
-      final d = _dateValue(row);
-      if (d != null) values.add(_isoWeek(d).toString().padLeft(2, '0'));
+      final date = _parseDate(_valueByColumn(row, parts.first));
+      if (date != null) values.add(_periodValue(date, parts.last));
     }
-    final out = values.toList()..sort();
-    return out;
+    final output = values.toList()..sort();
+    return output;
   }
 
-  List<String> _uniqueMonths() {
-    final values = <String>{};
-    for (final row in records) {
-      final d = _dateValue(row);
-      if (d != null) values.add(d.month.toString().padLeft(2, '0'));
+  Future<void> _showAddFilterDialog() async {
+    final mode = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Agregar filtro'),
+        content: SizedBox(
+          width: 500,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.view_column_outlined),
+                ),
+                title: const Text('Seleccionar campo(s)'),
+                subtitle: const Text(
+                  'Agrega uno o varios campos disponibles en esta tabla.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.pop(dialogContext, 'fields'),
+              ),
+              const Divider(height: 1),
+              ListTile(
+                leading: const CircleAvatar(
+                  child: Icon(Icons.calendar_month_outlined),
+                ),
+                title: const Text('Crear periodo'),
+                subtitle: const Text(
+                  'Usa una fecha base para filtrar por año, mes, semana o día.',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                enabled: _dateColumns().isNotEmpty,
+                onTap: _dateColumns().isEmpty
+                    ? null
+                    : () => Navigator.pop(dialogContext, 'period'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || mode == null) return;
+    if (mode == 'fields') {
+      await _selectFilterFields();
+    } else {
+      await _selectPeriodFilters();
     }
-    final out = values.toList()..sort();
-    return out;
   }
 
-  List<String> _uniqueDates() {
-    final values = <String>{};
-    for (final row in records) {
-      final d = _dateValue(row);
-      if (d != null) values.add(_dateKey(d));
+  Future<void> _selectFilterFields() async {
+    final available = _visibleWindowsColumns(displayColumns);
+    final selected = Set<String>.from(_visibleFilterFields);
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Seleccionar campo(s)'),
+          content: SizedBox(
+            width: 520,
+            height: 430,
+            child: available.isEmpty
+                ? const Center(child: Text('No hay campos disponibles.'))
+                : ListView.builder(
+                    itemCount: available.length,
+                    itemBuilder: (_, index) {
+                      final column = available[index];
+                      return CheckboxListTile(
+                        value: selected.contains(column),
+                        title: Text(_tableHeaderLabel(column)),
+                        subtitle: Text(column),
+                        controlAffinity: ListTileControlAffinity.leading,
+                        onChanged: (value) => setDialogState(() {
+                          if (value == true) {
+                            selected.add(column);
+                          } else {
+                            selected.remove(column);
+                          }
+                        }),
+                      );
+                    },
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, selected),
+              child: const Text('Agregar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _visibleFilterFields
+        ..clear()
+        ..addAll(result);
+      _columnFilters.removeWhere((column, _) => !result.contains(column));
+    });
+  }
+
+  Future<void> _selectPeriodFilters() async {
+    final dateColumns = _dateColumns();
+    if (dateColumns.isEmpty) return;
+    var baseDate = dateColumns.first;
+    final dimensions = <String>{};
+    final result = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Crear periodo'),
+          content: SizedBox(
+            width: 540,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: baseDate,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Fecha base',
+                    helperText:
+                        'Sólo se muestran campos de fecha o fecha y hora.',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: dateColumns
+                      .map((column) => DropdownMenuItem(
+                            value: column,
+                            child: Text(_tableHeaderLabel(column)),
+                          ))
+                      .toList(),
+                  onChanged: (value) =>
+                      setDialogState(() => baseDate = value ?? baseDate),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'Periodos disponibles',
+                  style: TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _periodLabels.entries
+                      .map((entry) => FilterChip(
+                            selected: dimensions.contains(entry.key),
+                            label: Text(entry.value),
+                            onSelected: (selected) => setDialogState(() {
+                              if (selected) {
+                                dimensions.add(entry.key);
+                              } else {
+                                dimensions.remove(entry.key);
+                              }
+                            }),
+                          ))
+                      .toList(),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: dimensions.isEmpty
+                  ? null
+                  : () => Navigator.pop(dialogContext, {
+                        'field': baseDate,
+                        'dimensions': dimensions.toList(),
+                      }),
+              child: const Text('Agregar'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (result == null || !mounted) return;
+    final field = result['field']?.toString() ?? '';
+    final selectedDimensions = (result['dimensions'] as List? ?? const [])
+        .map((value) => value.toString());
+    setState(() {
+      for (final dimension in selectedDimensions) {
+        final key = '$field::$dimension';
+        _periodFilterKeys.add(key);
+        _periodFilterValues.putIfAbsent(key, () => null);
+      }
+    });
+  }
+
+  String _columnFilterSummary(String encoded) {
+    final filter = _decodeColumnFilter(encoded);
+    final mode = filter['mode'] ?? 'contains';
+    if (mode.startsWith('between')) {
+      final start = filter['start']?.trim() ?? '';
+      final end = filter['end']?.trim() ?? '';
+      return [start, end].where((value) => value.isNotEmpty).join(' – ');
     }
-    final out = values.toList()..sort();
-    return out;
+    final value = filter['value']?.trim() ?? '';
+    if (mode == 'multiple' && value.isNotEmpty) {
+      final count = value
+          .split(RegExp(r'[;|,]'))
+          .where((item) => item.trim().isNotEmpty)
+          .length;
+      return count == 1 ? value : '$count valores';
+    }
+    return value.isNotEmpty ? value : 'Todos';
+  }
+
+  Widget _fieldFilterControl(String column) {
+    final encoded = _columnFilters[column];
+    return SizedBox(
+      height: 44,
+      width: 218,
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(9),
+          side: const BorderSide(color: Color(0xFFC8D4DF)),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: () => _showColumnValueFilterDialog(column),
+          child: Row(
+            children: [
+              const SizedBox(width: 10),
+              const Icon(Icons.filter_alt_outlined,
+                  size: 17, color: Color(0xFF147A6E)),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _tableHeaderLabel(column),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF4A6075),
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text(
+                      encoded == null ? 'Todos' : _columnFilterSummary(encoded),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xFF17324D),
+                        fontSize: 12.5,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                tooltip: 'Quitar filtro',
+                icon: const Icon(Icons.close, size: 16),
+                onPressed: () {
+                  setState(() {
+                    _visibleFilterFields.remove(column);
+                    _columnFilters.remove(column);
+                    _invalidateFilteredCache();
+                  });
+                  unawaited(_load());
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _periodFilterControl(String key) {
+    final parts = key.split('::');
+    final field = parts.first;
+    final dimension = parts.length > 1 ? parts.last : 'year';
+    final values = _periodValues(key);
+    return Container(
+      height: 44,
+      width: 218,
+      padding: const EdgeInsets.only(left: 9),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(9),
+        border: Border.all(color: const Color(0xFFC8D4DF)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                value: _periodFilterValues[key],
+                isExpanded: true,
+                hint: Text(
+                  '${_periodLabels[dimension]} · ${_tableHeaderLabel(field)}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11.5),
+                ),
+                items: [
+                  const DropdownMenuItem<String>(
+                    value: null,
+                    child: Text('Todos'),
+                  ),
+                  ...values.map((value) => DropdownMenuItem(
+                        value: value,
+                        child: Text(value, overflow: TextOverflow.ellipsis),
+                      )),
+                ],
+                onChanged: (value) => _applyTopFilter(
+                  () => _periodFilterValues[key] = value,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: 'Quitar filtro',
+            icon: const Icon(Icons.close, size: 16),
+            onPressed: () {
+              setState(() {
+                _periodFilterKeys.remove(key);
+                _periodFilterValues.remove(key);
+                _invalidateFilteredCache();
+              });
+              unawaited(_load());
+            },
+          ),
+        ],
+      ),
+    );
   }
 
   List<Map<String, dynamic>> _filterAndSortRows(
@@ -1686,6 +2176,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (turnoFilter != null && turno != turnoFilter) return false;
       for (final entry in _columnFilters.entries) {
         if (!_matchesColumnFilter(row, entry.key, entry.value)) return false;
+      }
+      for (final key in _periodFilterKeys) {
+        final selected = _periodFilterValues[key];
+        if (selected == null || selected.isEmpty) continue;
+        final parts = key.split('::');
+        if (parts.length != 2) continue;
+        final date = _parseDate(_valueByColumn(row, parts.first));
+        if (date == null || _periodValue(date, parts.last) != selected) {
+          return false;
+        }
       }
       return true;
     }).toList();
@@ -1736,7 +2236,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       varietyFilter != null ||
       loteFilter != null ||
       turnoFilter != null ||
-      _columnFilters.isNotEmpty;
+      _columnFilters.isNotEmpty ||
+      _periodFilterValues.values.any((value) => value?.isNotEmpty == true);
 
   void _clearAllFilters() {
     if (!_hasAnyActiveFilters) return;
@@ -1750,6 +2251,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     loteFilter = null;
     turnoFilter = null;
     _columnFilters.clear();
+    for (final key in _periodFilterKeys) {
+      _periodFilterValues[key] = null;
+    }
     _currentPage = 0;
     _invalidateFilteredCache();
     // Al limpiar filtros volvemos a cargar paginado normal.
@@ -1845,6 +2349,146 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       return true;
     }
     return text.toLowerCase().contains(value.toLowerCase().trim());
+  }
+
+  List<String> _distinctColumnValues(String column) {
+    final values = <String>{};
+    for (final row in records) {
+      final value = _valueByColumn(row, column)?.toString().trim() ?? '';
+      if (value.isNotEmpty) values.add(value);
+    }
+    final ordered = values.toList();
+    ordered.sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+    return ordered;
+  }
+
+  Future<void> _showColumnValueFilterDialog(String column) async {
+    final values = _distinctColumnValues(column);
+    final current = _columnFilters[column] == null
+        ? <String, String>{}
+        : _decodeColumnFilter(_columnFilters[column]!);
+    final selected = <String>{};
+    if (current['mode'] == 'multiple') {
+      selected.addAll((current['value'] ?? '')
+          .split(RegExp(r'[;|,]'))
+          .map((value) => value.trim())
+          .where((value) => value.isNotEmpty));
+    } else if (current['mode'] == 'equals' &&
+        (current['value'] ?? '').trim().isNotEmpty) {
+      selected.add(current['value']!.trim());
+    }
+    for (final value in selected) {
+      if (!values.contains(value)) values.add(value);
+    }
+    var search = '';
+    final result = await showDialog<Set<String>>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final visible = values
+              .where((value) =>
+                  value.toLowerCase().contains(search.trim().toLowerCase()))
+              .toList(growable: false);
+          return AlertDialog(
+            title: Text('Filtrar ${_tableHeaderLabel(column)}'),
+            content: SizedBox(
+              width: 480,
+              height: 480,
+              child: Column(
+                children: [
+                  TextField(
+                    autofocus: values.length > 12,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.search_rounded),
+                      hintText: 'Buscar valor…',
+                      border: OutlineInputBorder(),
+                      isDense: true,
+                    ),
+                    onChanged: (value) => setDialogState(() => search = value),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      TextButton.icon(
+                        onPressed: () => setDialogState(() {
+                          selected
+                            ..clear()
+                            ..addAll(visible);
+                        }),
+                        icon: const Icon(Icons.done_all_rounded, size: 18),
+                        label: const Text('Seleccionar visibles'),
+                      ),
+                      const Spacer(),
+                      TextButton(
+                        onPressed: () => setDialogState(() => selected.clear()),
+                        child: const Text('Limpiar'),
+                      ),
+                    ],
+                  ),
+                  const Divider(height: 1),
+                  Expanded(
+                    child: values.isEmpty
+                        ? const Center(
+                            child: Text('Esta columna no contiene valores.'))
+                        : visible.isEmpty
+                            ? const Center(child: Text('No hay coincidencias.'))
+                            : ListView.builder(
+                                itemCount: visible.length,
+                                itemBuilder: (_, index) {
+                                  final value = visible[index];
+                                  return CheckboxListTile(
+                                    dense: true,
+                                    value: selected.contains(value),
+                                    title: Text(value),
+                                    controlAffinity:
+                                        ListTileControlAffinity.leading,
+                                    onChanged: (checked) => setDialogState(() {
+                                      if (checked == true) {
+                                        selected.add(value);
+                                      } else {
+                                        selected.remove(value);
+                                      }
+                                    }),
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton.icon(
+                onPressed: () =>
+                    Navigator.pop(dialogContext, Set<String>.from(selected)),
+                icon: const Icon(Icons.filter_alt_rounded, size: 18),
+                label: const Text('Aplicar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      if (result.isEmpty || result.length == values.length) {
+        _columnFilters.remove(column);
+      } else {
+        _columnFilters[column] = jsonEncode({
+          'mode': 'multiple',
+          'value': result.join(';'),
+        });
+      }
+      _visibleFilterFields.add(column);
+      _currentPage = 0;
+      _renderRowLimit = _pageSize;
+      _invalidateFilteredCache();
+      _filterControlsVersion.value++;
+    });
+    await _load();
   }
 
   Future<void> _showColumnFilterDialog(String column) async {
@@ -1978,6 +2622,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     } else {
       _columnFilters[column] = result;
     }
+    _visibleFilterFields.add(column);
     _currentPage = 0;
     _renderRowLimit = _pageSize;
     _invalidateFilteredCache();
@@ -4023,105 +4668,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
-  Future<void> _pickRangeDate({required bool isStart}) async {
-    final now = DateTime.now();
-    final current = isStart ? startDateFilter : endDateFilter;
-    final picked = await showDatePicker(
-      context: context,
-      initialDate: current ?? now,
-      firstDate: DateTime(1900),
-      lastDate: DateTime(now.year + 20),
-    );
-    if (picked == null) return;
-    _applyTopFilter(() {
-      if (isStart) {
-        startDateFilter = picked;
-        if (endDateFilter != null && endDateFilter!.isBefore(picked))
-          endDateFilter = picked;
-      } else {
-        endDateFilter = picked;
-        if (startDateFilter != null && startDateFilter!.isAfter(picked))
-          startDateFilter = picked;
-      }
-    });
-  }
-
-  Widget _dateRangeFilter({
-    required String label,
-    required DateTime? value,
-    required VoidCallback onTap,
-    required VoidCallback onClear,
-    double width = 136,
-  }) {
-    return SizedBox(
-      width: width,
-      height: 44,
-      child: InkWell(
-        onTap: onTap,
-        child: InputDecorator(
-          decoration: InputDecoration(
-            labelText: label,
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            border: const OutlineInputBorder(),
-            enabledBorder: const OutlineInputBorder(
-                borderSide: BorderSide(color: Color(0xFFC8D4DF))),
-            labelStyle: const TextStyle(color: Color(0xFF4A6075)),
-            suffixIcon: value == null
-                ? const Icon(Icons.calendar_today,
-                    size: 16, color: Color(0xFF17324D))
-                : IconButton(
-                    padding: EdgeInsets.zero,
-                    icon: const Icon(Icons.close,
-                        size: 16, color: Color(0xFF17324D)),
-                    onPressed: onClear,
-                  ),
-          ),
-          child: Text(
-            value == null ? 'Todos' : _dateKey(value),
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(color: Color(0xFF17324D), fontSize: 13),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _dropdownFilter({
-    required String label,
-    required String? value,
-    required List<String> values,
-    required ValueChanged<String?> onChanged,
-    double width = 120,
-  }) {
-    return SizedBox(
-      width: width,
-      height: 44,
-      child: DropdownButtonFormField<String>(
-        value: value,
-        isExpanded: true,
-        dropdownColor: Colors.white,
-        style: const TextStyle(color: Color(0xFF17324D), fontSize: 13),
-        iconEnabledColor: const Color(0xFF17324D),
-        decoration: InputDecoration(
-          labelText: label,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          border: const OutlineInputBorder(),
-          enabledBorder: const OutlineInputBorder(
-              borderSide: BorderSide(color: Color(0xFFC8D4DF))),
-          labelStyle: const TextStyle(color: Color(0xFF4A6075)),
-        ),
-        items: [
-          const DropdownMenuItem<String>(value: null, child: Text('Todos')),
-          ...values
-              .map((e) => DropdownMenuItem<String>(value: e, child: Text(e))),
-        ],
-        onChanged: onChanged,
-      ),
-    );
-  }
-
   Widget _emptyMessage(String message) {
     return Center(
       child: Text(
@@ -5817,6 +6363,137 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return children;
   }
 
+  String? _editControllerColumnByCandidates(
+    Map<String, TextEditingController> controllers,
+    List<String> candidates,
+  ) {
+    final wanted = candidates.map(_norm).toSet();
+    for (final column in controllers.keys) {
+      if (wanted.contains(_norm(column))) return column;
+    }
+    return null;
+  }
+
+  String _editControllerTextByCandidates(
+    Map<String, TextEditingController> controllers,
+    List<String> candidates,
+  ) {
+    final column = _editControllerColumnByCandidates(controllers, candidates);
+    return column == null ? '' : controllers[column]!.text.trim();
+  }
+
+  Future<bool> _confirmPersonalStatusTransition(
+    Map<String, dynamic> row,
+    Map<String, TextEditingController> controllers,
+  ) async {
+    final statusColumn = _editControllerColumnByCandidates(
+      controllers,
+      const ['Status', 'ESTADO', 'ESTADO_PERSONAL'],
+    );
+    if (statusColumn == null) return true;
+
+    final oldStatus = _norm(
+      _rowText(row, const ['Status', 'ESTADO', 'ESTADO_PERSONAL']),
+    );
+    final newStatus = _norm(controllers[statusColumn]!.text);
+    final active = _norm('Activo');
+    final terminated = _norm('Cese');
+    final pendingRenewal = _norm('pendiente renovación');
+
+    if (newStatus == terminated &&
+        oldStatus != terminated &&
+        (oldStatus == active || oldStatus == pendingRenewal)) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Confirmar cese'),
+          content: const Text(
+            '¿Está seguro de activar Cese para este trabajador?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Activar Cese'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return false;
+    }
+
+    if (newStatus != active ||
+        (oldStatus != terminated && oldStatus != pendingRenewal)) return true;
+
+    const startCandidates = [
+      'Fecha inicio de Contrato',
+      'FECHA_INICIO_CONTRATO'
+    ];
+    const endCandidates = ['Fecha fin de Contrato', 'FECHA_FIN_CONTRATO'];
+    final required = <String, List<String>>{
+      'Fecha inicio de Contrato': startCandidates,
+      'Fecha fin de Contrato': endCandidates,
+    };
+    if (oldStatus == terminated) {
+      required.addAll({
+        'Fecha de Ingreso': const ['Fecha de Ingreso', 'FECHA_INGRESO'],
+        'Sueldo': const ['Sueldo', 'SUELDO_MENSUAL', 'REMUNERACION'],
+        'Asignación familiar': const [
+          'Asignación familiar',
+          'ASIGNACION_FAMILIAR'
+        ],
+      });
+    }
+
+    final missing = <String>[];
+    for (final entry in required.entries) {
+      if (_editControllerTextByCandidates(controllers, entry.value).isEmpty) {
+        missing.add(entry.key);
+      }
+    }
+    final salary = _editControllerTextByCandidates(
+      controllers,
+      const ['Sueldo', 'SUELDO_MENSUAL', 'REMUNERACION'],
+    );
+    if (oldStatus == terminated &&
+        salary.isNotEmpty &&
+        (num.tryParse(salary.replaceAll(',', '.')) ?? 0) <= 0) {
+      if (!missing.contains('Sueldo')) missing.add('Sueldo mayor que cero');
+    }
+    if (missing.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Para activar al trabajador complete: ${missing.join(', ')}.',
+          ),
+        ),
+      );
+      return false;
+    }
+
+    final start = _parseDate(
+      _editControllerTextByCandidates(controllers, startCandidates),
+    );
+    final end = _parseDate(
+      _editControllerTextByCandidates(controllers, endCandidates),
+    );
+    if (start == null || end == null || end.isBefore(start)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'El rango de contrato no es válido: la fecha fin debe ser igual o posterior al inicio.',
+          ),
+        ),
+      );
+      return false;
+    }
+    return true;
+  }
+
   Future<void> _editRemoteRecord(Map<String, dynamic> row) async {
     final table = tableName;
     if (!canUpdate) {
@@ -5897,6 +6574,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
 
     if (saved != true) {
+      for (final c in controllers.values) {
+        c.dispose();
+      }
+      return;
+    }
+
+    if (_isPersonalPlanillaTable &&
+        !await _confirmPersonalStatusTransition(row, controllers)) {
       for (final c in controllers.values) {
         c.dispose();
       }
@@ -6284,7 +6969,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     Widget headerCell(String column, double width) {
       final label = _tableHeaderLabel(column);
-      final activeFilter = _columnFilters.containsKey(column);
       final sorted = _sortColumn == column;
       return Container(
         width: width,
@@ -6337,14 +7021,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 ),
               ),
             ),
-            InkWell(
-              onTap: () => _showColumnFilterDialog(column),
-              child: Padding(
-                padding: const EdgeInsets.only(left: 4),
-                child: Icon(
-                    activeFilter ? Icons.filter_alt : Icons.filter_alt_outlined,
+            Tooltip(
+              message: _columnFilters.containsKey(column)
+                  ? 'Cambiar filtro de $label'
+                  : 'Filtrar $label',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(6),
+                onTap: () => _showColumnValueFilterDialog(column),
+                child: Padding(
+                  padding: const EdgeInsets.all(5),
+                  child: Icon(
+                    _columnFilters.containsKey(column)
+                        ? Icons.filter_alt_rounded
+                        : Icons.filter_alt_outlined,
                     size: 16,
-                    color: Colors.white),
+                    color: _columnFilters.containsKey(column)
+                        ? const Color(0xFFFFD166)
+                        : Colors.white70,
+                  ),
+                ),
               ),
             ),
             GestureDetector(
@@ -6417,7 +7112,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
-          color: fmt.bgColor,
+          color: fmt.bgColor ??
+              (index.isEven ? Colors.white : const Color(0xFFFAFCFD)),
           border: Border(
             right: BorderSide(
                 color: fmt.borderColor ?? const Color(0xFFE7EDF3),
@@ -6425,9 +7121,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             top: fmt.borderColor == null
                 ? BorderSide.none
                 : BorderSide(color: fmt.borderColor!, width: 1.0),
-            bottom: fmt.borderColor == null
-                ? BorderSide.none
-                : BorderSide(color: fmt.borderColor!, width: 1.0),
+            bottom: BorderSide(
+              color: fmt.borderColor ?? const Color(0xFFD7E1E9),
+              width: fmt.borderColor == null ? 0.8 : 1.0,
+            ),
           ),
         ),
         child: child,
@@ -6442,7 +7139,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         alignment: Alignment.center,
         decoration: const BoxDecoration(
             border: Border(
-                right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
+          right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8),
+          bottom: BorderSide(color: Color(0xFFD7E1E9), width: 0.8),
+        )),
         child: StatefulBuilder(
           builder: (context, setLocalState) {
             final selected = _selectedDeleteRowKeys.contains(key);
@@ -6465,7 +7164,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         alignment: Alignment.center,
         decoration: const BoxDecoration(
             border: Border(
-                right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8))),
+          right: BorderSide(color: Color(0xFFE7EDF3), width: 0.8),
+          bottom: BorderSide(color: Color(0xFFD7E1E9), width: 0.8),
+        )),
         child: IconButton(
           tooltip: canUpdate ? 'Editar registro' : 'Actualización no permitida',
           icon: Icon(Icons.edit,
@@ -6802,6 +7503,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           .where((f) => _normHeaderTable(f['tabla_destino']) == tableKey),
       ...rows,
     ];
+    final tableDefinition =
+        internalTableRows.cast<Map<String, dynamic>?>().firstWhere(
+              (row) => _normHeaderTable(row?['tabla_destino']) == tableKey,
+              orElse: () => null,
+            );
 
     String firstNonEmpty(String key) {
       for (final row in fields) {
@@ -6814,6 +7520,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     dynamic firstValue(String key) {
+      final tableValue = tableDefinition?[key];
+      if (tableValue != null && tableValue.toString().trim().isNotEmpty) {
+        return tableValue;
+      }
       for (final row in fields) {
         final value = row[key];
         if (value != null && value.toString().trim().isNotEmpty) return value;
@@ -6826,6 +7536,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'titulo2': firstNonEmpty('titulo2'),
       'codigo1': firstNonEmpty('codigo1'),
       'codigo2': firstNonEmpty('codigo2'),
+      'auditable': firstValue('auditable') ?? true,
+      'icono': firstValue('icono') ?? 'assignment',
+      'imagen_encabezado': firstValue('imagen_encabezado'),
       for (final key in [
         'titulo1_alineacion',
         'titulo1_tamanio_letra',
@@ -7069,13 +7782,175 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
+  Widget _compactFormatDocumentHeader(Map<String, dynamic> meta) {
+    final configuredTitle = _headerLineBreaks(meta['titulo1'] ?? '');
+    final selectedTitle = configuredTitle.isEmpty
+        ? (widget.format['nombre']?.toString() ?? 'Formato')
+        : configuredTitle;
+    final selectedTitle2 = _headerLineBreaks(meta['titulo2'] ?? '');
+    final selectedCode = _headerLineBreaks(meta['codigo1'] ?? '');
+    final selectedCode2 = _headerLineBreaks(meta['codigo2'] ?? '');
+    final title1Color =
+        _parseTableMatrixColor(meta['titulo1_color']) ?? Colors.white;
+    final title2Color =
+        _parseTableMatrixColor(meta['titulo2_color']) ?? Colors.white;
+    final title1Size =
+        (double.tryParse(meta['titulo1_tamanio_letra']?.toString() ?? '') ??
+                15.5)
+            .clamp(11.0, 17.0);
+    final title2Size =
+        (double.tryParse(meta['titulo2_tamanio_letra']?.toString() ?? '') ??
+                12.5)
+            .clamp(9.0, 13.0);
+    final auditable = _boolValue(meta['auditable']);
+
+    Widget visual() {
+      final image = meta['imagen_encabezado']?.toString().trim() ?? '';
+      if (image.startsWith('data:image/') && image.contains(',')) {
+        try {
+          return Image.memory(
+            base64Decode(image.split(',').last),
+            width: 43,
+            height: 43,
+            fit: BoxFit.cover,
+          );
+        } catch (_) {}
+      }
+      if (image.startsWith('http://') || image.startsWith('https://')) {
+        return Image.network(
+          image,
+          width: 43,
+          height: 43,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => Icon(
+            configurationIconForName(meta['icono']?.toString()),
+            size: 34,
+            color: Colors.white,
+          ),
+        );
+      }
+      return Icon(
+        configurationIconForName(meta['icono']?.toString()),
+        size: 34,
+        color: Colors.white,
+      );
+    }
+
+    Widget visualPanel() => Container(
+          width: 60,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: _appgtHeaderColor,
+            border: Border.all(color: _appgtHeaderBorderColor, width: 1),
+          ),
+          padding: const EdgeInsets.all(5),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(10),
+            child: visual(),
+          ),
+        );
+
+    Widget titlePanel() => Container(
+          alignment: _headerAlignment(meta['titulo1_alineacion']),
+          decoration: BoxDecoration(
+            color: _appgtHeaderColor,
+            border: Border.all(color: _appgtHeaderBorderColor, width: 1),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                selectedTitle,
+                textAlign: _headerTextAlign(meta['titulo1_alineacion']),
+                maxLines: selectedTitle2.isEmpty ? 2 : 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: title1Color,
+                  fontWeight: FontWeight.w800,
+                  fontSize: title1Size,
+                  height: 1.05,
+                ),
+              ),
+              if (selectedTitle2.isNotEmpty)
+                Text(
+                  selectedTitle2,
+                  textAlign: _headerTextAlign(meta['titulo2_alineacion']),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: title2Color,
+                    fontWeight: FontWeight.w700,
+                    fontSize: title2Size,
+                    height: 1.02,
+                  ),
+                ),
+            ],
+          ),
+        );
+
+    Widget codePanel() => InkWell(
+          onTap: selectedCode.isEmpty
+              ? null
+              : () => _showHeaderCodeDialog(selectedCode),
+          child: Container(
+            width: 150,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: _appgtHeaderColor,
+              border: Border.all(color: _appgtHeaderBorderColor, width: 1),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            child: Text(
+              [selectedCode, selectedCode2]
+                  .where((value) => value.isNotEmpty)
+                  .join('\n'),
+              textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w800,
+                fontSize: 9.5,
+                height: 1.02,
+              ),
+            ),
+          ),
+        );
+
+    return Container(
+      height: 68,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: _appgtHeaderColor,
+        border: Border.all(color: _appgtHeaderBorderColor, width: 1.2),
+      ),
+      child: auditable
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                visualPanel(),
+                const SizedBox(width: 4),
+                Expanded(child: titlePanel()),
+                const SizedBox(width: 4),
+                codePanel(),
+              ],
+            )
+          : Stack(
+              fit: StackFit.expand,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 66),
+                  child: titlePanel(),
+                ),
+                Align(alignment: Alignment.centerLeft, child: visualPanel()),
+              ],
+            ),
+    );
+  }
+
   Widget _desktopBody() {
-    final rows = filteredRecords;
-    final hasDate = _firstDateColumn() != null;
-    final hasVariety = _hasColumn(['VARIEDAD', 'VARIEDADES']);
-    final hasLote = _hasColumn(['LOTE', 'LOTES']);
-    final hasTurno =
-        _hasColumn(['TURNO', 'TURNOS', 'FECHA O TURNO', 'FECHA_O_TURNO']);
     final headerMeta = _formatHeaderMeta();
 
     return Container(
@@ -7093,7 +7968,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _formatDocumentHeader(headerMeta),
+          _compactFormatDocumentHeader(headerMeta),
           const SizedBox(height: 10),
           ValueListenableBuilder<int>(
             valueListenable: _filterControlsVersion,
@@ -7107,97 +7982,28 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
                       SizedBox(
-                        height: 34,
-                        child: OutlinedButton.icon(
-                          onPressed:
-                              _hasAnyActiveFilters ? _clearAllFilters : null,
-                          icon: const Icon(Icons.filter_alt_off, size: 16),
-                          label: const Text('Limpiar filtros'),
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: const Color(0xFF147A6E),
-                            backgroundColor: const Color(0xFFF2FAF8),
-                            side: const BorderSide(color: Color(0xFFB7DDD6)),
-                            shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(10)),
-                            padding: const EdgeInsets.symmetric(horizontal: 12),
+                        width: 44,
+                        height: 44,
+                        child: Tooltip(
+                          message: 'Limpiar filtros',
+                          child: OutlinedButton(
+                            onPressed:
+                                _hasAnyActiveFilters ? _clearAllFilters : null,
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFF147A6E),
+                              backgroundColor: const Color(0xFFF2FAF8),
+                              side: const BorderSide(color: Color(0xFFB7DDD6)),
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(10)),
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: const Icon(Icons.cleaning_services_outlined),
                           ),
                         ),
                       ),
                       const SizedBox(width: 8),
-                      if (hasDate) ...[
-                        _dateRangeFilter(
-                          label: 'FECHA INICIO',
-                          value: startDateFilter,
-                          onTap: () => _pickRangeDate(isStart: true),
-                          onClear: () =>
-                              _applyTopFilter(() => startDateFilter = null),
-                          width: 145,
-                        ),
-                        _dateRangeFilter(
-                          label: 'FECHA FIN',
-                          value: endDateFilter,
-                          onTap: () => _pickRangeDate(isStart: false),
-                          onClear: () =>
-                              _applyTopFilter(() => endDateFilter = null),
-                          width: 135,
-                        ),
-                        _dropdownFilter(
-                          label: 'AÑO',
-                          value: yearFilter,
-                          values: _uniqueYears(),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => yearFilter = v),
-                          width: 86,
-                        ),
-                        _dropdownFilter(
-                          label: 'SEMANA',
-                          value: weekFilter,
-                          values: _uniqueWeeks(),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => weekFilter = v),
-                          width: 105,
-                        ),
-                        _dropdownFilter(
-                          label: 'MES',
-                          value: monthFilter,
-                          values: _uniqueMonths(),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => monthFilter = v),
-                          width: 92,
-                        ),
-                      ],
-                      if (hasVariety)
-                        _dropdownFilter(
-                          label: 'VARIEDAD',
-                          value: varietyFilter,
-                          values: _unique(['VARIEDAD', 'VARIEDADES']),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => varietyFilter = v),
-                          width: 140,
-                        ),
-                      if (hasLote)
-                        _dropdownFilter(
-                          label: 'LOTE',
-                          value: loteFilter,
-                          values: _unique(['LOTE', 'LOTES']),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => loteFilter = v),
-                          width: 120,
-                        ),
-                      if (hasTurno)
-                        _dropdownFilter(
-                          label: 'TURNO',
-                          value: turnoFilter,
-                          values: _unique([
-                            'TURNO',
-                            'TURNOS',
-                            'FECHA O TURNO',
-                            'FECHA_O_TURNO'
-                          ]),
-                          onChanged: (v) =>
-                              _applyTopFilter(() => turnoFilter = v),
-                          width: 130,
-                        ),
+                      ..._visibleFilterFields.map(_fieldFilterControl),
+                      ..._periodFilterKeys.map(_periodFilterControl),
                     ],
                   ),
                 ),
@@ -7243,6 +8049,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   ),
                   const SizedBox(width: 10),
                 ],
+                SizedBox(
+                  height: 44,
+                  child: OutlinedButton.icon(
+                    onPressed: displayColumns.isEmpty || loading
+                        ? null
+                        : _showAddFilterDialog,
+                    icon: const Icon(Icons.add, size: 18),
+                    label: const Text('Filtro'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: const Color(0xFF147A6E),
+                      backgroundColor: const Color(0xFFF2FAF8),
+                      side: const BorderSide(color: Color(0xFF147A6E)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
                 SizedBox(
                   width: 44,
                   height: 44,
@@ -7573,6 +8398,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                               MobileRecordsList(
                                             records: rows,
                                             columns: columns,
+                                            layout: widget
+                                                    .format['layout_registros']
+                                                    ?.toString() ??
+                                                'TABLA',
                                             rowNumberOffset:
                                                 _currentPage * _pageSize,
                                             labelFor: _tableHeaderLabel,

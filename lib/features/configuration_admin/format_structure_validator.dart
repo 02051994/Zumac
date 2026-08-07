@@ -80,6 +80,9 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
     } else if (!physicalTables.add(physicalName.toUpperCase())) {
       errors.add('$prefix: el nombre está repetido, por favor elija otro.');
     }
+    if (!table.containsKey('auditable') || table['auditable'] is! bool) {
+      errors.add('$prefix: indique si la tabla es auditable (Sí o No).');
+    }
     if (table['es_detalle'] == true &&
         (text(table, 'tabla_padre').isEmpty ||
             text(table, 'campo_fk_hijo').isEmpty)) {

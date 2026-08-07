@@ -20,6 +20,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final userCtrl = TextEditingController();
   final passCtrl = TextEditingController();
+  final FocusNode passwordFocus = FocusNode();
   final session = LocalSession();
   bool loading = false;
   bool updatingUsers = false;
@@ -70,6 +71,14 @@ class _LoginPageState extends State<LoginPage> {
   void initState() {
     super.initState();
     _loadCachedEmail();
+  }
+
+  @override
+  void dispose() {
+    userCtrl.dispose();
+    passCtrl.dispose();
+    passwordFocus.dispose();
+    super.dispose();
   }
 
   @override
@@ -143,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: true,
+        forceConfigurationRefresh: false,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -316,14 +325,25 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   Future<void> login() async {
+    if (loading || updatingUsers) return;
+    final loginIdentifier = userCtrl.text.trim();
+    final password = passCtrl.text.trim();
+    if (loginIdentifier.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Escribe tu usuario y contraseña.')),
+      );
+      return;
+    }
+    // El teclado y la contraseña visible se ocultan antes de dibujar la capa
+    // de carga. De este modo ningún fotograma del ingreso expone el texto.
+    FocusManager.instance.primaryFocus?.unfocus();
     setState(() {
+      passwordVisible = false;
       loading = true;
       loadingProgress = 0.08;
       loadingMessage = 'Validando conexión y credenciales...';
     });
     await Future<void>.delayed(const Duration(milliseconds: 48));
-    final loginIdentifier = userCtrl.text.trim();
-    final password = passCtrl.text.trim();
 
     try {
       final online = await SyncService().hasInternet();
@@ -508,6 +528,8 @@ class _LoginPageState extends State<LoginPage> {
                           TextField(
                             controller: userCtrl,
                             keyboardType: TextInputType.text,
+                            textInputAction: TextInputAction.next,
+                            onSubmitted: (_) => passwordFocus.requestFocus(),
                             style: const TextStyle(fontSize: 14),
                             decoration: const InputDecoration(
                               labelText: 'DNI o correo',
@@ -519,7 +541,10 @@ class _LoginPageState extends State<LoginPage> {
                           const SizedBox(height: 12),
                           TextField(
                             controller: passCtrl,
+                            focusNode: passwordFocus,
                             obscureText: !passwordVisible,
+                            textInputAction: TextInputAction.done,
+                            onSubmitted: (_) => login(),
                             style: const TextStyle(fontSize: 14),
                             decoration: InputDecoration(
                               labelText: 'Contraseña',

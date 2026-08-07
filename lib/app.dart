@@ -1,6 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'features/auth/login_page.dart';
@@ -82,7 +84,11 @@ class _AppGTState extends State<AppGT> {
               ),
             ),
           ),
-          child: child ?? const SizedBox.shrink(),
+          child: _AppInteractionScope(
+            child: SelectionArea(
+              child: child ?? const SizedBox.shrink(),
+            ),
+          ),
         );
       },
       theme: ThemeData(
@@ -143,6 +149,110 @@ class _AppGTState extends State<AppGT> {
           : session == null
               ? const LoginPage()
               : const ModulesPage(),
+    );
+  }
+}
+
+/// Interacciones globales comunes a web, Windows, macOS y Linux.
+///
+/// Ctrl + rueda modifica el lienzo completo (no solo el texto o el control bajo
+/// el puntero). El mismo tope se aplica a Ctrl +/- para que el comportamiento
+/// sea predecible cuando no hay rueda disponible.
+class _AppInteractionScope extends StatefulWidget {
+  const _AppInteractionScope({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_AppInteractionScope> createState() => _AppInteractionScopeState();
+}
+
+class _AppInteractionScopeState extends State<_AppInteractionScope> {
+  static const double _minimumZoom = .80;
+  static const double _maximumZoom = 1.40;
+  static const double _zoomStep = .10;
+
+  double _zoom = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+  }
+
+  @override
+  void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
+    super.dispose();
+  }
+
+  bool get _modifierPressed =>
+      HardwareKeyboard.instance.isControlPressed ||
+      HardwareKeyboard.instance.isMetaPressed;
+
+  void _changeZoom(double delta) {
+    final next = (_zoom + delta).clamp(_minimumZoom, _maximumZoom).toDouble();
+    if ((next - _zoom).abs() < .001 || !mounted) return;
+    setState(() => _zoom = next);
+  }
+
+  bool _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent || !_modifierPressed) return false;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.equal ||
+        key == LogicalKeyboardKey.add ||
+        key == LogicalKeyboardKey.numpadAdd) {
+      _changeZoom(_zoomStep);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.minus ||
+        key == LogicalKeyboardKey.numpadSubtract) {
+      _changeZoom(-_zoomStep);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.digit0 || key == LogicalKeyboardKey.numpad0) {
+      if ((_zoom - 1).abs() >= .001 && mounted) {
+        setState(() => _zoom = 1);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  void _handlePointerSignal(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent || !_modifierPressed) return;
+    _changeZoom(event.scrollDelta.dy < 0 ? _zoomStep : -_zoomStep);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Listener(
+      behavior: HitTestBehavior.translucent,
+      onPointerSignal: _handlePointerSignal,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+            return widget.child;
+          }
+          final logicalSize = Size(
+            constraints.maxWidth / _zoom,
+            constraints.maxHeight / _zoom,
+          );
+          return ClipRect(
+            child: Transform.scale(
+              scale: _zoom,
+              alignment: Alignment.topLeft,
+              child: SizedBox.fromSize(
+                size: logicalSize,
+                child: MediaQuery(
+                  data: MediaQuery.of(context).copyWith(size: logicalSize),
+                  child: widget.child,
+                ),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 }

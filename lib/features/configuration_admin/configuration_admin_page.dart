@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../../core/services/app_experience_service.dart';
 import '../../core/widgets/configuration_icon_catalog.dart';
 import '../../core/widgets/responsive_layout.dart';
+import '../../core/widgets/zumac_feature_header.dart';
 import 'configuration_admin_repository.dart';
+import 'creator_document_import_page.dart';
 import 'configuration_entity_wizard_page.dart';
 import 'configuration_preview_page.dart';
 import 'format_structure_wizard_page.dart';
@@ -16,9 +18,13 @@ class ConfigurationAdminPage extends StatefulWidget {
   const ConfigurationAdminPage({
     super.key,
     this.initialMode = CreatorEntryMode.create,
+    this.embedded = false,
+    this.onConfigurationChanged,
   });
 
   final CreatorEntryMode initialMode;
+  final bool embedded;
+  final Future<void> Function()? onConfigurationChanged;
 
   @override
   State<ConfigurationAdminPage> createState() => _ConfigurationAdminPageState();
@@ -209,7 +215,23 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         builder: (_) => page,
       ),
     );
-    if (published == true) publicationPendingSync = true;
+    if (published == true) {
+      publicationPendingSync = false;
+      await widget.onConfigurationChanged?.call();
+    }
+    await _load();
+  }
+
+  Future<void> _openDocumentImport() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => CreatorDocumentImportPage(
+          contextData: contextData,
+          initialRubroId: selectedBuilderRubroId,
+          repository: repository,
+        ),
+      ),
+    );
     await _load();
   }
 
@@ -282,10 +304,11 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
             );
       if (!mounted) return;
       if (result['publicado'] == true) {
-        publicationPendingSync = true;
+        publicationPendingSync = false;
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Configuración publicada.')),
         );
+        await widget.onConfigurationChanged?.call();
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -350,43 +373,54 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
 
   @override
   Widget build(BuildContext context) {
+    final pageBody = loading
+        ? const Center(child: CircularProgressIndicator())
+        : error != null
+            ? _errorPanel()
+            : !canManage
+                ? _accessDenied()
+                : Stack(
+                    children: [
+                      IgnorePointer(
+                        ignoring: actionRunning,
+                        child: _creatorBody(),
+                      ),
+                      if (refreshing || actionRunning)
+                        const Positioned(
+                          left: 0,
+                          right: 0,
+                          top: 0,
+                          child: LinearProgressIndicator(minHeight: 3),
+                        ),
+                    ],
+                  );
+    final title = ZumacFeatureHeader(
+      title: widget.initialMode == CreatorEntryMode.edit
+          ? 'Zumac Creator · Editar objetos'
+          : 'Zumac Creator · Nuevo objeto',
+      icon: Icons.dashboard_customize_outlined,
+      color: const Color(0xFF237A57),
+      compact: true,
+    );
+    final refreshButton = IconButton(
+      tooltip: 'Actualizar panel',
+      onPressed: loading || refreshing ? null : _load,
+      icon: const Icon(Icons.refresh),
+    );
+    if (widget.embedded) {
+      return ColoredBox(
+        color: const Color(0xFFF5F8FA),
+        child: pageBody,
+      );
+    }
     return Scaffold(
       backgroundColor: const Color(0xFFF5F8FA),
       appBar: AppBar(
-        title: Text(
-          widget.initialMode == CreatorEntryMode.edit
-              ? 'Zumac Creator · Editar objetos'
-              : 'Zumac Creator · Nuevo objeto',
-        ),
-        actions: [
-          IconButton(
-            tooltip: 'Actualizar panel',
-            onPressed: loading || refreshing ? null : _load,
-            icon: const Icon(Icons.refresh),
-          ),
-        ],
+        titleSpacing: 8,
+        title: title,
+        actions: [refreshButton],
       ),
-      body: loading
-          ? const Center(child: CircularProgressIndicator())
-          : error != null
-              ? _errorPanel()
-              : !canManage
-                  ? _accessDenied()
-                  : Stack(
-                      children: [
-                        IgnorePointer(
-                          ignoring: actionRunning,
-                          child: _creatorBody(),
-                        ),
-                        if (refreshing || actionRunning)
-                          const Positioned(
-                            left: 0,
-                            right: 0,
-                            top: 0,
-                            child: LinearProgressIndicator(minHeight: 3),
-                          ),
-                      ],
-                    ),
+      body: pageBody,
     );
   }
 
@@ -453,62 +487,35 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   }
 
   Widget _editCreatorBody(double horizontalPadding) {
-    final sections = _filteredPublishedSections();
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: CustomScrollView(
-        key: const PageStorageKey('zumac-creator-edit-scroll'),
-        controller: pageScrollController,
-        slivers: [
-          SliverPadding(
-            padding: EdgeInsets.fromLTRB(
-              horizontalPadding,
-              18,
-              horizontalPadding,
-              10,
-            ),
-            sliver: SliverToBoxAdapter(
-              child: Align(
-                alignment: Alignment.topCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: ZumacResponsiveLimits.page,
-                  ),
-                  child: _publishedPanel(includeSectionTiles: false),
-                ),
-              ),
-            ),
+    // En móvil, la altura de cada árbol cambia mucho al expandir formatos.
+    // Una lista convencional conserva una única geometría de desplazamiento y
+    // evita el lienzo gris que podía aparecer al regresar rápidamente arriba.
+    return ColoredBox(
+      color: const Color(0xFFF5F8FA),
+      child: RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          key: const PageStorageKey('zumac-creator-edit-scroll-stable'),
+          controller: pageScrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: EdgeInsets.fromLTRB(
+            horizontalPadding,
+            18,
+            horizontalPadding,
+            32,
           ),
-          if (sections.isNotEmpty)
-            SliverPadding(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                0,
-                horizontalPadding,
-                32,
+          children: [
+            Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: ZumacResponsiveLimits.page,
+                ),
+                child: _publishedPanel(),
               ),
-              sliver: SliverList.builder(
-                itemCount: sections.length,
-                itemBuilder: (context, index) {
-                  final section = sections[index];
-                  return Align(
-                    alignment: Alignment.topCenter,
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: ZumacResponsiveLimits.page,
-                      ),
-                      child: _publishedSectionTile(
-                        section,
-                        publishedSearch.trim().toLowerCase(),
-                      ),
-                    ),
-                  );
-                },
-              ),
-            )
-          else
-            const SliverToBoxAdapter(child: SizedBox(height: 32)),
-        ],
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -663,9 +670,13 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   Widget _entityActions() {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 680;
+        final columns = constraints.maxWidth >= 1000
+            ? 4
+            : constraints.maxWidth >= 680
+                ? 2
+                : 1;
         final cardWidth =
-            compact ? constraints.maxWidth : (constraints.maxWidth - 16) / 3;
+            (constraints.maxWidth - (8 * (columns - 1))) / columns;
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -699,6 +710,12 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
                   icon: Icons.assignment_outlined,
                   title: 'Formato',
                   onTap: () => _openWizard('FORMATO'),
+                ),
+                _entityCard(
+                  width: cardWidth,
+                  icon: Icons.document_scanner_outlined,
+                  title: 'Documento → App',
+                  onTap: _openDocumentImport,
                 ),
               ],
             ),

@@ -13,7 +13,19 @@ const configurationIconChoices = <ConfigurationIconChoice>[
   ConfigurationIconChoice('assignment', 'Formatos', Icons.assignment_outlined),
   ConfigurationIconChoice(
       'agriculture', 'Agricultura', Icons.agriculture_outlined),
+  ConfigurationIconChoice(
+      'phytosanitary', 'Aplicación fitosanitaria', Icons.sanitizer_outlined),
+  ConfigurationIconChoice(
+      'pest_control', 'Plagas', Icons.pest_control_outlined),
   ConfigurationIconChoice('eco', 'Cultivos y ambiente', Icons.eco_outlined),
+  ConfigurationIconChoice(
+      'fertilizer', 'Fertilizantes', Icons.compost_outlined),
+  ConfigurationIconChoice(
+      'fruit_quality', 'Calidad de fruta', Icons.workspace_premium_outlined),
+  ConfigurationIconChoice('harvest', 'Cosecha', Icons.grass_outlined),
+  ConfigurationIconChoice(
+      'temperature', 'Temperatura', Icons.thermostat_outlined),
+  ConfigurationIconChoice('packing', 'Empaque', Icons.inventory_outlined),
   ConfigurationIconChoice(
       'inventory', 'Inventario', Icons.inventory_2_outlined),
   ConfigurationIconChoice('people', 'Personal', Icons.people_alt_outlined),
@@ -28,6 +40,8 @@ const configurationIconChoices = <ConfigurationIconChoice>[
   ConfigurationIconChoice('verified', 'Aprobaciones', Icons.verified_outlined),
   ConfigurationIconChoice('security', 'Seguridad', Icons.security_outlined),
   ConfigurationIconChoice('water', 'Riego y agua', Icons.water_drop_outlined),
+  ConfigurationIconChoice(
+      'water_consumption', 'Consumo de agua', Icons.water_outlined),
   ConfigurationIconChoice('map', 'Mapas y lotes', Icons.map_outlined),
   ConfigurationIconChoice(
       'account_tree', 'Procesos', Icons.account_tree_outlined),
@@ -77,6 +91,12 @@ IconData configurationIconForName(String? name) {
     'form': 'assignment',
     'formatos': 'assignment',
     'tractor': 'agriculture',
+    'aplicacion_fitosanitaria': 'phytosanitary',
+    'plagas': 'pest_control',
+    'fertilizante': 'fertilizer',
+    'calidad_fruta': 'fruit_quality',
+    'cosecha': 'harvest',
+    'empaque': 'packing',
     'riego': 'water',
     'lotes': 'map',
     'variedades': 'eco',

@@ -12,6 +12,7 @@ void main() {
             'codigo': 'INSPECCION_TABLA',
             'nombre': 'Inspecciones',
             'tabla_destino': 'INSPECCION_REGISTROS',
+            'auditable': true,
             'campos': [
               {
                 'codigo': 'INSPECCION_ALTURA',
@@ -36,6 +37,19 @@ void main() {
     expect(validateFormatStructurePayload(validPayload()), isEmpty);
   });
 
+  test('exige indicar explícitamente si la tabla es auditable', () {
+    final payload = validPayload();
+    final table = (payload['tablas'] as List).first as Map<String, dynamic>;
+    table.remove('auditable');
+
+    expect(
+      validateFormatStructurePayload(payload).join(' '),
+      contains('auditable'),
+    );
+    table['auditable'] = false;
+    expect(validateFormatStructurePayload(payload), isEmpty);
+  });
+
   test('rechaza tablas sin campos y relaciones detalle incompletas', () {
     final payload = validPayload();
     payload['tablas'] = [
@@ -43,6 +57,7 @@ void main() {
         'codigo': 'DETALLE_TABLA',
         'nombre': 'Detalle',
         'tabla_destino': 'DETALLE_REGISTROS',
+        'auditable': true,
         'es_detalle': true,
         'campos': <dynamic>[],
       }

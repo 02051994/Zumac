@@ -2454,6 +2454,58 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
   }
 
+  bool _timeEndsBeforeStart(String start, String end) {
+    try {
+      final startParts = start.trim().split(':');
+      final endParts = end.trim().split(':');
+      if (startParts.length < 2 || endParts.length < 2) return false;
+      final startMinutes =
+          int.parse(startParts[0]) * 60 + int.parse(startParts[1]);
+      final endMinutes = int.parse(endParts[0]) * 60 + int.parse(endParts[1]);
+      return endMinutes < startMinutes;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _confirmOvernightShift(String horaInicio, String horaFin) async {
+    if (!_timeEndsBeforeStart(horaInicio, horaFin)) return true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Horario nocturno'),
+        content: Text(
+          'La hora de fin ($horaFin) es menor que la hora de inicio '
+          '($horaInicio). ¿Son horas nocturnas?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('No, corregir'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Sí, continuar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) return true;
+
+    horaFinCtrl.clear();
+    for (final entry in tareoHeader.controllers.entries) {
+      if (_norm(entry.key) == 'HORA_FIN') entry.value.clear();
+    }
+    if (mounted) {
+      setState(() => secondStep = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Corrige la HORA_FIN para continuar.')),
+      );
+    }
+    return false;
+  }
+
   bool _isTareoTimeField(Map<String, dynamic> field) {
     final campo = _norm(field['campo']?.toString() ?? '');
     return campo == 'HORA_INICIO' ||
@@ -2496,6 +2548,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final headerPayload = _tareoHeaderPayload();
     final horaInicio = headerPayload['HORA_INICIO']?.toString().trim() ?? '';
     final horaFin = headerPayload['HORA_FIN']?.toString().trim() ?? '';
+    if (!await _confirmOvernightShift(horaInicio, horaFin)) return;
     final horasMatriz =
         tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
     final horas = horasMatriz.trim().isNotEmpty

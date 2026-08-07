@@ -117,12 +117,26 @@ select
   now()
 from public."RUBROS_APPGT" r
 where coalesce(r.activo, true) and r.deleted_at is null
-on conflict (empresa_id, codigo, version) do update set
+-- La identidad estable del paquete depende del rubro, no de su codigo visible.
+-- Si el codigo del rubro cambio desde una ejecucion anterior, el UUID sigue
+-- siendo el mismo y el conflicto ocurre en la PK. Resolverlo por id mantiene
+-- la migracion reejecutable y actualiza el codigo sin duplicar el paquete.
+on conflict (id) do update set
+  empresa_id = excluded.empresa_id,
+  rubro_id = excluded.rubro_id,
+  codigo = excluded.codigo,
   nombre = excluded.nombre,
   descripcion = excluded.descripcion,
+  origen = excluded.origen,
+  tipo_plantilla = excluded.tipo_plantilla,
+  version = excluded.version,
   estado = 'PUBLICADO',
   editable = false,
   metadata = excluded.metadata,
+  published_at = coalesce(
+    public."PAQUETES_PLANTILLA_APPGT".published_at,
+    excluded.published_at
+  ),
   deleted_at = null,
   updated_at = now();
 

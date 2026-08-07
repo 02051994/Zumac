@@ -2,9 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/services/app_experience_service.dart';
+import '../../core/widgets/configuration_icon_catalog.dart';
 import 'configuration_admin_repository.dart';
 import 'format_structure_validator.dart';
 
@@ -204,6 +206,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
   List<Map<String, dynamic>> templates = [];
   List<Map<String, dynamic>> moduleTemplates = [];
   List<Map<String, dynamic>> tables = [];
+  Map<String, dynamic> aiImportMetadata = <String, dynamic>{};
   Timer? autosaveTimer;
   DateTime? lastAutosaveAt;
   String? lastAutosaveFingerprint;
@@ -321,6 +324,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
   void _hydrateDraft(Map<String, dynamic>? draft) {
     if (draft == null) return;
     final definition = _map(draft['definicion']);
+    aiImportMetadata = _aiMetadataFrom(definition);
     draftId = draft['id']?.toString();
     publishedTargetId = definition['_modo_edicion'] == 'NUEVA_VERSION'
         ? definition['_entidad_objetivo_id']?.toString()
@@ -757,22 +761,42 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     formatType = structure['tipo_formato']?.toString() ?? 'SIMPLE';
     active = structure['activo'] != false;
     tableVisible = structure['tabla_visible_app'] != false;
+    aiImportMetadata = _aiMetadataFrom(structure);
     tables = _maps(structure['tablas']);
     _deriveRubro();
   }
 
   Map<String, dynamic> _payload() {
     _syncGeneratedFormatCode();
+    final normalizedTables = tables
+        .map((table) => <String, dynamic>{
+              ...table,
+              'auditable': table['auditable'] == null
+                  ? true
+                  : table['auditable'] == true || table['auditable'] == 1,
+              'icono': table['icono']?.toString().trim().isNotEmpty == true
+                  ? table['icono']
+                  : 'assignment',
+            })
+        .toList();
+    final firstTable = normalizedTables.isEmpty
+        ? const <String, dynamic>{}
+        : normalizedTables.first;
     final raw = <String, dynamic>{
+      ...aiImportMetadata,
       'codigo': codeController.text.trim(),
       'nombre': nameController.text.trim(),
       'descripcion': descriptionController.text.trim(),
       'rubro_id': selectedRubroId,
       'modulo_id': selectedModuleId,
       'tipo_formato': formatType,
-      'tabla_destino':
-          tables.isEmpty ? '' : tables.first['tabla_destino']?.toString() ?? '',
+      'tabla_destino': normalizedTables.isEmpty
+          ? ''
+          : normalizedTables.first['tabla_destino']?.toString() ?? '',
       'tabla_visible_app': tableVisible,
+      'auditable': firstTable['auditable'] ?? true,
+      'icono': firstTable['icono'] ?? 'assignment',
+      'imagen_encabezado': firstTable['imagen_encabezado'],
       'orden': int.tryParse(orderController.text.trim()) ??
           orderController.text.trim(),
       'activo': active,
@@ -786,7 +810,7 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
         'aprobaciones': approvals,
       },
       'flujo_estados': workflow ? workflowStates : <String>[],
-      'tablas': tables,
+      'tablas': normalizedTables,
     };
     if (editingPublished) {
       raw.addAll({
@@ -795,6 +819,21 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
       });
     }
     return rekeyClonedFormatChildren(raw);
+  }
+
+  Map<String, dynamic> _aiMetadataFrom(Map<String, dynamic> source) {
+    const keys = <String>{
+      'estado_revision_ia',
+      'layout_formulario',
+      'layout_registros',
+      'configuracion_layout',
+      'origen_creador',
+      'relaciones_sugeridas_ia',
+    };
+    return {
+      for (final key in keys)
+        if (source.containsKey(key)) key: source[key],
+    };
   }
 
   Future<void> _saveAndValidate() async {
@@ -1869,6 +1908,37 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     var createPhysical = initial['crear_tabla_fisica'] != false;
     var header = initial['es_cabecera'] == true;
     var detail = initial['es_detalle'] == true;
+    bool? auditable = initial.containsKey('auditable')
+        ? initial['auditable'] == true ||
+            initial['auditable'] == 1 ||
+            initial['auditable']?.toString().toLowerCase() == 'true'
+        : null;
+    String? auditableError;
+    var selectedIcon = initial['icono']?.toString().trim().isNotEmpty == true
+        ? initial['icono'].toString()
+        : 'assignment';
+    var headerImage = initial['imagen_encabezado']?.toString() ?? '';
+
+    Widget imagePreview() {
+      if (!headerImage.startsWith('data:image/') ||
+          !headerImage.contains(',')) {
+        return Icon(configurationIconForName(selectedIcon), size: 34);
+      }
+      try {
+        return ClipRRect(
+          borderRadius: BorderRadius.circular(10),
+          child: Image.memory(
+            base64Decode(headerImage.split(',').last),
+            width: 54,
+            height: 54,
+            fit: BoxFit.cover,
+          ),
+        );
+      } catch (_) {
+        return Icon(configurationIconForName(selectedIcon), size: 34);
+      }
+    }
+
     final result = await showDialog<Map<String, dynamic>>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -1885,6 +1955,100 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
                     'Nombre de tabla *',
                     helperText:
                         'Nombre visible que identificarán los usuarios.',
+                  ),
+                  DropdownButtonFormField<bool>(
+                    initialValue: auditable,
+                    decoration: InputDecoration(
+                      labelText: '¿Es auditable? *',
+                      helperText:
+                          'Sí muestra código; No centra el título sobre todo el encabezado.',
+                      errorText: auditableError,
+                      border: const OutlineInputBorder(),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: true, child: Text('Sí')),
+                      DropdownMenuItem(value: false, child: Text('No')),
+                    ],
+                    onChanged: (value) => setDialogState(() {
+                      auditable = value;
+                      auditableError = null;
+                    }),
+                  ),
+                  const SizedBox(height: 8),
+                  ExpansionTile(
+                    tilePadding: EdgeInsets.zero,
+                    childrenPadding: EdgeInsets.zero,
+                    leading: imagePreview(),
+                    title: const Text(
+                      'Icono o imagen del encabezado',
+                      style: TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    subtitle: const Text(
+                      'Elija un icono agrícola o suba una imagen JPG, PNG o WebP.',
+                    ),
+                    children: [
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Wrap(
+                          spacing: 7,
+                          runSpacing: 7,
+                          children: configurationIconChoices
+                              .map((choice) => ChoiceChip(
+                                    selected: headerImage.isEmpty &&
+                                        selectedIcon == choice.value,
+                                    avatar: Icon(choice.icon, size: 17),
+                                    label: Text(choice.label),
+                                    onSelected: (_) => setDialogState(() {
+                                      selectedIcon = choice.value;
+                                      headerImage = '';
+                                    }),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final picked =
+                                  await FilePicker.platform.pickFiles(
+                                type: FileType.image,
+                                withData: true,
+                                allowMultiple: false,
+                              );
+                              final file = picked?.files.single;
+                              final bytes = file?.bytes;
+                              if (bytes == null || !mounted) return;
+                              final extension =
+                                  (file?.extension ?? 'png').toLowerCase();
+                              final mime =
+                                  extension == 'jpg' || extension == 'jpeg'
+                                      ? 'jpeg'
+                                      : extension == 'webp'
+                                          ? 'webp'
+                                          : 'png';
+                              setDialogState(() {
+                                headerImage =
+                                    'data:image/$mime;base64,${base64Encode(bytes)}';
+                              });
+                            },
+                            icon: const Icon(Icons.upload_file_outlined),
+                            label: const Text('Subir imagen'),
+                          ),
+                          if (headerImage.isNotEmpty) ...[
+                            const SizedBox(width: 8),
+                            TextButton.icon(
+                              onPressed: () =>
+                                  setDialogState(() => headerImage = ''),
+                              icon: const Icon(Icons.delete_outline),
+                              label: const Text('Quitar'),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
                   ),
                   if (index != null &&
                       _suggestionsForPath('tablas[$index]').isNotEmpty)
@@ -2047,6 +2211,11 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
             ),
             FilledButton(
               onPressed: () {
+                if (auditable == null) {
+                  setDialogState(() => auditableError =
+                      'Seleccione Sí o No para crear la tabla.');
+                  return;
+                }
                 final visibleName = name.text.trim();
                 final existingCode = initial['codigo']?.toString().trim() ?? '';
                 final existingPhysical =
@@ -2062,6 +2231,9 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
                       : existingPhysical,
                   'orden': int.tryParse(order.text.trim()) ?? order.text.trim(),
                   'crear_tabla_fisica': createPhysical,
+                  'auditable': auditable,
+                  'icono': selectedIcon,
+                  'imagen_encabezado': headerImage.isEmpty ? null : headerImage,
                   'activo': initial['activo'] != false,
                   'es_cabecera': header,
                   'es_detalle': detail,

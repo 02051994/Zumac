@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
@@ -13,6 +14,11 @@ import 'local_session.dart';
 import 'evidence_storage.dart';
 import 'offline_record_state.dart';
 
+/// Orquesta la sincronización autenticada entre Supabase y la caché local.
+///
+/// Windows y móvil conservan registros para operación offline. En web se
+/// sincronizan configuración, permisos y catálogos, mientras los registros de
+/// gran volumen se consultan paginados desde Supabase.
 class SyncService {
   final _supabase = Supabase.instance.client;
   final _local = LocalDb.instance;
@@ -401,14 +407,14 @@ class SyncService {
     final output = <String, List<Map<String, dynamic>>>{};
     for (final table in sourceTables) {
       if (_excludedOfflineSourceTables.contains(table)) continue;
-      final mustRefreshFully = forceAllSources ||
-          _norm(table) == _norm('GH-REGISTRO_PERSONAL_PLANILLA');
-      if (!mustRefreshFully && !_tableChanged(changedTables, table)) continue;
+      final tableChanged = _tableChanged(changedTables, table);
+      final mustRefreshFully = forceAllSources || tableChanged;
+      if (!mustRefreshFully) continue;
       await _yieldToUi();
       try {
-        output[table] = mustRefreshFully
-            ? await _selectAllRowsPaged(table)
-            : await _selectRowsPagedSince(table, since);
+        // Un dropdown es un snapshot, no un historial. Se descarga completo
+        // cuando cambia para eliminar también opciones borradas en Supabase.
+        output[table] = await _selectAllRowsPaged(table);
       } catch (_) {}
     }
     return output;
@@ -528,6 +534,36 @@ class SyncService {
       }
     }
     return output;
+  }
+
+  Set<String> _dynamicCatalogKeysForTables(
+    List<Map<String, dynamic>> fields,
+    Iterable<String> sourceTables,
+  ) {
+    final wantedTables = sourceTables.map(_norm).toSet();
+    final keys = <String>{};
+    for (final field in fields) {
+      final dropdownId = _cleanNullable(field['id_campo_dropdown']);
+      if (dropdownId.isEmpty || _isManualDropdownLiteral(dropdownId)) continue;
+      final cleanDropdownId = _unwrapBracketReference(dropdownId);
+      String sourceTable = '';
+      String sourceColumn = '';
+      if (cleanDropdownId.contains('.')) {
+        final parts = cleanDropdownId.split('.');
+        sourceTable = parts.first.trim();
+        sourceColumn = parts.sublist(1).join('.').trim();
+      } else {
+        final sourceField = _fieldByIdentifier(fields, cleanDropdownId);
+        sourceTable = _cleanNullable(sourceField?['tabla_destino']);
+        sourceColumn = _cleanNullable(sourceField?['campo']);
+      }
+      if (sourceTable.isNotEmpty &&
+          sourceColumn.isNotEmpty &&
+          wantedTables.contains(_norm(sourceTable))) {
+        keys.add('$sourceTable.$sourceColumn');
+      }
+    }
+    return keys;
   }
 
   List<Map<String, dynamic>> _matrixRowsForLocalCache(
@@ -810,9 +846,16 @@ class SyncService {
     return null;
   }
 
+  /// Descarga el bootstrap inicial o un delta desde el último checkpoint.
+  ///
+  /// [forceConfigurationRefresh] omite la detección de cambios y debe reservarse
+  /// para reparaciones. [cacheOperationalRecords] permite sobrescribir la
+  /// política por plataforma; por defecto es `false` en web y `true` fuera de
+  /// web. Los dropdowns y permisos siempre se mantienen disponibles localmente.
   Future<void> downloadAllForOffline(
       {bool allowFullFallback = true,
       bool forceConfigurationRefresh = false,
+      bool? cacheOperationalRecords,
       void Function(String message)? onProgress}) async {
     void progress(String message) => onProgress?.call(message);
     progress('Consultando cambios...');
@@ -851,6 +894,13 @@ class SyncService {
       previousPermissionsSync,
     ]);
     final hasCache = await _local.hasOfflineBootstrapCache();
+    final shouldCacheOperationalRecords = cacheOperationalRecords ?? !kIsWeb;
+    final lastConfigFullRefresh =
+        await _local.getMetaValue('config_full_refresh_at');
+    final lastConfigDate = DateTime.tryParse(lastConfigFullRefresh ?? '');
+    final periodicSafetyRefresh = lastConfigDate == null ||
+        DateTime.now().toUtc().difference(lastConfigDate.toUtc()) >=
+            const Duration(hours: 24);
 
     // Primera vez: descarga completa. Si cualquiera de los dos botones ya hizo
     // esa primera descarga, el otro botón entra por incremental usando la misma
@@ -860,7 +910,8 @@ class SyncService {
     if (hasCache &&
         changedTables != null &&
         changedTables.isEmpty &&
-        !forceConfigurationRefresh) {
+        !forceConfigurationRefresh &&
+        !periodicSafetyRefresh) {
       progress('Los datos ya están al día. Verificando permisos...');
       await _yieldToUi();
       await refreshLoginPermissionsOnly();
@@ -999,12 +1050,6 @@ class SyncService {
       'MATRIZ_CONDICIONES_APPGT',
       'MATRIZ_FORMULAS_APPGT',
     };
-    final lastConfigFullRefresh =
-        await _local.getMetaValue('config_full_refresh_at');
-    final lastConfigDate = DateTime.tryParse(lastConfigFullRefresh ?? '');
-    final periodicSafetyRefresh = lastConfigDate == null ||
-        DateTime.now().toUtc().difference(lastConfigDate.toUtc()) >=
-            const Duration(hours: 24);
     final configChanged = changedTables == null ||
         configTables.any((table) => _tableChanged(changedTables, table));
     final refreshFullConfig = forceConfigurationRefresh ||
@@ -1113,14 +1158,13 @@ class SyncService {
         : (incremental
             ? await _cachedLocalFieldsForSourceDetection()
             : dynamicFields);
-    // Los dropdowns dependen de datos completos de sus tablas fuente. Si se actualiza
-    // MATRIZ_CAMPOS_FORMATO_APPGT pero la tabla fuente no aparece en APPGT_TABLAS_CAMBIADAS,
-    // un incremental estricto deja catálogos vacíos/viejos. Se fuerza descarga completa
-    // de tablas fuente de dropdown/lookup en cada Actualizar datos.
+    // Los dropdowns dependen de snapshots completos de sus tablas fuente. Solo
+    // se descargan las fuentes marcadas como cambiadas, pero esas fuentes se
+    // reemplazan completas para reflejar altas, ediciones y eliminaciones.
     const forceAllSourceTables = false;
     progress('Actualizando catálogos y fuentes de dropdown...');
     await _yieldToUi();
-    final dynamicSourceRows = fieldsForSourceDetection.isEmpty
+    final dropdownSourceRows = fieldsForSourceDetection.isEmpty
         ? <String, List<Map<String, dynamic>>>{}
         : await _downloadDynamicSourceTables(
             fieldsForSourceDetection,
@@ -1128,6 +1172,9 @@ class SyncService {
             since: incremental ? previousMatricesSync : null,
             forceAllSources: forceAllSourceTables,
           );
+    final dynamicSourceRows = <String, List<Map<String, dynamic>>>{
+      ...dropdownSourceRows,
+    };
     dynamicSourceRows['SN-MATRIZ_ESTADIOS_CONTEO_FRUTA'] = conteoEstadios;
     dynamicSourceRows['SN-MATRIZ_CONCEPTOS_ESTADIOS_PLAGAS'] = plagasConceptos;
     dynamicSourceRows['SN-MATRIZ_ETAPAS_FENOLOGICAS'] = etapasFenologicas;
@@ -1152,29 +1199,36 @@ class SyncService {
     // En modo incremental puede que MATRIZ_VISTAS_DINAMICAS_APPGT no venga porque
     // no cambió; aun así las tablas destino sí pueden tener registros nuevos.
     // Por eso usamos las vistas recibidas o, si no vinieron, las vistas ya cacheadas.
-    final dynamicViewsForDataTables = dynamicViews.isNotEmpty
-        ? dynamicViews
-        : await _local.getAll('local_dynamic_views');
-    dynamicSourceRows.addAll(await _downloadDynamicViewDataTables(
-      dynamicViewsForDataTables,
-      changedTables: changedTables,
-      since: incremental ? previousDataSync : null,
-      forceAllTables: !incremental || changedTables == null,
-    ));
+    if (shouldCacheOperationalRecords) {
+      final dynamicViewsForDataTables = dynamicViews.isNotEmpty
+          ? dynamicViews
+          : await _local.getAll('local_dynamic_views');
+      dynamicSourceRows.addAll(await _downloadDynamicViewDataTables(
+        dynamicViewsForDataTables,
+        changedTables: changedTables,
+        since: incremental ? previousDataSync : null,
+        forceAllTables: !incremental || changedTables == null,
+      ));
+    }
 
     // Cachear tablas reales de formatos con estrategia incremental inteligente.
     // Primera descarga: completo. Siguientes actualizaciones: solo tablas marcadas
     // en APPGT_TABLAS_CAMBIADAS. La vista Windows ya no depende de esta caché para
     // abrir rápido; exportación/auditoría hacen carga completa bajo demanda.
-    progress('Actualizando registros modificados...');
-    await _yieldToUi();
-    dynamicSourceRows.addAll(await _downloadFormatRecordTables(
-      formats,
-      formatTables,
-      changedTables: changedTables,
-      since: incremental ? previousDataSync : null,
-      forceAllTables: !incremental || changedTables == null,
-    ));
+    if (shouldCacheOperationalRecords) {
+      progress('Actualizando registros modificados...');
+      await _yieldToUi();
+      dynamicSourceRows.addAll(await _downloadFormatRecordTables(
+        formats,
+        formatTables,
+        changedTables: changedTables,
+        since: incremental ? previousDataSync : null,
+        forceAllTables: !incremental || changedTables == null,
+      ));
+    } else {
+      progress('Web listo: los registros se consultarán por páginas...');
+      await _yieldToUi();
+    }
 
     await _yieldToUi();
     final catalogValues = <Map<String, dynamic>>[
@@ -1182,8 +1236,19 @@ class SyncService {
         changedTables: changedTables,
         forceAll: !incremental || changedTables == null,
       ),
-      ..._dynamicCatalogValues(fieldsForSourceDetection, dynamicSourceRows),
+      ..._dynamicCatalogValues(fieldsForSourceDetection, dropdownSourceRows),
     ];
+    final refreshedCatalogKeys = <String>{
+      ..._dynamicCatalogKeysForTables(
+        fieldsForSourceDetection,
+        dropdownSourceRows.keys,
+      ),
+      for (final spec in _catalogSpecs)
+        if (!incremental ||
+            changedTables == null ||
+            _tableChanged(changedTables, spec['table']!))
+          spec['key']!,
+    };
 
     progress('Guardando módulos, permisos y formatos...');
     await _yieldToUi();
@@ -1229,6 +1294,15 @@ class SyncService {
                 'geolocation_enabled':
                     _boolValue(e['geolocation_enabled']) ? 1 : 0,
                 'approvals_enabled': _boolValue(e['approvals_enabled']) ? 1 : 0,
+                'layout_formulario':
+                    e['layout_formulario']?.toString() ?? 'VERTICAL',
+                'layout_registros':
+                    e['layout_registros']?.toString() ?? 'TABLA',
+                'estado_revision_ia':
+                    e['estado_revision_ia']?.toString() ?? 'APROBADA',
+                'auditable': _boolValueOrDefault(e['auditable'], true) ? 1 : 0,
+                'icono': e['icono']?.toString() ?? 'assignment',
+                'imagen_encabezado': e['imagen_encabezado']?.toString(),
                 'orden': e['orden'] ?? 0,
                 'activo': _activeInt(e),
               })
@@ -1283,6 +1357,14 @@ class SyncService {
                 'modo_captura':
                     _valueByColumn(e, ['modo_captura', 'modo captura'])
                         ?.toString(),
+                'auditable':
+                    _boolValueOrDefault(_valueByColumn(e, ['auditable']), true)
+                        ? 1
+                        : 0,
+                'icono':
+                    _valueByColumn(e, ['icono'])?.toString() ?? 'assignment',
+                'imagen_encabezado':
+                    _valueByColumn(e, ['imagen_encabezado'])?.toString(),
                 'activo': _activeInt(e),
               })
           .where((e) => (e['activo'] as int) == 1)
@@ -1656,17 +1738,34 @@ class SyncService {
       snapshot: lotesSnapshot,
       keyColumn: null,
     );
-    await saveLocal(
-      'local_catalog_values',
-      catalogValues,
-      snapshot: !incremental,
-      keyColumn: null,
-    );
+    if (incremental) {
+      await _local.replaceCatalogValuesForKeys(
+        refreshedCatalogKeys,
+        catalogValues,
+      );
+    } else {
+      await saveLocal(
+        'local_catalog_values',
+        catalogValues,
+        snapshot: true,
+        keyColumn: null,
+      );
+    }
     await _yieldToUi();
     progress('Guardando caché local de registros...');
     await _yieldToUi();
+    if (incremental && dropdownSourceRows.isNotEmpty) {
+      await _local.applyMatrixRowsFromPayloads(
+        dropdownSourceRows,
+        replaceSources: true,
+      );
+    }
+    final remainingSourceRows = incremental
+        ? (Map<String, List<Map<String, dynamic>>>.from(dynamicSourceRows)
+          ..removeWhere((table, _) => dropdownSourceRows.containsKey(table)))
+        : dynamicSourceRows;
     await _local.applyMatrixRowsFromPayloads(
-      dynamicSourceRows,
+      remainingSourceRows,
       replaceSources: !incremental,
     );
     await _yieldToUi();
@@ -2099,6 +2198,15 @@ class SyncService {
                 'geolocation_enabled':
                     _boolValue(e['geolocation_enabled']) ? 1 : 0,
                 'approvals_enabled': _boolValue(e['approvals_enabled']) ? 1 : 0,
+                'layout_formulario':
+                    e['layout_formulario']?.toString() ?? 'VERTICAL',
+                'layout_registros':
+                    e['layout_registros']?.toString() ?? 'TABLA',
+                'estado_revision_ia':
+                    e['estado_revision_ia']?.toString() ?? 'APROBADA',
+                'auditable': _boolValueOrDefault(e['auditable'], true) ? 1 : 0,
+                'icono': e['icono']?.toString() ?? 'assignment',
+                'imagen_encabezado': e['imagen_encabezado']?.toString(),
                 'orden': e['orden'] ?? 0,
                 'activo': 1,
               })
@@ -2149,6 +2257,14 @@ class SyncService {
                 'modo_captura':
                     _valueByColumn(e, ['modo_captura', 'modo captura'])
                         ?.toString(),
+                'auditable':
+                    _boolValueOrDefault(_valueByColumn(e, ['auditable']), true)
+                        ? 1
+                        : 0,
+                'icono':
+                    _valueByColumn(e, ['icono'])?.toString() ?? 'assignment',
+                'imagen_encabezado':
+                    _valueByColumn(e, ['imagen_encabezado'])?.toString(),
                 'activo': _activeInt(e),
               })
           .toList(),
@@ -2159,6 +2275,7 @@ class SyncService {
       List<Map<String, dynamic>>.from(permissions)
           .map((e) => {
                 'id': e['id'],
+                'empresa_id': e['empresa_id']?.toString() ?? '',
                 'user_id': e['user_id'],
                 'modulo': e['modulo'],
                 'formato': e['formato'],

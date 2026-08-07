@@ -8,6 +8,12 @@ import 'package:sqflite/sqflite.dart';
 import '../../config/tenant_config.dart';
 import 'offline_record_state.dart';
 
+/// Persistencia local multiempresa para configuración, catálogos, registros
+/// operativos y la cola de sincronización.
+///
+/// La clase centraliza las transacciones SQLite/IndexedDB para que un snapshot
+/// incompleto nunca sustituya datos válidos y para que los deltas puedan
+/// aplicarse sin borrar filas ajenas al cambio recibido.
 class LocalDb {
   static final LocalDb instance = LocalDb._();
   LocalDb._({Database? database}) : _db = database;
@@ -36,7 +42,7 @@ class LocalDb {
     final path = await _databasePath();
     _db = await openDatabase(
       path,
-      version: 31,
+      version: 32,
       onCreate: _onCreate,
       onUpgrade: _onUpgrade,
       onOpen: (database) async {
@@ -487,6 +493,9 @@ class LocalDb {
   }
 
   Future<void> _upgradeLocalFormatTables(Database db) async {
+    await _ensureColumn(db, 'local_format_tables', 'auditable', 'integer');
+    await _ensureColumn(db, 'local_format_tables', 'icono', 'text');
+    await _ensureColumn(db, 'local_format_tables', 'imagen_encabezado', 'text');
     await _ensureColumn(db, 'local_format_tables', 'tipo_relacion', 'text');
     await _ensureColumn(db, 'local_format_tables', 'tabla_padre', 'text');
     await _ensureColumn(db, 'local_format_tables', 'campo_pk_padre', 'text');
@@ -502,6 +511,7 @@ class LocalDb {
   }
 
   Future<void> _upgradeLocalPermissions(Database db) async {
+    await _ensureColumn(db, 'local_permissions', 'empresa_id', 'text');
     await _ensureColumn(db, 'local_permissions', 'can_export', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_import', 'integer');
     await _ensureColumn(db, 'local_permissions', 'can_review', 'integer');
@@ -527,6 +537,12 @@ class LocalDb {
     await _ensureColumn(db, 'local_formats', 'workflow_enabled', 'integer');
     await _ensureColumn(db, 'local_formats', 'geolocation_enabled', 'integer');
     await _ensureColumn(db, 'local_formats', 'approvals_enabled', 'integer');
+    await _ensureColumn(db, 'local_formats', 'layout_formulario', 'text');
+    await _ensureColumn(db, 'local_formats', 'layout_registros', 'text');
+    await _ensureColumn(db, 'local_formats', 'estado_revision_ia', 'text');
+    await _ensureColumn(db, 'local_formats', 'auditable', 'integer');
+    await _ensureColumn(db, 'local_formats', 'icono', 'text');
+    await _ensureColumn(db, 'local_formats', 'imagen_encabezado', 'text');
     await _createLocalSections(db);
     await _upgradeLocalPermissions(db);
     await _createLocalLotesVariedades(db);
@@ -604,8 +620,17 @@ class LocalDb {
     if (oldVersion < 31) {
       await _createLocalIdSequences(db);
     }
+    if (oldVersion < 32) {
+      await _ensureColumn(db, 'local_formats', 'auditable', 'integer');
+      await _ensureColumn(db, 'local_formats', 'icono', 'text');
+      await _ensureColumn(db, 'local_formats', 'imagen_encabezado', 'text');
+      await _upgradeLocalFormatTables(db);
+    }
     await _ensureColumn(db, 'local_modules', 'seccion', 'text');
     await _ensureColumn(db, 'local_formats', 'tabla_visible_app', 'integer');
+    await _ensureColumn(db, 'local_formats', 'layout_formulario', 'text');
+    await _ensureColumn(db, 'local_formats', 'layout_registros', 'text');
+    await _ensureColumn(db, 'local_formats', 'estado_revision_ia', 'text');
     await _upgradeLocalPermissions(db);
     await _upgradeLocalFormatTables(db);
     await _createLocalSyncMeta(db);
@@ -651,6 +676,12 @@ class LocalDb {
         workflow_enabled integer,
         geolocation_enabled integer,
         approvals_enabled integer,
+        layout_formulario text,
+        layout_registros text,
+        estado_revision_ia text,
+        auditable integer,
+        icono text,
+        imagen_encabezado text,
         orden integer,
         numero_decimales integer,
         grid_fila integer,
@@ -688,12 +719,16 @@ class LocalDb {
         iterador_hasta integer,
         copiar_campos_desde_padre text,
         modo_captura text,
+        auditable integer,
+        icono text,
+        imagen_encabezado text,
         activo integer
       )
     ''');
     await db.execute('''
       create table local_permissions(
         id text primary key,
+        empresa_id text,
         user_id text,
         modulo text,
         formato text,
@@ -730,6 +765,9 @@ class LocalDb {
     await _createLocalSpecialFormats(db);
     await _upgradeLocalFormatTables(db);
     await _ensureColumn(db, 'local_formats', 'tabla_visible_app', 'integer');
+    await _ensureColumn(db, 'local_formats', 'layout_formulario', 'text');
+    await _ensureColumn(db, 'local_formats', 'layout_registros', 'text');
+    await _ensureColumn(db, 'local_formats', 'estado_revision_ia', 'text');
     await _createLocalSections(db);
     await _upgradeLocalPermissions(db);
     await _createLocalLotesVariedades(db);
@@ -852,6 +890,52 @@ class LocalDb {
         .toSet();
 
     await _insertRowsChunked(database, table, rows, validColumns);
+  }
+
+  /// Reemplaza de forma atómica solamente los catálogos indicados.
+  ///
+  /// Un `upsert` no elimina opciones que fueron borradas en Supabase. Esta
+  /// operación evita dropdowns obsoletos sin vaciar los demás catálogos que
+  /// no participaron en una sincronización incremental.
+  Future<void> replaceCatalogValuesForKeys(
+    Iterable<String> catalogKeys,
+    List<Map<String, dynamic>> rows,
+  ) async {
+    final keys = catalogKeys
+        .map((key) => key.trim())
+        .where((key) => key.isNotEmpty)
+        .toSet()
+        .toList();
+    if (keys.isEmpty) return;
+
+    final database = await db;
+    await database.transaction((txn) async {
+      const deleteChunkSize = 300;
+      for (var start = 0; start < keys.length; start += deleteChunkSize) {
+        final end = (start + deleteChunkSize < keys.length)
+            ? start + deleteChunkSize
+            : keys.length;
+        final chunk = keys.sublist(start, end);
+        await txn.delete(
+          'local_catalog_values',
+          where: 'catalog_key in (${List.filled(chunk.length, '?').join(',')})',
+          whereArgs: chunk,
+        );
+      }
+
+      final selectedRows = rows.where((row) {
+        final key = row['catalog_key']?.toString().trim() ?? '';
+        return keys.contains(key);
+      }).toList();
+      if (selectedRows.isNotEmpty) {
+        await _insertRowsChunkedWithExecutor(
+          txn,
+          'local_catalog_values',
+          selectedRows,
+          const {'catalog_key', 'value'},
+        );
+      }
+    });
   }
 
   Future<void> applyTableDelta(

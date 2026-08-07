@@ -15,6 +15,12 @@ multiempresa, reglas declarativas y constructor visual versionado.
   campos y matrices.
 - Plantillas inmutables, borradores, vista previa, versiones y auditoría.
 - Publicación atómica desde RPC seguros; Flutter no ejecuta SQL administrativo.
+- Zumac Alerts con reglas configurables, prueba previa, Cron, deduplicación y
+  bandeja de eventos por empresa.
+- Zumac Actions con tareas, aprobaciones, responsables, comentarios y evidencia.
+- Zumac Metrics con dashboards por empresa, constructor de gráficos, relaciones
+  entre tablas y filtros compartidos.
+- Dictado por micrófono de preguntas cortas en Zumac Consultor.
 
 ## Configuración
 
@@ -47,3 +53,12 @@ APK esperado:
 
 La documentación técnica y las garantías de despliegue están en
 `docs/ARCHITECTURE_IMPLEMENTATION_REPORT.md`.
+
+La operación de Zumac Consultor, Creator, motores de IA, sincronización por
+plataforma, escalabilidad y pasos pendientes de producción está documentada en
+`docs/ARQUITECTURA_OPERATIVA_IA_Y_SINCRONIZACION.md`.
+
+El modelo de datos, seguridad, programación automática y despliegue de Alerts,
+Actions y dictado está en `docs/ZUMAC_ALERTS_ACTIONS_Y_DICTADO.md`.
+
+El modelo y uso del constructor de dashboards está en `docs/ZUMAC_METRICS.md`.

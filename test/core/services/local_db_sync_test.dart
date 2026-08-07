@@ -54,6 +54,13 @@ void main() {
         primary key(source_table, row_key)
       )
     ''');
+    await database.execute('''
+      create table local_catalog_values(
+        catalog_key text,
+        value text,
+        primary key(catalog_key, value)
+      )
+    ''');
     local = LocalDb.forTesting(database);
   });
 
@@ -96,6 +103,34 @@ void main() {
     final rows = await database.query('sync_items');
     expect(rows, [
       {'id': 'estable', 'name': 'Configuracion valida'},
+    ]);
+  });
+
+  test('reemplaza solo el dropdown cambiado y elimina opciones antiguas',
+      () async {
+    await database.insert('local_catalog_values', {
+      'catalog_key': 'LOTES.NOMBRE',
+      'value': 'Lote antiguo',
+    });
+    await database.insert('local_catalog_values', {
+      'catalog_key': 'VARIEDADES.NOMBRE',
+      'value': 'Arándano',
+    });
+
+    await local.replaceCatalogValuesForKeys(
+      const ['LOTES.NOMBRE'],
+      const [
+        {'catalog_key': 'LOTES.NOMBRE', 'value': 'Lote nuevo'},
+      ],
+    );
+
+    final rows = await database.query(
+      'local_catalog_values',
+      orderBy: 'catalog_key, value',
+    );
+    expect(rows, [
+      {'catalog_key': 'LOTES.NOMBRE', 'value': 'Lote nuevo'},
+      {'catalog_key': 'VARIEDADES.NOMBRE', 'value': 'Arándano'},
     ]);
   });
 

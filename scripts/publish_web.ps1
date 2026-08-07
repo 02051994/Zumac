@@ -121,7 +121,9 @@ try {
 
     Invoke-NativeCommand git config user.name "02051994"
     Invoke-NativeCommand git config user.email "118220540+02051994@users.noreply.github.com"
-    Invoke-NativeCommand git add -A
+    # Pasar -A dentro de un arreglo evita que PowerShell lo interprete como
+    # abreviatura del parametro -Arguments de Invoke-NativeCommand.
+    Invoke-NativeCommand -Command git -Arguments @("add", "-A")
 
     & git diff --cached --quiet
     $diffExitCode = $LASTEXITCODE

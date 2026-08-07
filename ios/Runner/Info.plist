@@ -28,6 +28,14 @@
 	<true/>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Zumac usa tu ubicación al guardar formatos que requieren geolocalización.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Zumac Creator usa la cámara para convertir registros impresos en borradores de aplicaciones.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Zumac Creator usa las imágenes que selecciones para reconocer campos y preparar un borrador editable.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Zumac Consultor usa el micrófono únicamente mientras dictas una pregunta.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Zumac Consultor convierte tu voz en texto para realizar la consulta.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

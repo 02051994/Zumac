@@ -26,6 +26,10 @@
 	<string>$(PRODUCT_COPYRIGHT)</string>
 	<key>NSMainNibFile</key>
 	<string>MainMenu</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Zumac Consultor usa el micrófono únicamente mientras dictas una pregunta.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Zumac Consultor convierte tu voz en texto para realizar la consulta.</string>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 </dict>

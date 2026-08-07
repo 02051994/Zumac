@@ -2,9 +2,11 @@ import 'dart:convert';
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'knowledge_retrieval_engine.dart';
 import 'local_db.dart';
 
 enum ZumacConsultantIntent {
+  knowledge,
   phThreshold,
   absences,
   attendance,
@@ -70,13 +72,58 @@ class ZumacConsultantFinding {
       moduleId?.isNotEmpty == true && formatId?.isNotEmpty == true;
 }
 
+/// Formato de referencia relacionado con la consulta, pero que no representa
+/// un resultado operativo. Se muestra como acceso opcional "Quizá te interesa".
+class ZumacConsultantRelatedTable {
+  final String title;
+  final String tableName;
+  final String? moduleId;
+  final String? formatId;
+
+  const ZumacConsultantRelatedTable({
+    required this.title,
+    required this.tableName,
+    this.moduleId,
+    this.formatId,
+  });
+
+  bool get canOpen =>
+      moduleId?.isNotEmpty == true && formatId?.isNotEmpty == true;
+}
+
+enum ZumacConsultantOptionKind { source, period, followUp }
+
+/// Opción contextual que permite precisar una consulta sin convertir el chat
+/// en un formulario. [sourceTable] se utiliza internamente y nunca se muestra
+/// como identificador técnico al usuario.
+class ZumacConsultantOption {
+  const ZumacConsultantOption({
+    required this.label,
+    required this.query,
+    required this.kind,
+    this.sourceTable,
+  });
+
+  final String label;
+  final String query;
+  final ZumacConsultantOptionKind kind;
+  final String? sourceTable;
+}
+
 class ZumacConsultantResult {
   final String question;
   final String answer;
   final ZumacConsultantIntent intent;
   final List<ZumacConsultantFinding> findings;
   final List<ZumacConsultantReportTable> reportTables;
+  final List<ZumacConsultantRelatedTable> relatedTables;
   final int inspectedRecords;
+  final List<KnowledgeCitation> citations;
+  final List<String> relatedConcepts;
+  final List<String> inspectedKnowledgeSources;
+  final List<ZumacConsultantOption> options;
+  final List<String> detailLines;
+  final String? followUpPrompt;
 
   const ZumacConsultantResult({
     required this.question,
@@ -84,8 +131,23 @@ class ZumacConsultantResult {
     required this.intent,
     required this.findings,
     this.reportTables = const <ZumacConsultantReportTable>[],
+    this.relatedTables = const <ZumacConsultantRelatedTable>[],
     required this.inspectedRecords,
+    this.citations = const <KnowledgeCitation>[],
+    this.relatedConcepts = const <String>[],
+    this.inspectedKnowledgeSources = const <String>[],
+    this.options = const <ZumacConsultantOption>[],
+    this.detailLines = const <String>[],
+    this.followUpPrompt,
   });
+
+  bool get needsClarification => options.isNotEmpty;
+}
+
+class _OperationalConversationContext {
+  String? baseQuestion;
+  String? selectedTable;
+  String? selectedLabel;
 }
 
 class _ConsultantPeriod {
@@ -122,26 +184,45 @@ class _CrossTableResult {
   });
 }
 
+/// Consultor empresarial híbrido para conocimiento y datos operativos.
+///
+/// Las preguntas conceptuales se delegan al motor de recuperación con citas.
+/// Las preguntas operativas se resuelven sobre formatos configurados, memoria
+/// de conversación y periodos detectados; nunca dependen de respuestas fijas.
 class ZumacConsultantService {
+  static const Duration _remoteTableTimeout = Duration(seconds: 7);
+  static const int _defaultRemoteCandidateLimit = 4;
+
   final LocalDb local;
   final Future<List<Map<String, dynamic>>> Function(String table) remoteLoader;
+  final KnowledgeRetrievalEngine knowledgeEngine;
+  final bool _usesDefaultRemoteLoader;
+  final Map<String, String> _lastOperationalQuestion = {};
+  final Map<String, _OperationalConversationContext> _operationalContexts = {};
 
   ZumacConsultantService({
     LocalDb? localDb,
     Future<List<Map<String, dynamic>>> Function(String table)? remoteLoader,
+    KnowledgeRetrievalEngine? knowledgeRetrievalEngine,
   })  : local = localDb ?? LocalDb.instance,
-        remoteLoader = remoteLoader ?? _loadRemoteTable;
+        remoteLoader = remoteLoader ?? _loadRemoteTable,
+        _usesDefaultRemoteLoader = remoteLoader == null,
+        knowledgeEngine =
+            knowledgeRetrievalEngine ?? KnowledgeRetrievalEngine.supabase();
 
   static Future<List<Map<String, dynamic>>> _loadRemoteTable(
     String table,
   ) async {
     final client = Supabase.instance.client;
-    const pageSize = 1000;
-    const maxRows = 3000;
+    const pageSize = 500;
+    const maxRows = 2000;
     final rows = <Map<String, dynamic>>[];
     for (var from = 0; from < maxRows; from += pageSize) {
-      final page =
-          await client.from(table).select().range(from, from + pageSize - 1);
+      final page = await client
+          .from(table)
+          .select()
+          .range(from, from + pageSize - 1)
+          .timeout(_remoteTableTimeout);
       final mapped = List<Map<String, dynamic>>.from(page);
       rows.addAll(mapped);
       if (mapped.length < pageSize) break;
@@ -149,7 +230,15 @@ class ZumacConsultantService {
     return rows;
   }
 
-  Future<ZumacConsultantResult> ask(String rawQuestion) async {
+  /// Responde una pregunta y conserva el contexto asociado a [conversationId].
+  ///
+  /// La consulta remota usa un número acotado de tablas, filtros de periodo y
+  /// tiempos máximos para impedir que una fuente lenta deje la interfaz cargando.
+  Future<ZumacConsultantResult> ask(
+    String rawQuestion, {
+    String conversationId = 'default',
+    String? selectedSourceTable,
+  }) async {
     final question = rawQuestion.trim();
     if (question.isEmpty) {
       return const ZumacConsultantResult(
@@ -161,7 +250,42 @@ class ZumacConsultantService {
       );
     }
 
-    final normalized = _normalize(question);
+    if (selectedSourceTable == null &&
+        _looksLikeKnowledgeQuestion(question, conversationId)) {
+      final knowledge = await knowledgeEngine.ask(
+        question,
+        conversationId: conversationId,
+      );
+      return ZumacConsultantResult(
+        question: question,
+        answer: knowledge.answer,
+        intent: ZumacConsultantIntent.knowledge,
+        findings: const <ZumacConsultantFinding>[],
+        inspectedRecords: 0,
+        citations: knowledge.citations,
+        relatedConcepts: knowledge.relatedConcepts,
+        inspectedKnowledgeSources: knowledge.inspectedSources,
+        followUpPrompt:
+            '¿Quieres que lo relacione con otro proceso o formato de la empresa?',
+      );
+    }
+
+    final conversation = _operationalContexts.putIfAbsent(
+      conversationId,
+      _OperationalConversationContext.new,
+    );
+    if (selectedSourceTable != null && selectedSourceTable.trim().isNotEmpty) {
+      conversation.selectedTable = selectedSourceTable.trim();
+    }
+    var contextualQuestion = _contextualizeOperationalQuestion(
+      conversationId,
+      question,
+    );
+    if (selectedSourceTable != null &&
+        (conversation.baseQuestion ?? '').isNotEmpty) {
+      contextualQuestion = conversation.baseQuestion!;
+    }
+    final normalized = _normalize(contextualQuestion);
     var intent = _intentFor(normalized);
     final threshold = _numericThreshold(normalized);
     final period = _periodFor(normalized);
@@ -188,20 +312,103 @@ class ZumacConsultantService {
       sections: sections,
     );
 
-    final candidates = _candidateTables(
+    final formatByTable = _formatMetadataByTable(
+      formats: formats,
+      formatTables: formatTables,
+      modules: modules,
+    );
+    final allCandidates = _candidateTables(
       question: normalized,
       intent: intent,
       sourceTables: sourceTables,
       metadataByTable: metadataByTable,
       pendingRecords: pendingRecords,
     );
-    final formatByTable = _formatMetadataByTable(
-      formats: formats,
-      formatTables: formatTables,
-      modules: modules,
+    final separatesReferenceCatalogs =
+        _isAttendanceDomainQuestion(normalized, intent);
+    final relatedTables = separatesReferenceCatalogs
+        ? _relatedReferenceTables(
+            question: normalized,
+            formatByTable: formatByTable,
+          )
+        : const <ZumacConsultantRelatedTable>[];
+    var candidates = separatesReferenceCatalogs
+        ? allCandidates
+            .where(
+              (table) => !_isReferenceCatalogTable(table, formatByTable),
+            )
+            .toList(growable: false)
+        : allCandidates;
+    final explicitSource = _explicitCandidateSource(
+      normalized,
+      candidates,
+      formatByTable,
     );
+    if (explicitSource != null) {
+      conversation.selectedTable = explicitSource;
+    }
+    if ((conversation.selectedTable ?? '').isNotEmpty) {
+      conversation.selectedLabel =
+          _sourceLabel(conversation.selectedTable, formatByTable);
+    }
+    if ((conversation.selectedTable ?? '').isNotEmpty &&
+        candidates.contains(conversation.selectedTable)) {
+      candidates = <String>[conversation.selectedTable!];
+    }
+
+    if (intent == ZumacConsultantIntent.phThreshold) {
+      final sourceOptions = _sourceClarificationOptions(
+        allCandidates,
+        formatByTable,
+      );
+      if ((conversation.selectedTable ?? '').isEmpty &&
+          sourceOptions.length > 1) {
+        conversation.baseQuestion = contextualQuestion;
+        _lastOperationalQuestion[conversationId] = contextualQuestion;
+        return ZumacConsultantResult(
+          question: question,
+          answer: '¿A qué registro te refieres?',
+          intent: intent,
+          findings: const <ZumacConsultantFinding>[],
+          inspectedRecords: 0,
+          options: sourceOptions,
+          followUpPrompt:
+              'Selecciona un registro para que Zumac consulte solo esa fuente.',
+        );
+      }
+      if ((conversation.selectedTable ?? '').isEmpty &&
+          sourceOptions.length == 1) {
+        conversation
+          ..selectedTable = sourceOptions.first.sourceTable
+          ..selectedLabel = sourceOptions.first.label;
+        candidates = <String>[sourceOptions.first.sourceTable!];
+      }
+      if (period == null) {
+        conversation.baseQuestion ??= contextualQuestion;
+        _lastOperationalQuestion[conversationId] = conversation.baseQuestion!;
+        final sourceName = conversation.selectedLabel ??
+            _sourceLabel(conversation.selectedTable, formatByTable);
+        return ZumacConsultantResult(
+          question: question,
+          answer: sourceName.isEmpty
+              ? '¿En qué fecha o rango de fechas quieres consultar?'
+              : 'Revisaré $sourceName. ¿En qué fecha o rango de fechas?',
+          intent: intent,
+          findings: const <ZumacConsultantFinding>[],
+          inspectedRecords: 0,
+          options: _periodClarificationOptions(),
+          followUpPrompt:
+              'También puedes escribir un día, un mes o un rango específico.',
+        );
+      }
+    }
+    final remoteCandidateLimit = intent == ZumacConsultantIntent.crossTable
+        ? 8
+        : _defaultRemoteCandidateLimit;
     final remoteByTable = await _loadRemoteCandidates(
-      candidates.take(12).toList(growable: false),
+      candidates.take(remoteCandidateLimit).toList(growable: false),
+      period: period,
+      metadataByTable: metadataByTable,
     );
 
     var findings = <ZumacConsultantFinding>[];
@@ -259,6 +466,7 @@ class ZumacConsultantService {
               table,
               metadataByTable[table] ?? const <Map<String, dynamic>>[],
             ),
+          ZumacConsultantIntent.knowledge ||
           ZumacConsultantIntent.crossTable ||
           ZumacConsultantIntent.generalSearch =>
             _generalMatch(
@@ -321,7 +529,7 @@ class ZumacConsultantService {
       period: period,
     );
 
-    return ZumacConsultantResult(
+    final result = ZumacConsultantResult(
       question: question,
       answer: _smartAnswerFor(
         question: normalized,
@@ -336,8 +544,67 @@ class ZumacConsultantService {
       intent: intent,
       findings: findings,
       reportTables: reportTables,
+      relatedTables: relatedTables,
       inspectedRecords: inspected,
+      detailLines: intent == ZumacConsultantIntent.phThreshold
+          ? _phDetailLines(findings)
+          : const <String>[],
+      followUpPrompt: _followUpPromptFor(intent, findings),
     );
+    _lastOperationalQuestion[conversationId] = contextualQuestion;
+    return result;
+  }
+
+  void clearConversation(String conversationId) {
+    knowledgeEngine.clearConversation(conversationId);
+    _lastOperationalQuestion.remove(conversationId);
+    _operationalContexts.remove(conversationId);
+  }
+
+  String _contextualizeOperationalQuestion(
+    String conversationId,
+    String question,
+  ) {
+    final previous = _lastOperationalQuestion[conversationId];
+    if (previous == null) return question;
+    final normalized = KnowledgeText.normalize(question);
+    final isFollowUp = KnowledgeText.tokens(question).length <= 5 ||
+        RegExp(r'^(Y|TAMBIEN|ADEMAS|ENTONCES|DE ELLOS|DE ELLAS)\b')
+            .hasMatch(normalized);
+    if (!isFollowUp) return question;
+    final subject = previous
+        .replaceAll(
+          RegExp(
+            r'\b(hoy|ayer|anteayer|esta semana|este mes|el mes pasado|mañana)\b',
+            caseSensitive: false,
+          ),
+          ' ',
+        )
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return '$subject. $question';
+  }
+
+  bool _looksLikeKnowledgeQuestion(
+    String question,
+    String conversationId,
+  ) {
+    final normalized = KnowledgeText.normalize(question);
+    final isOperational = RegExp(
+      r'\b(HAY|CUANTOS|CUANTAS|HOY|AYER|SEMANA|MES|FECHA|MAYOR|MENOR|STOCK|ASISTENCIA|TAREO)\b',
+    ).hasMatch(normalized);
+    if (isOperational &&
+        !RegExp(r'\b(QUE ES|PARA QUE|RELACION|RIESGO|ERROR|BUENA PRACTICA)\b')
+            .hasMatch(normalized)) {
+      return false;
+    }
+    if (RegExp(
+      r'\b(QUE ES|DESCRIB|EXPLICA|OBJETIVO|PARA QUE|SIRVE|UTILIZA|QUIEN|CUANDO|FRECUENCIA|EJEMPLO|RELACION|CONECTA|GRAFO|ERROR|BUENA PRACTICA|RECOMEND|INDICADOR|KPI|RIESGO|FAQ|PREGUNTA FRECUENTE)\b',
+    ).hasMatch(normalized)) {
+      return true;
+    }
+    return knowledgeEngine.hasConversationContext(conversationId) &&
+        KnowledgeText.tokens(question).length <= 5;
   }
 
   Future<List<Map<String, dynamic>>> _safeLocalRows(String table) async {
@@ -348,17 +615,77 @@ class ZumacConsultantService {
     }
   }
 
-  Future<List<Map<String, dynamic>>> _safeRemoteRows(String table) async {
+  Future<List<Map<String, dynamic>>> _safeRemoteRows(
+    String table, {
+    _ConsultantPeriod? period,
+    List<Map<String, dynamic>> metadata = const <Map<String, dynamic>>[],
+  }) async {
     try {
-      return await remoteLoader(table);
+      if (_usesDefaultRemoteLoader && period != null) {
+        final dateColumn = _remoteDateColumn(metadata);
+        if (dateColumn != null) {
+          return await _loadRemoteTableForPeriod(table, dateColumn, period);
+        }
+      }
+      return await remoteLoader(table).timeout(_remoteTableTimeout);
     } catch (_) {
       return const <Map<String, dynamic>>[];
     }
   }
 
-  Future<Map<String, List<Map<String, dynamic>>>> _loadRemoteCandidates(
-    List<String> tables,
+  String? _remoteDateColumn(List<Map<String, dynamic>> metadata) {
+    for (final field in metadata) {
+      if (field['__consultant_context'] == true) continue;
+      final name = field['campo']?.toString().trim() ?? '';
+      if (name.isEmpty) continue;
+      final type = _normalize(field['tipo_ui']?.toString() ?? '');
+      final normalizedName = _normalize(name);
+      if (RegExp(r'DATE|FECHA|DIA|TIMESTAMP').hasMatch(type) ||
+          RegExp(r'(^|_)FECHA($|_)|(^|_)DATE($|_)|(^|_)DIA($|_)')
+              .hasMatch(normalizedName.replaceAll(' ', '_'))) {
+        return name;
+      }
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _loadRemoteTableForPeriod(
+    String table,
+    String dateColumn,
+    _ConsultantPeriod period,
   ) async {
+    final client = Supabase.instance.client;
+    const pageSize = 500;
+    const maxRows = 10000;
+    final rows = <Map<String, dynamic>>[];
+    final start = _dateForRemoteFilter(period.start);
+    final end = _dateForRemoteFilter(period.endExclusive);
+    for (var from = 0; from < maxRows; from += pageSize) {
+      final page = await client
+          .from(table)
+          .select()
+          .gte(dateColumn, start)
+          .lt(dateColumn, end)
+          .range(from, from + pageSize - 1)
+          .timeout(_remoteTableTimeout);
+      final mapped = List<Map<String, dynamic>>.from(page);
+      rows.addAll(mapped);
+      if (mapped.length < pageSize) break;
+    }
+    return rows;
+  }
+
+  String _dateForRemoteFilter(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-'
+      '${value.month.toString().padLeft(2, '0')}-'
+      '${value.day.toString().padLeft(2, '0')}';
+
+  Future<Map<String, List<Map<String, dynamic>>>> _loadRemoteCandidates(
+    List<String> tables, {
+    _ConsultantPeriod? period,
+    Map<String, List<Map<String, dynamic>>> metadataByTable =
+        const <String, List<Map<String, dynamic>>>{},
+  }) async {
     final loaded = <String, List<Map<String, dynamic>>>{};
     const batchSize = 4;
     for (var start = 0; start < tables.length; start += batchSize) {
@@ -366,7 +693,15 @@ class ZumacConsultantService {
           ? start + batchSize
           : tables.length;
       final batch = tables.sublist(start, end);
-      final rows = await Future.wait(batch.map(_safeRemoteRows));
+      final rows = await Future.wait(
+        batch.map(
+          (table) => _safeRemoteRows(
+            table,
+            period: period,
+            metadata: metadataByTable[table] ?? const <Map<String, dynamic>>[],
+          ),
+        ),
+      );
       for (var index = 0; index < batch.length; index++) {
         loaded[batch[index]] = rows[index];
       }
@@ -390,7 +725,7 @@ class ZumacConsultantService {
         question.contains('FALTA')) {
       return ZumacConsultantIntent.absences;
     }
-    if (question.contains('ASISTEN') ||
+    if (question.contains('ASIST') ||
         question.contains('INGRESO') ||
         question.contains('SALIDA')) {
       return ZumacConsultantIntent.attendance;
@@ -507,6 +842,193 @@ class ZumacConsultantService {
           .toList();
     }
     return available.take(24).toList();
+  }
+
+  String? _explicitCandidateSource(
+    String normalizedQuestion,
+    List<String> candidates,
+    Map<String, Map<String, String>> formatByTable,
+  ) {
+    final matches = <String>[];
+    for (final table in candidates) {
+      final metadata = formatByTable[table];
+      final names = <String>[
+        table,
+        metadata?['format_name'] ?? '',
+      ].map(_normalize).where((value) => value.length >= 4);
+      if (names.any(normalizedQuestion.contains)) matches.add(table);
+    }
+    return matches.length == 1 ? matches.single : null;
+  }
+
+  List<ZumacConsultantOption> _sourceClarificationOptions(
+    List<String> candidates,
+    Map<String, Map<String, String>> formatByTable,
+  ) {
+    final seenLabels = <String>{};
+    final options = <ZumacConsultantOption>[];
+    for (final table in candidates) {
+      final label = _sourceLabel(table, formatByTable);
+      if (label.isEmpty || !seenLabels.add(_normalize(label))) continue;
+      options.add(
+        ZumacConsultantOption(
+          label: label,
+          query: 'Consultar $label',
+          kind: ZumacConsultantOptionKind.source,
+          sourceTable: table,
+        ),
+      );
+      if (options.length == 8) break;
+    }
+    return options;
+  }
+
+  String _sourceLabel(
+    String? table,
+    Map<String, Map<String, String>> formatByTable,
+  ) {
+    if (table == null || table.isEmpty) return '';
+    final configured = formatByTable[table]?['format_name']?.trim() ?? '';
+    return configured.isNotEmpty ? configured : _humanizeIdentifier(table);
+  }
+
+  List<ZumacConsultantOption> _periodClarificationOptions() => const [
+        ZumacConsultantOption(
+          label: 'Hoy',
+          query: 'Hoy',
+          kind: ZumacConsultantOptionKind.period,
+        ),
+        ZumacConsultantOption(
+          label: 'Ayer',
+          query: 'Ayer',
+          kind: ZumacConsultantOptionKind.period,
+        ),
+        ZumacConsultantOption(
+          label: 'Esta semana',
+          query: 'Esta semana',
+          kind: ZumacConsultantOptionKind.period,
+        ),
+        ZumacConsultantOption(
+          label: 'Este mes',
+          query: 'Este mes',
+          kind: ZumacConsultantOptionKind.period,
+        ),
+      ];
+
+  List<String> _phDetailLines(List<ZumacConsultantFinding> findings) {
+    final lotsByDate = <String, Set<String>>{};
+    for (final finding in findings) {
+      final date = _displayDate(finding.values);
+      final lot = _firstValue(finding.values, const [
+        'LOTE',
+        'LOTE_ID',
+        'ID_LOTE',
+        'CAMPO',
+        'SECTOR',
+        'UBICACION',
+        'TURNO',
+      ]);
+      final key = date.isEmpty ? 'Sin fecha registrada' : date;
+      if (lot.isNotEmpty && !_looksOpaqueIdentifier(lot)) {
+        lotsByDate.putIfAbsent(key, () => <String>{}).add(lot);
+      }
+    }
+    final dates = lotsByDate.keys.toList()
+      ..sort((a, b) {
+        final parsedA = _parseDate(a);
+        final parsedB = _parseDate(b);
+        if (parsedA == null || parsedB == null) return a.compareTo(b);
+        return parsedA.compareTo(parsedB);
+      });
+    return dates.take(31).map((date) {
+      final lots = lotsByDate[date]!.toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      return '$date — ${lots.length == 1 ? 'Lote' : 'Lotes'} ${lots.join(', ')}';
+    }).toList(growable: false);
+  }
+
+  String _followUpPromptFor(
+    ZumacConsultantIntent intent,
+    List<ZumacConsultantFinding> findings,
+  ) {
+    if (findings.isEmpty) {
+      return '¿Quieres probar otra fecha, otro registro o una condición diferente?';
+    }
+    return switch (intent) {
+      ZumacConsultantIntent.phThreshold =>
+        '¿Quieres comparar otro periodo, cambiar el límite de pH o abrir los registros?',
+      ZumacConsultantIntent.attendance ||
+      ZumacConsultantIntent.absences =>
+        '¿Quieres revisar el detalle, otro periodo o compararlo con tareos?',
+      _ =>
+        '¿Quieres precisar otra condición o revisar los registros encontrados?',
+    };
+  }
+
+  bool _isAttendanceDomainQuestion(
+    String question,
+    ZumacConsultantIntent intent,
+  ) {
+    if (intent == ZumacConsultantIntent.attendance ||
+        intent == ZumacConsultantIntent.absences) {
+      return true;
+    }
+    return RegExp(r'ASISTEN|AUSEN|INASIST|TAREO|PERSONAL|TRABAJADOR')
+        .hasMatch(question);
+  }
+
+  bool _isReferenceCatalogTable(
+    String table,
+    Map<String, Map<String, String>> formatByTable,
+  ) {
+    final metadata = formatByTable[table];
+    final context = _normalize(
+      '$table ${metadata?['format_name'] ?? ''} '
+      '${metadata?['module_name'] ?? ''}',
+    );
+    return RegExp(r'(^|\s|_)(MATRIZ|CATALOGO|MAESTRO|MAESTRA)(\s|_|$)')
+        .hasMatch(context);
+  }
+
+  List<ZumacConsultantRelatedTable> _relatedReferenceTables({
+    required String question,
+    required Map<String, Map<String, String>> formatByTable,
+  }) {
+    final questionTokens = _tokens(question);
+    final scored = <(ZumacConsultantRelatedTable, int)>[];
+    final seen = <String>{};
+    for (final entry in formatByTable.entries) {
+      if (!_isReferenceCatalogTable(entry.key, formatByTable)) continue;
+      final metadata = entry.value;
+      final title = metadata['format_name']?.trim().isNotEmpty == true
+          ? metadata['format_name']!.trim()
+          : _humanizeIdentifier(entry.key);
+      final normalizedContext = _normalize(
+        '$title ${entry.key} ${metadata['module_name'] ?? ''}',
+      );
+      var score = 0;
+      if (RegExp(r'ASISTEN|AUSEN|INASIST|TAREO|PERSONAL|TRABAJADOR')
+              .hasMatch(question) &&
+          RegExp(r'ASISTEN|AUSEN|INASIST|TAREO|PERSONAL|TRABAJADOR')
+              .hasMatch(normalizedContext)) {
+        score += 100;
+      }
+      for (final token in questionTokens) {
+        if (_textContainsToken(normalizedContext, token)) score += 8;
+      }
+      if (score <= 0 || !seen.add(_normalize(title))) continue;
+      scored.add((
+        ZumacConsultantRelatedTable(
+          title: title,
+          tableName: entry.key,
+          moduleId: metadata['module_id'],
+          formatId: metadata['format_id'],
+        ),
+        score,
+      ));
+    }
+    scored.sort((a, b) => b.$2.compareTo(a.$2));
+    return scored.take(8).map((entry) => entry.$1).toList(growable: false);
   }
 
   void _augmentSearchMetadata({
@@ -1387,6 +1909,7 @@ class ZumacConsultantService {
           'No encontré inasistencias registradas$periodSuffix.',
         ZumacConsultantIntent.attendance =>
           'No encontré asistencias registradas$periodSuffix.',
+        ZumacConsultantIntent.knowledge ||
         ZumacConsultantIntent.crossTable ||
         ZumacConsultantIntent.generalSearch =>
           'No encontré registros que coincidan con esa pregunta$periodSuffix.',
@@ -1415,9 +1938,31 @@ class ZumacConsultantService {
           '${total == 1 ? 'persona con asistencia' : 'personas con asistencia'}$periodSuffix.';
     }
     if (intent == ZumacConsultantIntent.phThreshold) {
-      return 'Sí. Encontré ${findings.length} '
-          '${findings.length == 1 ? 'registro' : 'registros'} con pH'
-          '${threshold == null ? '' : ' mayor a ${_cleanNumber(threshold)}'}$periodSuffix.';
+      final lots = findings
+          .map((finding) => _firstValue(finding.values, const [
+                'LOTE',
+                'LOTE_ID',
+                'ID_LOTE',
+                'CAMPO',
+                'SECTOR',
+                'UBICACION',
+                'TURNO',
+              ]))
+          .where((value) => value.isNotEmpty && !_looksOpaqueIdentifier(value))
+          .toSet()
+          .toList()
+        ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+      final limit =
+          threshold == null ? 'el límite consultado' : _cleanNumber(threshold);
+      if (lots.isNotEmpty) {
+        return '${_capitalize(period?.label ?? 'En el periodo consultado')}, '
+            '${lots.length == 1 ? 'el lote con pH mayor a $limit fue' : 'los lotes con pH mayor a $limit fueron'}: '
+            '${lots.join(', ')}.';
+      }
+      return '${_capitalize(period?.label ?? 'En el periodo consultado')}, '
+          'se encontraron ${findings.length} '
+          '${findings.length == 1 ? 'medición de pH mayor' : 'mediciones de pH mayores'} a $limit, '
+          'pero la fuente no contiene un lote legible para resumirlas.';
     }
     if (intent == ZumacConsultantIntent.absences) {
       return 'Sí. Encontré ${findings.length} '
@@ -1599,6 +2144,29 @@ class ZumacConsultantService {
       );
     }
 
+    final numericRange = RegExp(
+      r'\b(?:DEL?\s+)?(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\s+(?:AL?|HASTA)\s+(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b',
+    ).firstMatch(question);
+    if (numericRange != null) {
+      final start = _validDate(
+        int.parse(numericRange.group(3)!),
+        int.parse(numericRange.group(2)!),
+        int.parse(numericRange.group(1)!),
+      );
+      final end = _validDate(
+        int.parse(numericRange.group(6)!),
+        int.parse(numericRange.group(5)!),
+        int.parse(numericRange.group(4)!),
+      );
+      if (start != null && end != null && !end.isBefore(start)) {
+        return _ConsultantPeriod(
+          start: start,
+          endExclusive: end.add(const Duration(days: 1)),
+          label: 'del ${_formatDate(start)} al ${_formatDate(end)}',
+        );
+      }
+    }
+
     final numericDate = RegExp(r'\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b')
         .firstMatch(question);
     if (numericDate != null) {
@@ -1644,6 +2212,37 @@ class ZumacConsultantService {
       );
       if (date != null) return day(date, 'el ${_formatDate(date)}');
     }
+
+    // Preguntas agregadas como "en julio" o "el mes de julio de 2025"
+    // representan el mes completo. Si no se indica año se usa el actual,
+    // que es el comportamiento esperado en una consulta operativa cotidiana.
+    const monthNumbers = {
+      'ENERO': 1,
+      'FEBRERO': 2,
+      'MARZO': 3,
+      'ABRIL': 4,
+      'MAYO': 5,
+      'JUNIO': 6,
+      'JULIO': 7,
+      'AGOSTO': 8,
+      'SEPTIEMBRE': 9,
+      'OCTUBRE': 10,
+      'NOVIEMBRE': 11,
+      'DICIEMBRE': 12,
+    };
+    final writtenMonth = RegExp(
+      r'\b(?:MES\s+DE\s+|EN\s+)?(ENERO|FEBRERO|MARZO|ABRIL|MAYO|JUNIO|JULIO|AGOSTO|SEPTIEMBRE|OCTUBRE|NOVIEMBRE|DICIEMBRE)(?:\s+(?:DE\s+)?(\d{4}))?\b',
+    ).firstMatch(question);
+    if (writtenMonth != null) {
+      final monthName = writtenMonth.group(1)!;
+      final year = int.tryParse(writtenMonth.group(2) ?? '') ?? today.year;
+      final month = monthNumbers[monthName]!;
+      return _ConsultantPeriod(
+        start: DateTime(year, month),
+        endExclusive: DateTime(year, month + 1),
+        label: 'en ${monthName.toLowerCase()} de $year',
+      );
+    }
     if (question.contains('ANTEAYER')) {
       return day(
         today.subtract(const Duration(days: 2)),
@@ -1680,6 +2279,13 @@ class ZumacConsultantService {
         start: DateTime(today.year, today.month),
         endExclusive: DateTime(today.year, today.month + 1),
         label: 'este mes',
+      );
+    }
+    if (question.contains('ESTE ANO')) {
+      return _ConsultantPeriod(
+        start: DateTime(today.year),
+        endExclusive: DateTime(today.year + 1),
+        label: 'este año',
       );
     }
     return null;

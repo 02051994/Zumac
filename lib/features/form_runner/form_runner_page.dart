@@ -5540,53 +5540,146 @@ class _SignatureDialogState extends State<SignatureDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final hasSignature = points.whereType<Offset>().isNotEmpty;
     return AlertDialog(
-      title: const Text('Firma'),
-      content: SizedBox(
-        width: double.maxFinite,
-        height: 260,
-        child: Container(
-          key: _paintKey,
-          decoration: BoxDecoration(
-            color: Colors.white,
-            border: Border.all(color: Colors.black26),
-            borderRadius: BorderRadius.circular(8),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+      contentPadding: const EdgeInsets.fromLTRB(24, 6, 24, 16),
+      actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      title: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFFE8F5F2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(Icons.draw_outlined, color: Color(0xFF147A6E)),
           ),
-          child: LayoutBuilder(
-            builder: (context, constraints) {
-              final scaleX = 900.0 / constraints.maxWidth;
-              final scaleY = 360.0 / constraints.maxHeight;
-              return GestureDetector(
-                onPanStart: (details) {
-                  final box = context.findRenderObject() as RenderBox;
-                  final local = box.globalToLocal(details.globalPosition);
-                  setState(() =>
-                      points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
-                },
-                onPanUpdate: (details) {
-                  final box = context.findRenderObject() as RenderBox;
-                  final local = box.globalToLocal(details.globalPosition);
-                  setState(() =>
-                      points.add(Offset(local.dx * scaleX, local.dy * scaleY)));
-                },
-                onPanEnd: (_) => setState(() => points.add(null)),
-                child: CustomPaint(
-                  painter: _SignaturePainter(points,
-                      scaleX: constraints.maxWidth / 900.0,
-                      scaleY: constraints.maxHeight / 360.0),
-                  child: const SizedBox.expand(),
-                ),
-              );
-            },
+          const SizedBox(width: 12),
+          const Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Registrar firma',
+                    style:
+                        TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                SizedBox(height: 2),
+                Text('Dibuja dentro del recuadro con el mouse o el dedo.',
+                    style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w400,
+                        color: Color(0xFF64748B))),
+              ],
+            ),
+          ),
+          IconButton(
+            tooltip: 'Cerrar',
+            onPressed: () => Navigator.pop(context),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 760),
+        child: AspectRatio(
+          aspectRatio: 2.5,
+          child: Container(
+            key: _paintKey,
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              border: Border.all(
+                color: hasSignature
+                    ? const Color(0xFF62B8A9)
+                    : const Color(0xFFCBD5E1),
+                width: 1.4,
+              ),
+              borderRadius: BorderRadius.circular(14),
+            ),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final scaleX = 900.0 / constraints.maxWidth;
+                final scaleY = 360.0 / constraints.maxHeight;
+                void addPoint(Offset local) {
+                  final clamped = Offset(
+                    local.dx.clamp(0, constraints.maxWidth),
+                    local.dy.clamp(0, constraints.maxHeight),
+                  );
+                  setState(() => points
+                      .add(Offset(clamped.dx * scaleX, clamped.dy * scaleY)));
+                }
+
+                return GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onPanStart: (details) => addPoint(details.localPosition),
+                  onPanUpdate: (details) => addPoint(details.localPosition),
+                  onPanEnd: (_) => setState(() => points.add(null)),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      if (!hasSignature)
+                        const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.gesture,
+                                  size: 38, color: Color(0xFFCBD5E1)),
+                              SizedBox(height: 8),
+                              Text('Firma aquí',
+                                  style: TextStyle(
+                                      color: Color(0xFF94A3B8),
+                                      fontWeight: FontWeight.w600)),
+                            ],
+                          ),
+                        ),
+                      Positioned(
+                        left: 32,
+                        right: 32,
+                        bottom: constraints.maxHeight * .20,
+                        child:
+                            const Divider(height: 1, color: Color(0xFFD9E2EA)),
+                      ),
+                      CustomPaint(
+                        painter: _SignaturePainter(
+                          points,
+                          scaleX: constraints.maxWidth / 900.0,
+                          scaleY: constraints.maxHeight / 360.0,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
           ),
         ),
       ),
       actions: [
-        TextButton(onPressed: _clear, child: const Text('Limpiar')),
-        TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancelar')),
-        FilledButton(onPressed: _accept, child: const Text('Aceptar')),
+        SizedBox(
+          width: double.maxFinite,
+          child: Row(
+            children: [
+              OutlinedButton.icon(
+                onPressed: hasSignature ? _clear : null,
+                icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                label: const Text('Limpiar'),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('Cancelar'),
+              ),
+              const SizedBox(width: 8),
+              FilledButton.icon(
+                onPressed: _accept,
+                icon: const Icon(Icons.check, size: 18),
+                label: const Text('Guardar firma'),
+              ),
+            ],
+          ),
+        ),
       ],
     );
   }

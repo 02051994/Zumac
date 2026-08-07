@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/configuration_icon_catalog.dart';
@@ -12,6 +14,7 @@ import '../../core/services/local_db.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/services/zumac_consultant_service.dart';
 import '../../core/widgets/branded_loading.dart';
+import '../../core/widgets/zumac_feature_header.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/onboarding_service.dart';
 import '../auth/login_page.dart';
@@ -24,7 +27,10 @@ import '../local_records/local_records_page.dart';
 import '../reports/reports_page.dart';
 import '../configuration_admin/configuration_admin_page.dart';
 import '../configuration_admin/configuration_admin_repository.dart';
+import '../knowledge_admin/knowledge_admin_page.dart';
 import '../onboarding/onboarding_page.dart';
+import '../alerts_actions/alerts_actions_page.dart';
+import '../metrics/metrics_page.dart';
 import 'generic_section_page.dart';
 import 'dynamic_views_page.dart';
 
@@ -53,13 +59,365 @@ class _HomeDecorationCircle extends StatelessWidget {
   }
 }
 
+class _ConsultantChatTurn {
+  const _ConsultantChatTurn({
+    required this.question,
+    required this.result,
+  });
+
+  final String question;
+  final ZumacConsultantResult result;
+}
+
+class _CreatorModeChoice extends StatelessWidget {
+  const _CreatorModeChoice({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.filled = false,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool filled;
+
+  @override
+  Widget build(BuildContext context) {
+    final foreground = filled ? Colors.white : const Color(0xFF17324D);
+    return Material(
+      color: filled ? const Color(0xFF176B87) : const Color(0xFFF7FAFB),
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: filled ? const Color(0xFF176B87) : const Color(0xFFD4E3E8),
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(icon, color: foreground, size: 30),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: TextStyle(
+                        color: foreground,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color:
+                            filled ? Colors.white70 : const Color(0xFF60758A),
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right, color: foreground),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Tabla operativa del Consultor con desplazamiento independiente en ambos
+/// ejes. Mantener los controladores dentro del widget evita que el scroll se
+/// reinicie cada vez que cambia otra parte de la pantalla.
+class _ConsultantReportTableCard extends StatefulWidget {
+  const _ConsultantReportTableCard({
+    super.key,
+    required this.report,
+    required this.onOpen,
+  });
+
+  final ZumacConsultantReportTable report;
+  final VoidCallback? onOpen;
+
+  @override
+  State<_ConsultantReportTableCard> createState() =>
+      _ConsultantReportTableCardState();
+}
+
+class _ConsultantReportTableCardState
+    extends State<_ConsultantReportTableCard> {
+  final ScrollController _horizontalController = ScrollController();
+  final ScrollController _verticalController = ScrollController();
+
+  @override
+  void dispose() {
+    _horizontalController.dispose();
+    _verticalController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final report = widget.report;
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFD7E6EB)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final title = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Padding(
+                    padding: EdgeInsets.only(top: 2),
+                    child: Icon(
+                      Icons.table_chart_outlined,
+                      size: 20,
+                      color: Color(0xFF176B87),
+                    ),
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          report.title,
+                          style: const TextStyle(
+                            color: Color(0xFF17324D),
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '${report.totalRows} ${report.totalRows == 1 ? 'registro' : 'registros'}',
+                          style: const TextStyle(
+                            color: Color(0xFF60758A),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+              final openButton = report.canOpen && widget.onOpen != null
+                  ? TextButton.icon(
+                      onPressed: widget.onOpen,
+                      icon: const Icon(Icons.open_in_new, size: 17),
+                      label: const Text('Abrir registros'),
+                    )
+                  : null;
+              return Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 10, 10),
+                child: constraints.maxWidth < 480
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          title,
+                          if (openButton != null)
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: openButton,
+                            ),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: title),
+                          if (openButton != null) openButton,
+                        ],
+                      ),
+              );
+            },
+          ),
+          if (report.columns.isEmpty)
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
+              child: Text(
+                'Los registros encontrados solo contienen identificadores técnicos.',
+                style: TextStyle(color: Color(0xFF60758A)),
+              ),
+            )
+          else ...[
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              color: const Color(0xFFF7FAFB),
+              child: const Row(
+                children: [
+                  Icon(
+                    Icons.swipe_outlined,
+                    size: 16,
+                    color: Color(0xFF60758A),
+                  ),
+                  SizedBox(width: 7),
+                  Expanded(
+                    child: Text(
+                      'Desliza horizontal y verticalmente para revisar la tabla.',
+                      style: TextStyle(
+                        color: Color(0xFF60758A),
+                        fontSize: 11.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                var tableWidth = report.columns.length * 168.0;
+                if (tableWidth < constraints.maxWidth) {
+                  tableWidth = constraints.maxWidth;
+                }
+                if (tableWidth > 1800) tableWidth = 1800;
+                final contentHeight = 58.0 + (report.rows.length * 52.0);
+                final viewportHeight = contentHeight.clamp(150.0, 390.0);
+                return SizedBox(
+                  height: viewportHeight,
+                  child: Scrollbar(
+                    controller: _verticalController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
+                    notificationPredicate: (notification) =>
+                        notification.metrics.axis == Axis.vertical,
+                    child: SingleChildScrollView(
+                      controller: _verticalController,
+                      scrollDirection: Axis.vertical,
+                      child: Scrollbar(
+                        controller: _horizontalController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        notificationPredicate: (notification) =>
+                            notification.metrics.axis == Axis.horizontal,
+                        child: SingleChildScrollView(
+                          controller: _horizontalController,
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.only(bottom: 12),
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(minWidth: tableWidth),
+                            child: DataTable(
+                              headingRowColor: WidgetStateProperty.all(
+                                const Color(0xFFEAF3F6),
+                              ),
+                              headingRowHeight: 54,
+                              dataRowMinHeight: 48,
+                              dataRowMaxHeight: 72,
+                              dividerThickness: 0.8,
+                              headingTextStyle: const TextStyle(
+                                color: Color(0xFF17324D),
+                                fontWeight: FontWeight.w800,
+                                fontSize: 12.5,
+                              ),
+                              dataTextStyle: const TextStyle(
+                                color: Color(0xFF304A60),
+                                fontSize: 12.5,
+                              ),
+                              columnSpacing: 20,
+                              horizontalMargin: 16,
+                              columns: [
+                                for (final column in report.columns)
+                                  DataColumn(
+                                    label: Text(
+                                      column.label,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                              ],
+                              rows: [
+                                for (var index = 0;
+                                    index < report.rows.length;
+                                    index++)
+                                  DataRow(
+                                    color: WidgetStateProperty.all(
+                                      index.isEven
+                                          ? Colors.white
+                                          : const Color(0xFFF8FBFC),
+                                    ),
+                                    cells: [
+                                      for (final column in report.columns)
+                                        DataCell(
+                                          ConstrainedBox(
+                                            constraints: const BoxConstraints(
+                                              minWidth: 92,
+                                              maxWidth: 250,
+                                            ),
+                                            child: SelectableText(
+                                              report.rows[index][column.key] ??
+                                                  '—',
+                                              maxLines: 3,
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ],
+          if (report.totalRows > report.rows.length)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Text(
+                'Mostrando ${report.rows.length} de ${report.totalRows} registros. Puedes precisar la fecha, lote, persona u otro campo para acotar la consulta.',
+                style: const TextStyle(
+                  color: Color(0xFF60758A),
+                  fontSize: 12,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
 class _ModulesPageState extends State<ModulesPage> {
+  static const _toolHome = 'home';
+  static const _toolConsultant = 'consultant';
+  static const _toolCreatorCreate = 'creator_create';
+  static const _toolCreatorEdit = 'creator_edit';
+  static const _toolMetrics = 'metrics';
+  static const _toolAlerts = 'alerts';
+  static const _toolActions = 'actions';
+
   final local = LocalDb.instance;
   final sync = SyncService();
   final experience = AppExperienceService();
   final consultant = ZumacConsultantService();
   final scaffoldKey = GlobalKey<ScaffoldState>();
   final TextEditingController _consultantController = TextEditingController();
+  final FocusNode _consultantFocusNode = FocusNode();
+  final stt.SpeechToText _consultantSpeech = stt.SpeechToText();
+  final GlobalKey _consultantComposerKey = GlobalKey();
+  final String _consultantConversationId =
+      'consultor-${DateTime.now().microsecondsSinceEpoch}';
 
   List<Map<String, dynamic>> modules = [];
   List<Map<String, dynamic>> sections = [];
@@ -88,15 +446,30 @@ class _ModulesPageState extends State<ModulesPage> {
   Map<String, dynamic>? mobileSelectedSpecial;
   String? _expandedSectionId;
   bool canManageConfiguration = false;
+  bool canManageCompany = false;
+  bool canUseZumacConsultor = false;
+  bool canUseZumacCreator = false;
+  bool canUseZumacAlerts = false;
+  bool canUseZumacActions = false;
+  bool canUseZumacMetrics = false;
+  int openAlertEvents = 0;
+  int pendingActions = 0;
   bool online = true;
   DateTime? lastSyncAt;
   Map<String, dynamic> restoredNavigation = {};
   final List<Map<String, dynamic>> navigationHistory = [];
   bool _consultantBusy = false;
-  ZumacConsultantResult? _consultantResult;
+  bool _consultantSpeechListening = false;
+  bool _consultantSpeechInitializing = false;
+  String _consultantSpeechBaseText = '';
+  bool _consultantSuggestionsExpanded = false;
+  bool _consultantOpen = false;
+  String _activeWorkspaceTool = _toolHome;
+  final List<_ConsultantChatTurn> _consultantTurns = [];
   String? _consultantTableName;
   String? _consultantRecordField;
   String? _consultantRecordValue;
+  String? _metricsInitialSourceTable;
 
   String? _desktopContentCacheKey;
   Widget? _desktopContentCache;
@@ -122,7 +495,10 @@ class _ModulesPageState extends State<ModulesPage> {
   @override
   void dispose() {
     unawaited(_persistNavigation());
+    unawaited(_consultantSpeech.cancel());
     _consultantController.dispose();
+    _consultantFocusNode.dispose();
+    consultant.clearConversation(_consultantConversationId);
     _desktopSidebarOpenNotifier.dispose();
     super.dispose();
   }
@@ -155,6 +531,12 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Map<String, dynamic> _navigationSnapshot() {
+    if (_activeWorkspaceTool != _toolHome) {
+      return {
+        'kind': 'tool',
+        'tool': _activeWorkspaceTool,
+      };
+    }
     if (desktopSelectedModule != null && desktopSelectedFormat != null) {
       return {
         'kind': 'format',
@@ -202,7 +584,20 @@ class _ModulesPageState extends State<ModulesPage> {
     Map<String, dynamic>? selectedSection;
     Map<String, dynamic>? selectedModule;
     Map<String, dynamic>? selectedFormat;
-    if (kind == 'section') {
+    var restoredTool = _toolHome;
+    if (kind == 'tool') {
+      final candidate = snapshot['tool']?.toString() ?? _toolHome;
+      if (const {
+        _toolConsultant,
+        _toolCreatorCreate,
+        _toolCreatorEdit,
+        _toolMetrics,
+        _toolAlerts,
+        _toolActions,
+      }.contains(candidate)) {
+        restoredTool = candidate;
+      }
+    } else if (kind == 'section') {
       selectedSection = sections.cast<Map<String, dynamic>?>().firstWhere(
             (row) => _sameId(row?['id'], snapshot['section_id']),
             orElse: () => null,
@@ -222,6 +617,8 @@ class _ModulesPageState extends State<ModulesPage> {
     setState(() {
       _clearDesktopContentCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = restoredTool;
+      _consultantOpen = restoredTool == _toolConsultant;
       desktopSelectedSection = selectedSection;
       desktopSelectedModule = selectedModule;
       desktopSelectedFormat = selectedFormat;
@@ -262,14 +659,55 @@ class _ModulesPageState extends State<ModulesPage> {
       final contextData = await ConfigurationAdminRepository()
           .loadContext()
           .timeout(const Duration(seconds: 4));
+      Map<String, dynamic> alertsContext = const {};
+      Map<String, dynamic> metricsContext = const {};
+      try {
+        final raw = await Supabase.instance.client
+            .rpc('appgt_alertas_contexto_v1')
+            .timeout(const Duration(seconds: 4));
+        if (raw is Map) alertsContext = Map<String, dynamic>.from(raw);
+      } catch (_) {
+        // Permite que una compilación nueva siga entrando mientras la migración
+        // de Alerts/Actions aún está pendiente de desplegar en Supabase.
+      }
+      try {
+        final raw = await Supabase.instance.client
+            .rpc('appgt_metrics_contexto_v1')
+            .timeout(const Duration(seconds: 4));
+        if (raw is Map) metricsContext = Map<String, dynamic>.from(raw);
+      } catch (_) {
+        // Una app nueva puede convivir temporalmente con el esquema anterior.
+      }
       if (!mounted) return;
-      setState(() =>
-          canManageConfiguration = contextData['puede_gestionar'] == true);
+      setState(() {
+        canUseZumacConsultor =
+            contextData['zumac_consultor_habilitado'] == true;
+        canUseZumacCreator = contextData['zumac_creator_habilitado'] == true;
+        canUseZumacAlerts = alertsContext['alerts_habilitado'] == true;
+        canUseZumacActions = alertsContext['actions_habilitado'] == true;
+        canUseZumacMetrics = metricsContext['metrics_habilitado'] == true;
+        final summary = alertsContext['resumen'];
+        if (summary is Map) {
+          openAlertEvents = (summary['eventos_abiertos'] as num?)?.toInt() ?? 0;
+          pendingActions =
+              (summary['acciones_pendientes'] as num?)?.toInt() ?? 0;
+        }
+        canManageCompany = contextData['puede_gestionar_empresa'] == true;
+        canManageConfiguration = canManageCompany && canUseZumacCreator;
+      });
     } catch (_) {
       // El constructor requiere conexión. La navegación offline principal no
       // debe bloquearse si Supabase no responde.
-      if (mounted && canManageConfiguration) {
-        setState(() => canManageConfiguration = false);
+      if (mounted) {
+        setState(() {
+          canManageConfiguration = false;
+          canManageCompany = false;
+          canUseZumacConsultor = false;
+          canUseZumacCreator = false;
+          canUseZumacAlerts = false;
+          canUseZumacActions = false;
+          canUseZumacMetrics = false;
+        });
       }
     }
   }
@@ -277,33 +715,282 @@ class _ModulesPageState extends State<ModulesPage> {
   Future<void> _openConfigurationAdmin({
     CreatorEntryMode mode = CreatorEntryMode.create,
   }) async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ConfigurationAdminPage(initialMode: mode),
-      ),
+    _activateWorkspaceTool(
+      mode == CreatorEntryMode.edit ? _toolCreatorEdit : _toolCreatorCreate,
     );
-    if (!mounted) return;
-    await _loadConfigurationAccess();
   }
 
-  Future<void> _askConsultant() async {
-    final question = _consultantController.text.trim();
+  Future<void> _chooseCreatorMode() async {
+    if (!canUseZumacCreator || !canManageConfiguration) return;
+    final mode = await showDialog<CreatorEntryMode>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.dashboard_customize_outlined),
+        title: const Text('Creator'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 430),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _CreatorModeChoice(
+                icon: Icons.edit_note_outlined,
+                title: 'Editar existentes',
+                subtitle: 'Revisar, modificar u ocultar lo que ya existe.',
+                onTap: () =>
+                    Navigator.of(dialogContext).pop(CreatorEntryMode.edit),
+              ),
+              const SizedBox(height: 10),
+              _CreatorModeChoice(
+                icon: Icons.add_circle_outline,
+                title: 'Crear',
+                subtitle:
+                    'Crear secciones, módulos, formatos o una app desde un documento.',
+                filled: true,
+                onTap: () =>
+                    Navigator.of(dialogContext).pop(CreatorEntryMode.create),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Cancelar'),
+          ),
+        ],
+      ),
+    );
+    if (mode != null && mounted) {
+      await _openConfigurationAdmin(mode: mode);
+    }
+  }
+
+  Future<void> _openMetrics({String? sourceTable}) async {
+    _metricsInitialSourceTable = sourceTable;
+    _activateWorkspaceTool(_toolMetrics);
+  }
+
+  Future<void> _openAlertsActions(int initialTab) async {
+    _activateWorkspaceTool(initialTab == 0 ? _toolAlerts : _toolActions);
+  }
+
+  void _activateWorkspaceTool(String tool) {
+    _rememberNavigation();
+    setState(() {
+      _clearDesktopContentCache();
+      _clearDesktopSidebarCache();
+      _clearConsultantFocusState();
+      _activeWorkspaceTool = tool;
+      _consultantOpen = tool == _toolConsultant;
+      desktopSelectedSection = null;
+      desktopSelectedModule = null;
+      desktopSelectedFormat = null;
+      desktopSelectedReportModule = null;
+      desktopSelectedReportView = null;
+      desktopSelectedDynamicView = null;
+      mobileSelectedSpecial = null;
+    });
+    unawaited(_persistNavigation());
+    if (tool == _toolConsultant) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _consultantFocusNode.requestFocus();
+      });
+    }
+  }
+
+  Future<void> _handleAlertNavigation(AlertNavigationTarget target) async {
+    if (!mounted) return;
+    await _loadConfigurationAccess();
+    if (!mounted) return;
+    if (target.openChart) {
+      await _openMetrics(sourceTable: target.tableName);
+      return;
+    }
+    if ((target.moduleId ?? '').isEmpty || (target.formatId ?? '').isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La alerta no tiene todavía el vínculo de formato. Evalúala nuevamente para actualizarlo.',
+          ),
+        ),
+      );
+      return;
+    }
+    _reviewConsultantFinding(
+      ZumacConsultantFinding(
+        title: 'Registros de la alerta',
+        detail: '',
+        tableName: target.tableName,
+        moduleId: target.moduleId,
+        formatId: target.formatId,
+        recordField: target.recordField,
+        recordValue: target.recordValue,
+      ),
+    );
+  }
+
+  Future<void> _refreshAfterCreatorChange() async {
+    await download();
+    if (mounted) await _loadConfigurationAccess();
+  }
+
+  Future<void> _toggleConsultantSpeech() async {
+    if (_consultantSpeechInitializing || _consultantBusy) return;
+    if (_consultantSpeech.isListening) {
+      await _consultantSpeech.stop();
+      if (mounted) setState(() => _consultantSpeechListening = false);
+      return;
+    }
+
+    setState(() => _consultantSpeechInitializing = true);
+    try {
+      final available = await _consultantSpeech.initialize(
+        onStatus: (status) {
+          if (!mounted) return;
+          final listening = status == 'listening';
+          if (_consultantSpeechListening != listening) {
+            setState(() => _consultantSpeechListening = listening);
+          }
+        },
+        onError: (error) {
+          if (!mounted) return;
+          setState(() => _consultantSpeechListening = false);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                error.permanent
+                    ? 'Zumac no tiene permiso para usar el micrófono. Habilítalo en la configuración del dispositivo o navegador.'
+                    : 'No se pudo reconocer la voz. Intenta nuevamente en un lugar con menos ruido.',
+              ),
+            ),
+          );
+        },
+      );
+      if (!available) {
+        throw StateError(
+          'El reconocimiento de voz no está disponible en este dispositivo o navegador.',
+        );
+      }
+
+      String? localeId;
+      try {
+        final locales = await _consultantSpeech.locales();
+        stt.LocaleName? preferred;
+        for (final locale in locales) {
+          if (locale.localeId.toLowerCase() == 'es_pe') {
+            preferred = locale;
+            break;
+          }
+          if (preferred == null &&
+              locale.localeId.toLowerCase().startsWith('es')) {
+            preferred = locale;
+          }
+        }
+        localeId = preferred?.localeId;
+      } catch (_) {
+        // Algunos navegadores no exponen la lista; se usa el idioma del sistema.
+      }
+
+      _consultantSpeechBaseText = _consultantController.text.trim();
+      await _consultantSpeech.listen(
+        listenOptions: stt.SpeechListenOptions(
+          localeId: localeId,
+          listenFor: const Duration(seconds: 45),
+          pauseFor: const Duration(seconds: 4),
+          partialResults: true,
+          cancelOnError: true,
+          listenMode: stt.ListenMode.confirmation,
+        ),
+        onResult: (result) {
+          if (!mounted) return;
+          final recognized = result.recognizedWords.trim();
+          final combined = [
+            if (_consultantSpeechBaseText.isNotEmpty) _consultantSpeechBaseText,
+            if (recognized.isNotEmpty) recognized,
+          ].join(' ');
+          _consultantController
+            ..text = combined
+            ..selection = TextSelection.collapsed(offset: combined.length);
+          setState(() {
+            _clearDesktopContentCache();
+            _consultantSpeechListening = !result.finalResult;
+          });
+        },
+      );
+      if (mounted) {
+        setState(() => _consultantSpeechListening = true);
+        _consultantFocusNode.requestFocus();
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _consultantSpeechInitializing = false);
+    }
+  }
+
+  Future<void> _askConsultant({
+    String? questionOverride,
+    String? displayQuestion,
+    String? selectedSourceTable,
+  }) async {
+    final question = (questionOverride ?? _consultantController.text).trim();
     if (question.isEmpty || _consultantBusy) return;
+    if (_consultantSpeech.isListening) {
+      await _consultantSpeech.stop();
+    }
     setState(() {
       _clearDesktopContentCache();
       _consultantBusy = true;
+      _consultantSpeechListening = false;
     });
     try {
-      final result = await consultant.ask(question);
+      final result = await consultant
+          .ask(
+            question,
+            conversationId: _consultantConversationId,
+            selectedSourceTable: selectedSourceTable,
+          )
+          .timeout(
+            const Duration(seconds: 30),
+            onTimeout: () => throw TimeoutException(
+              'La consulta tardó demasiado. Zumac detuvo la búsqueda para no dejar la pantalla cargando. Intenta precisar el formato, el mes o la fecha.',
+            ),
+          );
       if (!mounted) return;
       setState(() {
         _clearDesktopContentCache();
-        _consultantResult = result;
+        _consultantTurns.add(
+          _ConsultantChatTurn(
+            question: displayQuestion?.trim().isNotEmpty == true
+                ? displayQuestion!.trim()
+                : question,
+            result: result,
+          ),
+        );
+        _consultantController.clear();
+      });
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final composerContext = _consultantComposerKey.currentContext;
+        if (composerContext != null) {
+          Scrollable.ensureVisible(
+            composerContext,
+            duration: const Duration(milliseconds: 280),
+            alignment: 0.92,
+          );
+        }
+        if (mounted) _consultantFocusNode.requestFocus();
       });
     } catch (error) {
       if (!mounted) return;
+      final message = error is TimeoutException
+          ? error.message ?? 'La consulta excedió el tiempo permitido.'
+          : 'No se pudo completar la consulta: $error';
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo completar la consulta: $error')),
+        SnackBar(content: Text(message)),
       );
     } finally {
       if (mounted) {
@@ -316,11 +1003,17 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   void _clearConsultantAnswer() {
+    unawaited(_consultantSpeech.cancel());
     setState(() {
       _clearDesktopContentCache();
-      _consultantResult = null;
+      _consultantTurns.clear();
       _consultantController.clear();
+      _consultantSuggestionsExpanded = false;
+      _consultantSpeechListening = false;
+      _clearConsultantFocusState();
+      consultant.clearConversation(_consultantConversationId);
     });
+    _consultantFocusNode.requestFocus();
   }
 
   void _reviewConsultantFinding(ZumacConsultantFinding finding) {
@@ -350,6 +1043,8 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = null;
       desktopSelectedModule = Map<String, dynamic>.from(module);
       desktopSelectedFormat = Map<String, dynamic>.from(format);
@@ -372,6 +1067,18 @@ class _ModulesPageState extends State<ModulesPage> {
         tableName: report.tableName,
         moduleId: report.moduleId,
         formatId: report.formatId,
+      ),
+    );
+  }
+
+  void _openConsultantRelatedTable(ZumacConsultantRelatedTable table) {
+    _reviewConsultantFinding(
+      ZumacConsultantFinding(
+        title: table.title,
+        detail: '',
+        tableName: table.tableName,
+        moduleId: table.moduleId,
+        formatId: table.formatId,
       ),
     );
   }
@@ -834,7 +1541,7 @@ class _ModulesPageState extends State<ModulesPage> {
       final hasCache = await local.hasOfflineBootstrapCache();
       await sync.downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: true,
+        forceConfigurationRefresh: false,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -844,11 +1551,12 @@ class _ModulesPageState extends State<ModulesPage> {
           }
         },
       );
-      if (mounted)
+      if (mounted) {
         setState(() {
           busyProgress = 0.97;
           busyMessage = 'Aplicando cambios locales...';
         });
+      }
       await loadLocal();
       if (!mounted) return;
       final completedAt = DateTime.now();
@@ -948,7 +1656,8 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   bool _mobileIsHome() {
-    return desktopSelectedModule == null &&
+    return _activeWorkspaceTool == _toolHome &&
+        desktopSelectedModule == null &&
         desktopSelectedFormat == null &&
         desktopSelectedReportModule == null &&
         desktopSelectedReportView == null &&
@@ -957,7 +1666,107 @@ class _ModulesPageState extends State<ModulesPage> {
         mobileSelectedSpecial == null;
   }
 
+  bool get _usesImmersiveWorkspace => const {
+        _toolMetrics,
+        _toolAlerts,
+        _toolActions,
+      }.contains(_activeWorkspaceTool);
+
+  bool get _canClearConsultant =>
+      _activeWorkspaceTool == _toolConsultant &&
+      (_consultantTurns.isNotEmpty ||
+          _consultantController.text.trim().isNotEmpty);
+
+  Map<String, dynamic>? _sectionForModule(Map<String, dynamic>? module) {
+    if (module == null) return null;
+    final sectionId = _txt(module['seccion']);
+    for (final section in sections) {
+      if (_sameId(section['id'], sectionId)) return section;
+    }
+    return null;
+  }
+
+  String _formatFamilyTitle() {
+    final module = desktopSelectedModule;
+    if (module == null) return '';
+    final section = _sectionForModule(module);
+    final sectionKey =
+        '${section?['id'] ?? ''} ${section?['nombre'] ?? ''}'.toUpperCase();
+    final prefix = sectionKey.contains('MATRIZ') ? 'MATRIZ' : 'FORMATOS';
+    final moduleName = _txt(module['nombre']).isEmpty
+        ? _txt(module['id'])
+        : _txt(module['nombre']);
+    return '$prefix DE ${moduleName.toUpperCase()}';
+  }
+
+  Widget _workspaceTitle({bool compact = false}) {
+    if (_activeWorkspaceTool != _toolHome) {
+      final (title, icon, color) = switch (_activeWorkspaceTool) {
+        _toolConsultant => (
+            'Zumac Consultor',
+            Icons.forum_outlined,
+            const Color(0xFF176B87)
+          ),
+        _toolCreatorCreate => (
+            'Zumac Creator · Crear',
+            Icons.dashboard_customize_outlined,
+            const Color(0xFF237A57)
+          ),
+        _toolCreatorEdit => (
+            'Zumac Creator · Editar',
+            Icons.dashboard_customize_outlined,
+            const Color(0xFF237A57)
+          ),
+        _toolMetrics => (
+            'Zumac Metrics',
+            Icons.insights_outlined,
+            const Color(0xFF6E56CF)
+          ),
+        _toolAlerts => (
+            'Zumac Alerts',
+            Icons.notifications_active_outlined,
+            const Color(0xFFC56A13)
+          ),
+        _toolActions => (
+            'Zumac Actions',
+            Icons.bolt_outlined,
+            const Color(0xFFB4425A)
+          ),
+        _ => ('ZUMAC', Icons.home_outlined, const Color(0xFF176B87)),
+      };
+      return ZumacFeatureHeader(
+        title: title,
+        icon: icon,
+        color: color,
+        compact: compact,
+      );
+    }
+    final familyTitle = _formatFamilyTitle();
+    final title = familyTitle.isNotEmpty ? familyTitle : _mobilePageTitle();
+    return Text(
+      title,
+      maxLines: 2,
+      overflow: TextOverflow.ellipsis,
+      style: TextStyle(
+        color: const Color(0xFF17324D),
+        fontSize: compact ? 16 : 18,
+        fontWeight: FontWeight.w900,
+      ),
+    );
+  }
+
   String _mobilePageTitle() {
+    if (_activeWorkspaceTool != _toolHome) {
+      return switch (_activeWorkspaceTool) {
+        _toolConsultant => 'Consultor',
+        _toolCreatorCreate => 'Creator · Crear',
+        _toolCreatorEdit => 'Creator · Editar',
+        _toolMetrics => 'Metrics',
+        _toolAlerts => 'Alerts',
+        _toolActions => 'Actions',
+        _ => 'ZUMAC',
+      };
+    }
     if (desktopSelectedModule != null && desktopSelectedFormat != null) {
       return desktopSelectedFormat!['nombre']?.toString().trim().isNotEmpty ==
               true
@@ -974,8 +1783,9 @@ class _ModulesPageState extends State<ModulesPage> {
           ? desktopSelectedReportView!['nombre_vista'].toString()
           : 'Reportes';
     }
-    if (desktopSelectedSection != null)
+    if (desktopSelectedSection != null) {
       return _sectionTitle(desktopSelectedSection!);
+    }
     return 'ZUMAC';
   }
 
@@ -983,9 +1793,9 @@ class _ModulesPageState extends State<ModulesPage> {
     if (_mobileIsHome()) return const SizedBox.shrink();
     // Cuando se abre un formato en móvil, FormRunnerPage ya trae su propio AppBar
     // con flecha y título. Evita el segundo título fijo que quitaba espacio útil.
-    if (desktopSelectedFormat != null) return const SizedBox.shrink();
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 8, 16, 4),
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(8, 7, 10, 7),
       child: Row(
         children: [
           IconButton(
@@ -993,14 +1803,13 @@ class _ModulesPageState extends State<ModulesPage> {
             icon: const Icon(Icons.arrow_back),
             onPressed: _restorePreviousNavigation,
           ),
-          Expanded(
-            child: Text(
-              _mobilePageTitle(),
-              maxLines: 2,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+          Expanded(child: _workspaceTitle(compact: true)),
+          if (_canClearConsultant)
+            TextButton.icon(
+              onPressed: _consultantBusy ? null : _clearConsultantAnswer,
+              icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+              label: const Text('Limpiar'),
             ),
-          ),
         ],
       ),
     );
@@ -1012,6 +1821,8 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = null;
       desktopSelectedModule = null;
       desktopSelectedFormat = null;
@@ -1021,162 +1832,6 @@ class _ModulesPageState extends State<ModulesPage> {
       mobileSelectedSpecial = null;
     });
     unawaited(_persistNavigation());
-  }
-
-  void _selectDesktopModule(Map<String, dynamic> module) {
-    _rememberNavigation();
-    setState(() {
-      _clearDesktopContentCache();
-      _clearDesktopSidebarCache();
-      desktopSelectedSection = null;
-      desktopSelectedModule = Map<String, dynamic>.from(module);
-      desktopSelectedFormat = null;
-      desktopSelectedReportModule = null;
-      desktopSelectedReportView = null;
-      desktopSelectedDynamicView = null;
-      mobileSelectedSpecial = null;
-    });
-    unawaited(_persistNavigation());
-  }
-
-  Map<String, dynamic> _formatsSectionForModule(Map<String, dynamic>? module) {
-    final sectionId = _txt(module?['seccion']);
-    final existing = sections.cast<Map<String, dynamic>?>().firstWhere(
-          (row) => _sameId(row?['id'], sectionId),
-          orElse: () => null,
-        );
-    return existing ??
-        <String, dynamic>{
-          'id': sectionId.isEmpty ? 'modulos' : sectionId,
-          'nombre': 'Formatos',
-          'icono': 'apps',
-        };
-  }
-
-  void _openFormatsFromBreadcrumb() {
-    _selectDesktopSection(_formatsSectionForModule(desktopSelectedModule));
-    if (!desktopSidebarOpen) {
-      setState(() {
-        desktopSidebarOpen = true;
-        _clearDesktopSidebarCache();
-      });
-      _desktopSidebarOpenNotifier.value = true;
-      unawaited(_persistNavigation());
-    }
-  }
-
-  List<({String label, VoidCallback? onTap})> _breadcrumbItems() {
-    final items = <({String label, VoidCallback? onTap})>[
-      (label: 'Agroexportación', onTap: _openHomeFromBreadcrumb),
-    ];
-    final module = desktopSelectedModule;
-    final format = desktopSelectedFormat;
-    if (module != null) {
-      final sectionId = _txt(module['seccion']);
-      final section = sections.cast<Map<String, dynamic>?>().firstWhere(
-            (row) => _sameId(row?['id'], sectionId),
-            orElse: () => null,
-          );
-      final sectionName = section == null ? '' : _sectionTitle(section);
-      if (sectionName.isNotEmpty) {
-        items.add((label: sectionName, onTap: _openFormatsFromBreadcrumb));
-      }
-      items.add((
-        label: _txt(module['nombre']).isEmpty
-            ? _txt(module['id'])
-            : _txt(module['nombre']),
-        onTap: () => _selectDesktopModule(module),
-      ));
-      if (format != null) {
-        items.add((
-          label: _txt(format['nombre']).isEmpty
-              ? _txt(format['id'])
-              : _txt(format['nombre']),
-          onTap: null,
-        ));
-      }
-    } else if (desktopSelectedSection != null) {
-      items.add((
-        label: _sectionTitle(desktopSelectedSection!),
-        onTap: desktopSelectedDynamicView == null
-            ? null
-            : () => _selectDesktopSection(desktopSelectedSection!),
-      ));
-      if (desktopSelectedDynamicView != null) {
-        items.add((
-          label: _txt(desktopSelectedDynamicView!['nombre']),
-          onTap: null,
-        ));
-      }
-    } else if (desktopSelectedReportView != null) {
-      items.add((
-        label: 'Reportes',
-        onTap: () => _selectDesktopSection({
-              'id': 'reportes',
-              'nombre': 'Reportes',
-              'icono': 'bar_chart',
-            }),
-      ));
-      items.add((
-        label: _txt(desktopSelectedReportView!['nombre_vista']),
-        onTap: null,
-      ));
-    }
-    return items;
-  }
-
-  Widget _breadcrumbBar() {
-    if (_mobileIsHome()) return const SizedBox.shrink();
-    final items = _breadcrumbItems();
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      color: const Color(0xFFEAF3F6),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            for (var index = 0; index < items.length; index++) ...[
-              if (index > 0)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 6),
-                  child: Icon(
-                    Icons.chevron_right,
-                    size: 15,
-                    color: Color(0xFF6A8290),
-                  ),
-                ),
-              InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: items[index].onTap,
-                child: Padding(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                  child: Text(
-                    items[index].label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: items[index].onTap == null
-                          ? const Color(0xFF17324D)
-                          : const Color(0xFF176B87),
-                      fontSize: 12,
-                      fontWeight: items[index].onTap == null
-                          ? FontWeight.w700
-                          : FontWeight.w600,
-                      decoration: items[index].onTap == null
-                          ? TextDecoration.none
-                          : TextDecoration.underline,
-                      decorationColor: const Color(0xFF176B87),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
   }
 
   Widget _animatedContent(Widget child) {
@@ -1235,6 +1890,7 @@ class _ModulesPageState extends State<ModulesPage> {
         .then((_) => loadLocal());
   }
 
+  // ignore: unused_element
   Widget _menuItems() {
     final visibleSections =
         sections.where((s) => _canSection(s['id']?.toString() ?? '')).toList();
@@ -1272,12 +1928,16 @@ class _ModulesPageState extends State<ModulesPage> {
         desktopSelectedFormat == null &&
         desktopSelectedReportModule == null &&
         desktopSelectedReportView == null &&
-        desktopSelectedDynamicView == null) return;
+        desktopSelectedDynamicView == null) {
+      return;
+    }
     _rememberNavigation();
     setState(() {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = Map<String, dynamic>.from(section);
       desktopSelectedModule = null;
       desktopSelectedFormat = null;
@@ -1310,6 +1970,8 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = null;
       desktopSelectedModule = Map<String, dynamic>.from(module);
       desktopSelectedFormat = Map<String, dynamic>.from(format);
@@ -1328,6 +1990,8 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = null;
       desktopSelectedModule = null;
       desktopSelectedFormat = null;
@@ -1346,6 +2010,8 @@ class _ModulesPageState extends State<ModulesPage> {
       _clearDesktopContentCache();
       _clearDesktopSidebarCache();
       _clearConsultantFocusState();
+      _activeWorkspaceTool = _toolHome;
+      _consultantOpen = false;
       desktopSelectedSection = Map<String, dynamic>.from(section);
       desktopSelectedDynamicView = Map<String, dynamic>.from(view);
       desktopSelectedModule = null;
@@ -1362,6 +2028,9 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _homeDashboard({required bool desktop}) {
+    if (_consultantOpen && canUseZumacConsultor) {
+      return _consultantWorkspace(desktop: desktop);
+    }
     final normalizedName = profileName.trim();
     final firstName = normalizedName.isEmpty
         ? ''
@@ -1372,8 +2041,6 @@ class _ModulesPageState extends State<ModulesPage> {
         final compact = constraints.maxWidth < 620;
         final horizontalPadding =
             (constraints.maxWidth * 0.045).clamp(14.0, 64.0);
-        final logoSize =
-            (constraints.maxWidth * (wide ? 0.14 : 0.34)).clamp(132.0, 220.0);
         return DecoratedBox(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
@@ -1421,25 +2088,41 @@ class _ModulesPageState extends State<ModulesPage> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _homeQuickActions(
-                          desktop: desktop,
-                        ),
-                        SizedBox(height: compact ? 6 : 10),
                         _welcomeHomePanel(
                           firstName: firstName,
                           wide: wide,
-                          logoSize: logoSize,
                           desktop: desktop,
                         ),
                         SizedBox(height: compact ? 16 : 22),
-                        _consultantPanel(compact: compact),
-                        if (_consultantResult != null) ...[
+                        _homeTools(compact: compact),
+                        if (_consultantOpen && canUseZumacConsultor) ...[
+                          SizedBox(height: compact ? 16 : 22),
+                          _consultantPanel(compact: compact),
+                          if (_consultantTurns.isNotEmpty) ...[
+                            const SizedBox(height: 14),
+                            _consultantConversationPanel(),
+                          ],
                           const SizedBox(height: 14),
-                          _consultantAnswerPanel(),
+                          _consultantComposer(compact: compact),
                         ],
-                        if (canManageConfiguration) ...[
-                          const SizedBox(height: 18),
-                          _creatorHomePanel(compact: compact),
+                        if (_consultantOpen &&
+                            canUseZumacConsultor &&
+                            canManageCompany) ...[
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: OutlinedButton.icon(
+                              onPressed: () => Navigator.of(context).push<void>(
+                                MaterialPageRoute(
+                                  builder: (_) => const KnowledgeAdminPage(),
+                                ),
+                              ),
+                              icon: const Icon(Icons.hub_outlined),
+                              label: const Text(
+                                'Revisar base de conocimiento IA',
+                              ),
+                            ),
+                          ),
                         ],
                       ],
                     ),
@@ -1453,6 +2136,7 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
+  // ignore: unused_element
   Widget _homeQuickActions({
     required bool desktop,
   }) {
@@ -1515,6 +2199,282 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
+  Widget _consultantWorkspace({required bool desktop}) {
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFFF8FBFC), Color(0xFFEAF4F6)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Expanded(
+            child: SingleChildScrollView(
+              padding: EdgeInsets.fromLTRB(
+                desktop ? 34 : 14,
+                20,
+                desktop ? 34 : 14,
+                34,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1080),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _consultantPanel(compact: !desktop),
+                      if (_consultantTurns.isNotEmpty) ...[
+                        const SizedBox(height: 14),
+                        _consultantConversationPanel(),
+                      ],
+                      const SizedBox(height: 14),
+                      _consultantComposer(compact: !desktop),
+                      if (canManageCompany) ...[
+                        const SizedBox(height: 12),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: OutlinedButton.icon(
+                            onPressed: () => Navigator.of(context).push<void>(
+                              MaterialPageRoute(
+                                builder: (_) => const KnowledgeAdminPage(),
+                              ),
+                            ),
+                            icon: const Icon(Icons.hub_outlined),
+                            label:
+                                const Text('Revisar base de conocimiento IA'),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _homeTools({required bool compact}) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 1050
+            ? 5
+            : constraints.maxWidth >= 620
+                ? 3
+                : compact
+                    ? 2
+                    : 3;
+        const spacing = 12.0;
+        final cardWidth = math.min(
+          220.0,
+          (constraints.maxWidth - (columns - 1) * spacing) / columns,
+        );
+
+        Widget toolCard({
+          required String title,
+          required String subtitle,
+          required IconData icon,
+          required Color color,
+          required VoidCallback? onTap,
+          bool selected = false,
+          String? badge,
+        }) {
+          final enabled = onTap != null;
+          return SizedBox(
+            width: cardWidth,
+            height: compact ? 142 : 150,
+            child: Material(
+              color: selected ? color : Colors.white.withValues(alpha: 0.96),
+              borderRadius: BorderRadius.circular(18),
+              child: InkWell(
+                onTap: onTap,
+                borderRadius: BorderRadius.circular(18),
+                child: Container(
+                  padding: const EdgeInsets.all(15),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(
+                      color: selected ? color : const Color(0xFFD5E5EA),
+                    ),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Color(0x1017324D),
+                        blurRadius: 16,
+                        offset: Offset(0, 7),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 39,
+                            height: 39,
+                            decoration: BoxDecoration(
+                              color: selected
+                                  ? Colors.white.withValues(alpha: 0.18)
+                                  : color.withValues(alpha: 0.11),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: Icon(
+                              icon,
+                              color: selected
+                                  ? Colors.white
+                                  : enabled
+                                      ? color
+                                      : const Color(0xFF8A99A8),
+                            ),
+                          ),
+                          const Spacer(),
+                          if (badge != null)
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: selected
+                                    ? Colors.white.withValues(alpha: 0.18)
+                                    : const Color(0xFFF0F4F6),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                badge,
+                                style: TextStyle(
+                                  color: selected
+                                      ? Colors.white
+                                      : const Color(0xFF60758A),
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const Spacer(),
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white
+                              : enabled
+                                  ? const Color(0xFF17324D)
+                                  : const Color(0xFF7A8A99),
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        subtitle,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: selected
+                              ? Colors.white70
+                              : const Color(0xFF60758A),
+                          fontSize: 11,
+                          height: 1.25,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            const Text(
+              'Herramientas de trabajo',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Color(0xFF17324D),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              alignment: WrapAlignment.center,
+              spacing: spacing,
+              runSpacing: spacing,
+              children: [
+                toolCard(
+                  title: 'Consultor',
+                  subtitle: canUseZumacConsultor
+                      ? 'Pregunta cualquier tema de tu empresa.'
+                      : 'No habilitado para esta empresa.',
+                  icon: Icons.forum_outlined,
+                  color: const Color(0xFF176B87),
+                  selected: _consultantOpen && canUseZumacConsultor,
+                  onTap: canUseZumacConsultor
+                      ? () => _activateWorkspaceTool(_toolConsultant)
+                      : null,
+                ),
+                toolCard(
+                  title: 'Creator',
+                  subtitle: canUseZumacCreator && canManageConfiguration
+                      ? 'Crear o editar la estructura de la empresa.'
+                      : 'No habilitado para este usuario.',
+                  icon: Icons.dashboard_customize_outlined,
+                  color: const Color(0xFF237A57),
+                  onTap: canUseZumacCreator && canManageConfiguration
+                      ? _chooseCreatorMode
+                      : null,
+                ),
+                toolCard(
+                  title: 'Metrics',
+                  subtitle: canUseZumacMetrics
+                      ? 'Dashboards, indicadores y análisis visual.'
+                      : 'No habilitado para esta empresa.',
+                  icon: Icons.insights_outlined,
+                  color: const Color(0xFF6E56CF),
+                  onTap: canUseZumacMetrics ? _openMetrics : null,
+                ),
+                toolCard(
+                  title: 'Alerts',
+                  subtitle: canUseZumacAlerts
+                      ? 'Vigilancia de condiciones y anomalías.'
+                      : 'No habilitado para esta empresa.',
+                  icon: Icons.notifications_active_outlined,
+                  color: const Color(0xFFC56A13),
+                  badge:
+                      openAlertEvents > 0 ? '$openAlertEvents ABIERTAS' : null,
+                  onTap: canUseZumacAlerts ? () => _openAlertsActions(0) : null,
+                ),
+                toolCard(
+                  title: 'Actions',
+                  subtitle: canUseZumacActions
+                      ? 'Tareas, aprobaciones y evidencia.'
+                      : 'No habilitado para esta empresa.',
+                  icon: Icons.bolt_outlined,
+                  color: const Color(0xFFB4425A),
+                  badge:
+                      pendingActions > 0 ? '$pendingActions PENDIENTES' : null,
+                  onTap:
+                      canUseZumacActions ? () => _openAlertsActions(1) : null,
+                ),
+              ],
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   Widget _consultantPanel({required bool compact}) {
     return Container(
       padding: EdgeInsets.all(compact ? 14 : 20),
@@ -1535,123 +2495,262 @@ class _ModulesPageState extends State<ModulesPage> {
         children: [
           Row(
             children: [
-              Container(
-                width: compact ? 38 : 44,
-                height: compact ? 38 : 44,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE2F2F5),
-                  borderRadius: BorderRadius.circular(13),
-                ),
-                child: const Icon(
-                  Icons.auto_awesome_outlined,
-                  color: Color(0xFF176B87),
-                ),
-              ),
-              const SizedBox(width: 12),
               const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Consultor Zumac',
-                      style: TextStyle(
-                        color: Color(0xFF17324D),
-                        fontSize: 19,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    Text(
-                      'Pregunta, compara fechas y cruza información entre formatos.',
-                      style: TextStyle(
-                        color: Color(0xFF60758A),
-                        fontSize: 12.5,
-                      ),
-                    ),
-                  ],
+                child: Text(
+                  'Consulta el conocimiento de tu empresa, compara datos y haz preguntas de seguimiento.',
+                  style: TextStyle(
+                    color: Color(0xFF60758A),
+                    fontSize: 12.5,
+                    height: 1.4,
+                  ),
                 ),
               ),
-              if (_consultantResult != null)
-                IconButton(
-                  tooltip: 'Nueva consulta',
-                  onPressed: _clearConsultantAnswer,
-                  icon: const Icon(Icons.close),
-                ),
             ],
           ),
-          const SizedBox(height: 14),
-          TextField(
-            controller: _consultantController,
-            enabled: !_consultantBusy,
-            textInputAction: TextInputAction.search,
-            onSubmitted: (_) => _askConsultant(),
-            decoration: InputDecoration(
-              hintText: compact
-                  ? 'Ej.: ¿Hay pH mayores a 6 hoy?'
-                  : 'Escribe una pregunta, por ejemplo: ¿Hay pH mayores a 6 hoy?',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _consultantBusy
-                  ? const Padding(
-                      padding: EdgeInsets.all(13),
-                      child: SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      ),
-                    )
-                  : IconButton(
-                      tooltip: 'Consultar',
-                      onPressed: _askConsultant,
-                      icon: const Icon(Icons.arrow_forward),
-                    ),
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: _consultantBusy
+                  ? null
+                  : () => setState(() {
+                        _clearDesktopContentCache();
+                        _consultantSuggestionsExpanded =
+                            !_consultantSuggestionsExpanded;
+                      }),
+              icon: Icon(
+                _consultantSuggestionsExpanded
+                    ? Icons.expand_less
+                    : Icons.lightbulb_outline,
+                size: 18,
+              ),
+              label: Text(
+                _consultantSuggestionsExpanded
+                    ? 'Ocultar sugerencias'
+                    : 'Sugerencias',
+              ),
             ),
           ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
+          if (_consultantSuggestionsExpanded)
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                ActionChip(
+                  avatar: const Icon(Icons.account_tree_outlined, size: 17),
+                  label: const Text('Relaciones del drenaje'),
+                  onPressed: _consultantBusy
+                      ? null
+                      : () {
+                          _consultantController.text =
+                              '¿Qué registros están relacionados con drenaje?';
+                          _askConsultant();
+                        },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.science_outlined, size: 17),
+                  label: const Text('pH mayores a 6 hoy'),
+                  onPressed: _consultantBusy
+                      ? null
+                      : () {
+                          _consultantController.text =
+                              '¿Hay pH mayores a 6 hoy?';
+                          _askConsultant();
+                        },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.how_to_reg_outlined, size: 17),
+                  label: const Text('Asistencia y salidas de hoy'),
+                  onPressed: _consultantBusy
+                      ? null
+                      : () {
+                          _consultantController.text =
+                              '¿Cuántas personas tienen asistencia hoy y cuántas ya salieron?';
+                          _askConsultant();
+                        },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.compare_arrows_outlined, size: 17),
+                  label: const Text('Tareo sin asistencia'),
+                  onPressed: _consultantBusy
+                      ? null
+                      : () {
+                          _consultantController.text =
+                              '¿Qué personas tienen tareo hoy pero no asistencia?';
+                          _askConsultant();
+                        },
+                ),
+                ActionChip(
+                  avatar: const Icon(Icons.pest_control_outlined, size: 17),
+                  label: const Text('Plagas, lotes y productos'),
+                  onPressed: _consultantBusy
+                      ? null
+                      : () {
+                          _consultantController.text =
+                              '¿Qué plagas se encontraron, en qué lotes y qué productos con stock sirven para combatirlas?';
+                          _askConsultant();
+                        },
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _consultantConversationPanel() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var index = 0; index < _consultantTurns.length; index++) ...[
+          Align(
+            alignment: Alignment.centerRight,
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 760),
+              margin: const EdgeInsets.only(left: 38),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 11),
+              decoration: BoxDecoration(
+                color: const Color(0xFF176B87),
+                borderRadius: BorderRadius.circular(17).copyWith(
+                  bottomRight: const Radius.circular(5),
+                ),
+              ),
+              child: Text(
+                _consultantTurns[index].question,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 14.5,
+                  height: 1.3,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          _consultantAnswerPanel(_consultantTurns[index].result),
+          if (index != _consultantTurns.length - 1) const SizedBox(height: 16),
+        ],
+      ],
+    );
+  }
+
+  Widget _consultantComposer({required bool compact}) {
+    return Container(
+      key: _consultantComposerKey,
+      padding: EdgeInsets.all(compact ? 11 : 14),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: 0.98),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: const Color(0xFFBFDCE4)),
+        boxShadow: const [
+          BoxShadow(
+            color: Color(0x1017324D),
+            blurRadius: 16,
+            offset: Offset(0, 7),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (_consultantSpeechListening) ...[
+            const Row(
+              children: [
+                Icon(Icons.graphic_eq_rounded,
+                    size: 18, color: Color(0xFFB4425A)),
+                SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    'Escuchando… habla con claridad y Zumac escribirá la pregunta.',
+                    style: TextStyle(
+                      color: Color(0xFFB4425A),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              ActionChip(
-                avatar: const Icon(Icons.science_outlined, size: 17),
-                label: const Text('pH mayores a 6 hoy'),
-                onPressed: _consultantBusy
-                    ? null
-                    : () {
-                        _consultantController.text = '¿Hay pH mayores a 6 hoy?';
-                        _askConsultant();
-                      },
+              Expanded(
+                child: TextField(
+                  controller: _consultantController,
+                  focusNode: _consultantFocusNode,
+                  enabled: !_consultantBusy,
+                  minLines: 1,
+                  maxLines: compact ? 4 : 5,
+                  textInputAction: TextInputAction.send,
+                  onChanged: (_) => setState(_clearDesktopContentCache),
+                  onSubmitted: (_) => _askConsultant(),
+                  decoration: const InputDecoration(
+                    hintText: 'Consulta',
+                    prefixIcon: Icon(Icons.chat_bubble_outline),
+                    border: OutlineInputBorder(),
+                    isDense: true,
+                  ),
+                ),
               ),
-              ActionChip(
-                avatar: const Icon(Icons.how_to_reg_outlined, size: 17),
-                label: const Text('Asistencia y salidas de hoy'),
-                onPressed: _consultantBusy
-                    ? null
-                    : () {
-                        _consultantController.text =
-                            '¿Cuántas personas tienen asistencia hoy y cuántas ya salieron?';
-                        _askConsultant();
-                      },
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: IconButton.filledTonal(
+                  tooltip: _consultantSpeechListening
+                      ? 'Detener dictado'
+                      : 'Dictar pregunta',
+                  style: IconButton.styleFrom(
+                    backgroundColor: _consultantSpeechListening
+                        ? const Color(0xFFFFE8EC)
+                        : const Color(0xFFE2F2F5),
+                    foregroundColor: _consultantSpeechListening
+                        ? const Color(0xFFB4425A)
+                        : const Color(0xFF176B87),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: _consultantBusy || _consultantSpeechInitializing
+                      ? null
+                      : _toggleConsultantSpeech,
+                  icon: _consultantSpeechInitializing
+                      ? const SizedBox.square(
+                          dimension: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Icon(
+                          _consultantSpeechListening
+                              ? Icons.stop_rounded
+                              : Icons.mic_none_rounded,
+                        ),
+                ),
               ),
-              ActionChip(
-                avatar: const Icon(Icons.compare_arrows_outlined, size: 17),
-                label: const Text('Tareo sin asistencia'),
-                onPressed: _consultantBusy
-                    ? null
-                    : () {
-                        _consultantController.text =
-                            '¿Qué personas tienen tareo hoy pero no asistencia?';
-                        _askConsultant();
-                      },
-              ),
-              ActionChip(
-                avatar: const Icon(Icons.pest_control_outlined, size: 17),
-                label: const Text('Plagas, lotes y productos'),
-                onPressed: _consultantBusy
-                    ? null
-                    : () {
-                        _consultantController.text =
-                            '¿Qué plagas se encontraron, en qué lotes y qué productos con stock sirven para combatirlas?';
-                        _askConsultant();
-                      },
+              const SizedBox(width: 8),
+              SizedBox(
+                width: 48,
+                height: 48,
+                child: FilledButton(
+                  style: FilledButton.styleFrom(
+                    padding: EdgeInsets.zero,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                  ),
+                  onPressed: _consultantBusy ? null : _askConsultant,
+                  child: _consultantBusy
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: Colors.white,
+                          ),
+                        )
+                      : const Icon(Icons.send_rounded),
+                ),
               ),
             ],
           ),
@@ -1660,8 +2759,7 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
-  Widget _consultantAnswerPanel() {
-    final result = _consultantResult!;
+  Widget _consultantAnswerPanel(ZumacConsultantResult result) {
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -1693,268 +2791,213 @@ class _ModulesPageState extends State<ModulesPage> {
               ),
             ],
           ),
+          if (result.citations.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            const Text(
+              'Fuentes consultadas',
+              style: TextStyle(
+                color: Color(0xFF17324D),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 7),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                for (var index = 0; index < result.citations.length; index++)
+                  Tooltip(
+                    message: result.citations[index].status == 'GENERADA_IA'
+                        ? 'Contenido sugerido por IA pendiente de aprobación administrativa'
+                        : 'Contenido aprobado',
+                    child: Chip(
+                      avatar: Icon(
+                        result.citations[index].status == 'GENERADA_IA'
+                            ? Icons.auto_awesome_outlined
+                            : Icons.verified_outlined,
+                        size: 16,
+                        color: result.citations[index].status == 'GENERADA_IA'
+                            ? const Color(0xFF9A6700)
+                            : const Color(0xFF237A57),
+                      ),
+                      label: Text(
+                        '[${index + 1}] ${result.citations[index].title} · '
+                        '${result.citations[index].sourceName}',
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (result.relatedConcepts.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            const Text(
+              'Conocimiento relacionado',
+              style: TextStyle(
+                color: Color(0xFF17324D),
+                fontSize: 12.5,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                for (final concept in result.relatedConcepts.take(10))
+                  ActionChip(
+                    label: Text(concept),
+                    onPressed: _consultantBusy
+                        ? null
+                        : () {
+                            _consultantController.text =
+                                '¿Cómo se relaciona $concept con lo anterior?';
+                            _askConsultant();
+                          },
+                  ),
+              ],
+            ),
+          ],
+          if (result.detailLines.isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: .72),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFD2E5EA)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  for (final line in result.detailLines)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Text(
+                        line,
+                        style: const TextStyle(
+                          color: Color(0xFF28465E),
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ],
+          if (result.options.isNotEmpty) ...[
+            const SizedBox(height: 13),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final option in result.options)
+                  ActionChip(
+                    avatar: Icon(
+                      option.kind == ZumacConsultantOptionKind.source
+                          ? Icons.assignment_outlined
+                          : Icons.calendar_month_outlined,
+                      size: 17,
+                    ),
+                    label: Text(option.label),
+                    onPressed: _consultantBusy
+                        ? null
+                        : () => _askConsultant(
+                              questionOverride: option.query,
+                              displayQuestion: option.label,
+                              selectedSourceTable: option.sourceTable,
+                            ),
+                  ),
+              ],
+            ),
+          ],
           if (result.reportTables.isNotEmpty) ...[
-            const SizedBox(height: 18),
-            for (final report in result.reportTables) ...[
-              _consultantReportTable(report),
-              const SizedBox(height: 12),
-            ],
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final report in result.reportTables)
+                  OutlinedButton.icon(
+                    onPressed: report.canOpen
+                        ? () => _openConsultantReport(report)
+                        : null,
+                    icon: const Icon(Icons.open_in_new, size: 17),
+                    label: Text(
+                      result.reportTables.length == 1
+                          ? 'Ver registros'
+                          : 'Ver registros · ${report.title}',
+                    ),
+                  ),
+              ],
+            ),
+          ],
+          if (result.relatedTables.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'Quizá te interesa',
+              style: TextStyle(
+                color: Color(0xFF17324D),
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            const Text(
+              'Estas son tablas de referencia relacionadas. Ábrelas solo si necesitas consultar su catálogo.',
+              style: TextStyle(
+                color: Color(0xFF60758A),
+                fontSize: 12,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                for (final related in result.relatedTables)
+                  ActionChip(
+                    avatar: const Icon(Icons.link_outlined, size: 17),
+                    label: Text(related.title),
+                    onPressed: related.canOpen
+                        ? () => _openConsultantRelatedTable(related)
+                        : null,
+                  ),
+              ],
+            ),
+          ],
+          if ((result.followUpPrompt ?? '').isNotEmpty) ...[
+            const SizedBox(height: 14),
+            Text(
+              result.followUpPrompt!,
+              style: const TextStyle(
+                color: Color(0xFF5F935D),
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                fontStyle: FontStyle.italic,
+                height: 1.35,
+              ),
+            ),
           ],
         ],
       ),
     );
   }
 
+  // ignore: unused_element
   Widget _consultantReportTable(ZumacConsultantReportTable report) {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFD7E6EB)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 10, 10),
-            child: Row(
-              children: [
-                const Icon(
-                  Icons.table_chart_outlined,
-                  size: 20,
-                  color: Color(0xFF176B87),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        report.title,
-                        style: const TextStyle(
-                          color: Color(0xFF17324D),
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      Text(
-                        '${report.totalRows} ${report.totalRows == 1 ? 'registro' : 'registros'}',
-                        style: const TextStyle(
-                          color: Color(0xFF60758A),
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                if (report.canOpen)
-                  TextButton.icon(
-                    onPressed: () => _openConsultantReport(report),
-                    icon: const Icon(Icons.open_in_new, size: 17),
-                    label: const Text('Abrir registros'),
-                  ),
-              ],
-            ),
-          ),
-          if (report.columns.isEmpty)
-            const Padding(
-              padding: EdgeInsets.fromLTRB(16, 4, 16, 16),
-              child: Text(
-                'Los registros encontrados solo contienen identificadores técnicos.',
-                style: TextStyle(color: Color(0xFF60758A)),
-              ),
-            )
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.only(bottom: 4),
-              child: DataTable(
-                headingRowColor: WidgetStateProperty.all(
-                  const Color(0xFFF1F7F9),
-                ),
-                headingTextStyle: const TextStyle(
-                  color: Color(0xFF17324D),
-                  fontWeight: FontWeight.w800,
-                  fontSize: 12.5,
-                ),
-                dataTextStyle: const TextStyle(
-                  color: Color(0xFF304A60),
-                  fontSize: 12.5,
-                ),
-                columnSpacing: 24,
-                horizontalMargin: 16,
-                columns: [
-                  for (final column in report.columns)
-                    DataColumn(label: Text(column.label)),
-                ],
-                rows: [
-                  for (final row in report.rows)
-                    DataRow(
-                      cells: [
-                        for (final column in report.columns)
-                          DataCell(
-                            ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 260),
-                              child: SelectableText(
-                                row[column.key] ?? '—',
-                                maxLines: 3,
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-                ],
-              ),
-            ),
-          if (report.totalRows > report.rows.length)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
-              child: Text(
-                'Mostrando ${report.rows.length} de ${report.totalRows} registros. Puedes precisar la fecha, lote, persona u otro campo para acotar la consulta.',
-                style: const TextStyle(
-                  color: Color(0xFF60758A),
-                  fontSize: 12,
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _creatorHomePanel({required bool compact}) {
-    Widget creatorCard({
-      required IconData icon,
-      required String title,
-      required String subtitle,
-      required CreatorEntryMode mode,
-      required bool filled,
-    }) {
-      return SizedBox(
-        width: compact ? double.infinity : 310,
-        height: compact ? 102 : 96,
-        child: Material(
-          color: filled ? const Color(0xFF176B87) : Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: () => _openConfigurationAdmin(mode: mode),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: filled
-                      ? const Color(0xFF176B87)
-                      : const Color(0xFFD4E3E8),
-                ),
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    icon,
-                    color: filled ? Colors.white : const Color(0xFF176B87),
-                    size: 28,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: TextStyle(
-                            color:
-                                filled ? Colors.white : const Color(0xFF17324D),
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                        Text(
-                          subtitle,
-                          style: TextStyle(
-                            color: filled
-                                ? Colors.white70
-                                : const Color(0xFF60758A),
-                            fontSize: 11.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Icon(
-                    Icons.chevron_right,
-                    color: filled ? Colors.white70 : const Color(0xFF60758A),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Zumac Creator',
-          style: TextStyle(
-            color: Color(0xFF17324D),
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 9),
-        if (compact)
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              creatorCard(
-                icon: Icons.edit_note_outlined,
-                title: 'Editar objetos',
-                subtitle: 'Revisar, editar u ocultar objetos existentes',
-                mode: CreatorEntryMode.edit,
-                filled: false,
-              ),
-              const SizedBox(height: 9),
-              creatorCard(
-                icon: Icons.add_circle_outline,
-                title: '+ Objetos',
-                subtitle: 'Crear secciones, módulos y formatos',
-                mode: CreatorEntryMode.create,
-                filled: true,
-              ),
-            ],
-          )
-        else
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [
-              creatorCard(
-                icon: Icons.edit_note_outlined,
-                title: 'Editar objetos',
-                subtitle: 'Revisar, editar u ocultar objetos existentes',
-                mode: CreatorEntryMode.edit,
-                filled: false,
-              ),
-              creatorCard(
-                icon: Icons.add_circle_outline,
-                title: '+ Objetos',
-                subtitle: 'Crear secciones, módulos y formatos',
-                mode: CreatorEntryMode.create,
-                filled: true,
-              ),
-            ],
-          ),
-      ],
+    return _ConsultantReportTableCard(
+      key: ValueKey('consultant-report-${report.tableName}'),
+      report: report,
+      onOpen: report.canOpen ? () => _openConsultantReport(report) : null,
     );
   }
 
   Widget _welcomeHomePanel({
     required String firstName,
     required bool wide,
-    required double logoSize,
     required bool desktop,
   }) {
     final message = Column(
@@ -1974,7 +3017,7 @@ class _ModulesPageState extends State<ModulesPage> {
         ),
         const SizedBox(height: 6),
         Text(
-          'Todo está listo para que sigas gestionando tu trabajo en Zumac.',
+          'Tus herramientas y datos, listos para convertir trabajo en decisiones.',
           textAlign: TextAlign.center,
           style: TextStyle(
             color: const Color(0xFF17324D),
@@ -1985,49 +3028,25 @@ class _ModulesPageState extends State<ModulesPage> {
         ),
       ],
     );
-    final logo = Container(
-      width: logoSize,
-      height: logoSize,
-      padding: EdgeInsets.all(wide ? 15 : 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.96),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFDCE7EC)),
-        boxShadow: const [
-          BoxShadow(
-            color: Color(0x1517324D),
-            blurRadius: 24,
-            offset: Offset(0, 10),
-          ),
-        ],
-      ),
-      child: Image.asset(
-        'assets/images/logo_bienvenida.png',
-        fit: BoxFit.contain,
-        filterQuality: FilterQuality.high,
-        semanticLabel: 'Logo de Zumac',
-      ),
-    );
     return Container(
-      padding: EdgeInsets.all(wide ? 24 : 18),
+      padding: EdgeInsets.symmetric(
+        horizontal: wide ? 22 : 16,
+        vertical: wide ? 18 : 14,
+      ),
       decoration: BoxDecoration(
         color: Colors.white.withValues(alpha: 0.56),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: const Color(0x80D5E5EA)),
       ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          logo,
-          SizedBox(height: wide ? 20 : 16),
-          message,
-        ],
-      ),
+      child: message,
     );
   }
 
   String _desktopContentSignature() {
     if (busy) return 'busy';
+    if (_activeWorkspaceTool != _toolHome) {
+      return 'tool:$_activeWorkspaceTool';
+    }
     if (desktopSelectedModule != null && desktopSelectedFormat != null) {
       return 'format:${desktopSelectedModule!['id']}:${desktopSelectedFormat!['id']}:'
           '${_consultantTableName ?? ''}:${_consultantRecordField ?? ''}:'
@@ -2043,10 +3062,13 @@ class _ModulesPageState extends State<ModulesPage> {
     if (desktopSelectedSection != null && desktopSelectedDynamicView != null) {
       return 'dynamic:${desktopSelectedSection!['id']}:${desktopSelectedDynamicView!['id']}';
     }
-    if (desktopSelectedSection != null)
+    if (desktopSelectedSection != null) {
       return 'section:${desktopSelectedSection!['id']}';
-    final result = _consultantResult;
+    }
+    final result =
+        _consultantTurns.isEmpty ? null : _consultantTurns.last.result;
     return 'home:${_consultantBusy ? 1 : 0}:'
+        '${_consultantOpen ? 1 : 0}:${_consultantTurns.length}:'
         '${result == null ? 0 : Object.hash(result.question, result.answer, result.findings.length)}';
   }
 
@@ -2063,6 +3085,9 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Widget _desktopSelectedContentRaw() {
     if (busy) return const Center(child: CircularProgressIndicator());
+
+    final toolContent = _workspaceToolContent(desktop: true);
+    if (toolContent != null) return toolContent;
 
     final module = desktopSelectedModule;
     final format = desktopSelectedFormat;
@@ -2268,6 +3293,7 @@ class _ModulesPageState extends State<ModulesPage> {
   Widget _desktopSidebar() {
     final visibleSections = sections
         .where((section) => _canSection(section['id']?.toString() ?? ''))
+        .where((section) => _sectionKind(section) != 'REPORTES')
         .toList();
     final viewportWidth = MediaQuery.sizeOf(context).width;
     final openWidth = (viewportWidth * .19).clamp(272.0, 340.0);
@@ -2642,16 +3668,6 @@ class _ModulesPageState extends State<ModulesPage> {
                           icon:
                               const Icon(Icons.storage, color: Colors.white70),
                         ),
-                        IconButton(
-                          tooltip: 'Reportes',
-                          onPressed: () => _selectDesktopSection({
-                            'id': 'reportes',
-                            'nombre': 'Reportes',
-                            'icono': 'bar_chart'
-                          }),
-                          icon: const Icon(Icons.bar_chart,
-                              color: Colors.white70),
-                        ),
                       ],
                     ),
             ),
@@ -2779,6 +3795,9 @@ class _ModulesPageState extends State<ModulesPage> {
   Widget _mobileSelectedContent() {
     if (busy) return const Center(child: CircularProgressIndicator());
 
+    final toolContent = _workspaceToolContent(desktop: false);
+    if (toolContent != null) return toolContent;
+
     final module = desktopSelectedModule;
     final format = desktopSelectedFormat;
     if (module != null && format != null) {
@@ -2836,26 +3855,65 @@ class _ModulesPageState extends State<ModulesPage> {
     if (section != null) {
       final id = section['id']?.toString() ?? '';
       final kind = _sectionKind(section);
-      if (kind == 'REGISTROS_LOCALES')
+      if (kind == 'REGISTROS_LOCALES') {
         return LocalRecordsPage(embedded: true, onChanged: loadLocal);
-      if (kind == 'REPORTES')
+      }
+      if (kind == 'REPORTES') {
         return const ReportsPage(embedded: true, showRail: false);
-      if (_sectionUsesDynamicViews(section))
+      }
+      if (_sectionUsesDynamicViews(section)) {
         return DynamicViewsPage(
             section: section,
             view: desktopSelectedDynamicView,
             embedded: true,
             onPendingChanged: loadLocal);
-      if (!_sectionHasFormatModules(id))
+      }
+      if (!_sectionHasFormatModules(id)) {
         return GenericSectionPage(section: section, embedded: true);
+      }
     }
 
     return _logoHomePanel();
   }
 
+  Widget? _workspaceToolContent({required bool desktop}) {
+    switch (_activeWorkspaceTool) {
+      case _toolConsultant:
+        return _consultantWorkspace(desktop: desktop);
+      case _toolCreatorCreate:
+      case _toolCreatorEdit:
+        return ConfigurationAdminPage(
+          key: ValueKey(_activeWorkspaceTool),
+          embedded: true,
+          initialMode: _activeWorkspaceTool == _toolCreatorEdit
+              ? CreatorEntryMode.edit
+              : CreatorEntryMode.create,
+          onConfigurationChanged: _refreshAfterCreatorChange,
+        );
+      case _toolMetrics:
+        return MetricsPage(
+          key: const ValueKey('workspace-metrics'),
+          embedded: true,
+          initialSourceTable: _metricsInitialSourceTable,
+        );
+      case _toolAlerts:
+      case _toolActions:
+        return AlertsActionsPage(
+          key: ValueKey(_activeWorkspaceTool),
+          embedded: true,
+          initialTab: _activeWorkspaceTool == _toolAlerts ? 0 : 1,
+          onNavigate: _handleAlertNavigation,
+        );
+      default:
+        return null;
+    }
+  }
+
   Widget _mobileMenuItems() {
-    final visibleSections =
-        sections.where((s) => _canSection(s['id']?.toString() ?? '')).toList();
+    final visibleSections = sections
+        .where((s) => _canSection(s['id']?.toString() ?? ''))
+        .where((s) => _sectionKind(s) != 'REPORTES')
+        .toList();
 
     if (visibleSections.isEmpty && _canSection('modulos')) {
       visibleSections.add({
@@ -3058,6 +4116,7 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
+  // ignore: unused_element
   Widget _mobileModulesList() {
     return ListView.separated(
       padding: const EdgeInsets.all(14),
@@ -3084,13 +4143,26 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _desktopContentActions() {
-    return SizedBox(
-      height: 54,
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 54, maxHeight: 54),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: Row(
+          mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            if (_usesImmersiveWorkspace)
+              IconButton(
+                onPressed: _openHomeFromBreadcrumb,
+                icon: const Icon(Icons.home_outlined),
+                tooltip: 'Inicio',
+              ),
+            if (_canClearConsultant)
+              TextButton.icon(
+                onPressed: _consultantBusy ? null : _clearConsultantAnswer,
+                icon: const Icon(Icons.cleaning_services_outlined, size: 18),
+                label: const Text('Limpiar'),
+              ),
             IconButton(
               onPressed: busy ? null : download,
               icon: const Icon(Icons.refresh),
@@ -3144,6 +4216,33 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
+  Widget _desktopTopBar({required bool isHome}) {
+    return Container(
+      height: 54,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFD9E5EA))),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: isHome
+                ? const SizedBox.shrink()
+                : Padding(
+                    padding: const EdgeInsets.only(left: 14),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: _workspaceTitle(compact: true),
+                    ),
+                  ),
+          ),
+          _desktopContentActions(),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final desktopLayout = isWideDesktopLayout(context);
@@ -3160,8 +4259,18 @@ class _ModulesPageState extends State<ModulesPage> {
             : _mobileSelectedContent();
 
     final appBar = AppBar(
-      title: desktopLayout ? const SizedBox.shrink() : const SizedBox.shrink(),
+      titleSpacing: 0,
+      title: Text(
+        isHome ? 'ZUMAC' : _mobileAppBarTitle(),
+        style: const TextStyle(fontWeight: FontWeight.w800),
+      ),
       actions: [
+        if (_usesImmersiveWorkspace)
+          IconButton(
+            onPressed: _openHomeFromBreadcrumb,
+            icon: const Icon(Icons.home_outlined),
+            tooltip: 'Inicio',
+          ),
         IconButton(
             onPressed: busy ? null : download,
             icon: const Icon(Icons.refresh),
@@ -3207,15 +4316,15 @@ class _ModulesPageState extends State<ModulesPage> {
         key: scaffoldKey,
         body: Row(
           children: [
-            ValueListenableBuilder<bool>(
-              valueListenable: _desktopSidebarOpenNotifier,
-              builder: (context, _, __) => _desktopSidebarCached(),
-            ),
+            if (!_usesImmersiveWorkspace)
+              ValueListenableBuilder<bool>(
+                valueListenable: _desktopSidebarOpenNotifier,
+                builder: (context, _, __) => _desktopSidebarCached(),
+              ),
             Expanded(
               child: Column(
                 children: [
-                  if (!isHome) _desktopContentActions(),
-                  _breadcrumbBar(),
+                  _desktopTopBar(isHome: isHome),
                   Expanded(
                     child: RepaintBoundary(
                       child: _animatedContent(content),
@@ -3231,44 +4340,45 @@ class _ModulesPageState extends State<ModulesPage> {
 
     final mobileScaffold = Scaffold(
       key: scaffoldKey,
-      drawer: Drawer(
-        child: SafeArea(
-          child: Column(
-            children: [
-              ListTile(
-                leading: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image.asset(
-                    'assets/images/logo_app.png',
-                    width: 38,
-                    height: 38,
-                    cacheWidth: 114,
-                    cacheHeight: 114,
-                    fit: BoxFit.cover,
-                    filterQuality: FilterQuality.high,
-                  ),
-                ),
-                title: const Text('ZUMAC',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text(
-                  profileName.isEmpty
-                      ? 'Menú principal'
-                      : 'Menú principal\n$profileName',
+      drawer: _usesImmersiveWorkspace
+          ? null
+          : Drawer(
+              child: SafeArea(
+                child: Column(
+                  children: [
+                    ListTile(
+                      leading: ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.asset(
+                          'assets/images/logo_app.png',
+                          width: 38,
+                          height: 38,
+                          cacheWidth: 114,
+                          cacheHeight: 114,
+                          fit: BoxFit.cover,
+                          filterQuality: FilterQuality.high,
+                        ),
+                      ),
+                      title: const Text('ZUMAC',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
+                      subtitle: Text(
+                        profileName.isEmpty
+                            ? 'Menú principal'
+                            : 'Menú principal\n$profileName',
+                      ),
+                    ),
+                    const Divider(),
+                    Expanded(child: _mobileMenuItems()),
+                    const Divider(),
+                    _drawerItem(Icons.logout, 'Salir', logout),
+                  ],
                 ),
               ),
-              const Divider(),
-              Expanded(child: _mobileMenuItems()),
-              const Divider(),
-              _drawerItem(Icons.logout, 'Salir', logout),
-            ],
-          ),
-        ),
-      ),
-      appBar: isHome ? null : appBar,
+            ),
+      appBar: appBar,
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _breadcrumbBar(),
           _mobileTitleBar(),
           Expanded(child: _animatedContent(content)),
         ],
