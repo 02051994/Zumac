@@ -289,6 +289,7 @@ class ZumacConsultantService {
     var intent = _intentFor(normalized);
     final threshold = _numericThreshold(normalized);
     final period = _periodFor(normalized);
+    final requestedLots = _requestedLots(normalized);
 
     final fields = await _safeLocalRows('local_form_fields');
     final formats = await _safeLocalRows('local_formats');
@@ -451,6 +452,10 @@ class ZumacConsultantService {
                     r'PRODUCT|INSUMO|FITOSANIT|LOTE|CATALOG|MATRIZ|MAESTR',
                   ).hasMatch(context);
           if (!isUndatedCrossReference) continue;
+        }
+        if (requestedLots.isNotEmpty &&
+            !_matchesRequestedLot(row, requestedLots)) {
+          continue;
         }
         periodRows.add(row);
 
@@ -734,6 +739,42 @@ class ZumacConsultantService {
   }
 
   num? _numericThreshold(String question) => _comparisonFor(question)?.$2;
+
+  /// Extrae entidades solo de la clausula que sigue a "lote(s)"; evita tomar
+  /// el limite de pH o los componentes de la fecha como identificadores.
+  Set<String> _requestedLots(String question) {
+    final clause = RegExp(
+      r'\bLOTES?\s+(.+?)(?=\s+(?:TUVO|TUVIERON|TIENE|TIENEN|ESTUVO|ESTUVIERON|FUERON|CON|CUYO|CUYOS|QUE|MAYOR|MENOR|EL\s+DIA|EN\s+LA\s+FECHA|DEL?\s+\d)|[?.,;]|$)',
+    ).firstMatch(question)?.group(1);
+    if (clause == null || clause.trim().isEmpty) return const <String>{};
+    final values = RegExp(r'[A-Z0-9][A-Z0-9_-]*')
+        .allMatches(clause)
+        .map((match) => match.group(0)!)
+        .where((value) => !const {'Y', 'E', 'O', 'U'}.contains(value))
+        .map(_normalizeLotValue)
+        .where((value) => value.isNotEmpty)
+        .toSet();
+    return values.length <= 20 ? values : const <String>{};
+  }
+
+  bool _matchesRequestedLot(
+    Map<String, dynamic> row,
+    Set<String> requestedLots,
+  ) {
+    for (final entry in row.entries) {
+      final field = _normalize(entry.key).replaceAll(' ', '_');
+      if (!RegExp(r'(^LOTE$|^LOTE_|_LOTE$|LOTE_ID|ID_LOTE)').hasMatch(field)) {
+        continue;
+      }
+      final value = _normalizeLotValue(entry.value?.toString() ?? '');
+      if (value.isNotEmpty && requestedLots.contains(value)) return true;
+    }
+    return false;
+  }
+
+  String _normalizeLotValue(String value) => _normalize(value)
+      .replaceFirst(RegExp(r'^LOTE[\s_-]*'), '')
+      .replaceAll(RegExp(r'[^A-Z0-9]+'), '');
 
   (String, num)? _comparisonFor(String question) {
     final patterns = <(String, RegExp)>[

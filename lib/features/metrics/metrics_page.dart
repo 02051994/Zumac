@@ -63,7 +63,9 @@ class _MetricsPageState extends State<MetricsPage> {
   int _editorRevision = 0;
   bool _filterEditorOpen = false;
   bool _addingDashboardFilter = false;
+  bool _reorderingDashboards = false;
   String? _resizingWidgetId;
+  String? _movingWidgetId;
   final Map<String, Size> _liveWidgetSizes = {};
   final Map<String, Offset> _liveWidgetPositions = {};
   Offset? _geometryGestureOrigin;
@@ -373,6 +375,7 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _reorderDashboards(int oldIndex, int newIndex) async {
+    if (_reorderingDashboards || oldIndex == newIndex) return;
     final original =
         _dashboards.map((row) => Map<String, dynamic>.from(row)).toList();
     if (newIndex > oldIndex) newIndex--;
@@ -406,17 +409,35 @@ class _MetricsPageState extends State<MetricsPage> {
       if (mounted) setState(() => _dashboards = original);
       return;
     }
+    if (mounted) setState(() => _reorderingDashboards = true);
     try {
-      await _repository.reorderDashboards(
+      final saved = await _repository.reorderDashboards(
         reordered.map((dashboard) => '${dashboard['id']}').toList(),
       );
-      await _load(selectDashboard: _dashboardId);
+      if (!mounted) return;
+      final savedById = {
+        for (final dashboard in saved) '${dashboard['id']}': dashboard,
+      };
+      final confirmed = reordered.map((dashboard) {
+        final server = savedById['${dashboard['id']}'];
+        return server == null
+            ? dashboard
+            : <String, dynamic>{...dashboard, ...server};
+      }).toList()
+        ..sort((a, b) => ((a['orden'] as num?)?.toInt() ?? 0)
+            .compareTo((b['orden'] as num?)?.toInt() ?? 0));
+      setState(() => _dashboards = confirmed);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Orden de dashboards guardado.')),
+      );
     } catch (error) {
       if (!mounted) return;
       setState(() => _dashboards = original);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo guardar el orden: $error')),
       );
+    } finally {
+      if (mounted) setState(() => _reorderingDashboards = false);
     }
   }
 
@@ -546,31 +567,15 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
-  /// Mantiene intacta la geometría del dashboard cuando aparece el editor.
-  /// El panel ocupa espacio real, mientras el lienzo completo se reduce de
-  /// forma proporcional: ninguna coordenada se recalcula ni se superpone.
+  /// El panel ocupa espacio real y el lienzo usa todo el ancho y alto restante.
+  /// Mientras el panel esta abierto, las tarjetas fluyen sin alterar la
+  /// geometria libre que el usuario guardo para la vista normal.
   Widget _dashboardViewport({required bool panelOpen}) {
-    if (!panelOpen) return _dashboardCanvas(desktop: true);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
-          return _dashboardCanvas(desktop: true);
-        }
-        const removedWidth = 431.0;
-        final designWidth = constraints.maxWidth + removedWidth;
-        final scale = constraints.maxWidth / designWidth;
-        return ClipRect(
-          child: Transform.scale(
-            scale: scale,
-            alignment: Alignment.topLeft,
-            child: SizedBox(
-              width: designWidth,
-              height: constraints.maxHeight / scale,
-              child: _dashboardCanvas(desktop: true),
-            ),
-          ),
-        );
-      },
+    return SizedBox.expand(
+      child: _dashboardCanvas(
+        desktop: true,
+        fitAvailableWidth: panelOpen,
+      ),
     );
   }
 
@@ -696,7 +701,10 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
-  Widget _dashboardCanvas({required bool desktop}) {
+  Widget _dashboardCanvas({
+    required bool desktop,
+    bool fitAvailableWidth = false,
+  }) {
     if (_dashboards.isEmpty) {
       return _MetricsEmpty(
         icon: Icons.dashboard_customize_outlined,
@@ -863,7 +871,7 @@ class _MetricsPageState extends State<MetricsPage> {
                     const gap = 14.0;
                     final cardWidth = (width - gap * (columns - 1)) / columns;
                     return SliverToBoxAdapter(
-                      child: desktop
+                      child: desktop && !fitAvailableWidth
                           ? _desktopWidgetCanvas(
                               width: width,
                               columns: columns,
@@ -888,12 +896,16 @@ class _MetricsPageState extends State<MetricsPage> {
                                 final config = _map(widget['configuracion']);
                                 final defaultWidth =
                                     cardWidth * span + gap * (span - 1);
-                                final persistedWidth =
-                                    (config['pixel_width'] as num?)?.toDouble();
+                                final persistedWidth = fitAvailableWidth
+                                    ? null
+                                    : (config['pixel_width'] as num?)
+                                        ?.toDouble();
                                 final persistedHeight =
                                     (config['pixel_height'] as num?)
                                         ?.toDouble();
-                                final liveSize = _liveWidgetSizes[widgetId];
+                                final liveSize = fitAvailableWidth
+                                    ? null
+                                    : _liveWidgetSizes[widgetId];
                                 final minimumWidth = math.min(260.0, width);
                                 final sizedWidth = (liveSize?.width ??
                                         persistedWidth ??
@@ -1005,7 +1017,8 @@ class _MetricsPageState extends State<MetricsPage> {
           final widget = item.widget;
           final rect = item.rect;
           final widgetId = widget['id']?.toString() ?? '';
-          final selected = _resizingWidgetId == widgetId;
+          final selected =
+              _resizingWidgetId == widgetId || _movingWidgetId == widgetId;
           return Positioned(
             left: rect.left,
             top: rect.top,
@@ -1021,6 +1034,12 @@ class _MetricsPageState extends State<MetricsPage> {
               child: Stack(
                 children: [
                   Positioned.fill(child: _metricCard(widget)),
+                  if (_canManage)
+                    _widgetMoveHandle(
+                      widget: widget,
+                      rect: rect,
+                      canvasWidth: width,
+                    ),
                   if (_canManage && selected) ...[
                     _geometryEdge(
                       widget: widget,
@@ -1072,6 +1091,57 @@ class _MetricsPageState extends State<MetricsPage> {
         tooltip: 'Ampliar gráfico',
         onPressed: () => _expandWidget(widget),
         icon: const Icon(Icons.open_in_full_rounded, size: 18),
+      ),
+    );
+  }
+
+  Widget _widgetMoveHandle({
+    required Map<String, dynamic> widget,
+    required Rect rect,
+    required double canvasWidth,
+  }) {
+    final widgetId = widget['id']?.toString() ?? '';
+    return Positioned(
+      left: 8,
+      top: 8,
+      width: 34,
+      height: 34,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.move,
+        child: Tooltip(
+          message: 'Arrastra para mover el gráfico',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onPanStart: (_) {
+              _geometryGestureOrigin =
+                  _liveWidgetPositions[widgetId] ?? rect.topLeft;
+              setState(() => _movingWidgetId = widgetId);
+            },
+            onPanUpdate: (details) {
+              final current = _liveWidgetPositions[widgetId] ?? rect.topLeft;
+              final next = Offset(
+                (current.dx + details.delta.dx)
+                    .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
+                math.max(0.0, current.dy + details.delta.dy),
+              );
+              setState(() => _liveWidgetPositions[widgetId] = next);
+            },
+            onPanEnd: (_) async {
+              _geometryGestureOrigin = null;
+              await _persistWidgetGeometry(widget);
+              if (mounted) setState(() => _movingWidgetId = null);
+            },
+            onPanCancel: () {
+              _geometryGestureOrigin = null;
+              if (mounted) setState(() => _movingWidgetId = null);
+            },
+            child: const Icon(
+              Icons.drag_indicator_rounded,
+              size: 21,
+              color: _metricsMuted,
+            ),
+          ),
+        ),
       ),
     );
   }

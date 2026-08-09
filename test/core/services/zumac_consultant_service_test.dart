@@ -200,6 +200,44 @@ void main() {
     expect(result.findings.single.recordValue, 'ph-1');
   });
 
+  test('limita una consulta de pH a los lotes pedidos explicitamente',
+      () async {
+    const table = 'ph_lotes';
+    await configureCustomFormat(
+      table: table,
+      formatId: 'ph-lotes',
+      formatName: 'pH y CE SRF',
+      fields: const {
+        'fecha': 'Fecha',
+        'lote': 'Lote',
+        'ph': 'pH',
+      },
+    );
+    for (final lot in [5, 6, 7, 10]) {
+      await insertMatrixRow(table, 'lot-$lot', {
+        'id': 'lot-$lot',
+        'fecha': '2026-06-20',
+        'lote': 'Lote $lot',
+        'ph': 6.2 + lot / 100,
+      });
+    }
+
+    final result = await consultant.ask(
+      '¿Los lotes 5 y 6 tuvieron pHs mayor a 6 el día 20/06/2026?',
+      selectedSourceTable: table,
+    );
+
+    expect(result.findings, hasLength(2));
+    expect(
+      result.findings.map((finding) => finding.recordValue).toSet(),
+      {'lot-5', 'lot-6'},
+    );
+    expect(result.answer, contains('Lote 5'));
+    expect(result.answer, contains('Lote 6'));
+    expect(result.answer, isNot(contains('Lote 7')));
+    expect(result.answer, isNot(contains('Lote 10')));
+  });
+
   test('lista las inasistencias registradas hoy', () async {
     const table = 'asistencia_personal';
     await configureFormat(

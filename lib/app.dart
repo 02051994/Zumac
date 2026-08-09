@@ -178,10 +178,15 @@ class _AppInteractionScopeState extends State<_AppInteractionScope> {
   void initState() {
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyEvent);
+    // La ruta global recibe la rueda antes que los Scrollable internos. Asi
+    // Ctrl/Cmd + rueda funciona incluso sobre tablas, graficos y paneles.
+    GestureBinding.instance.pointerRouter.addGlobalRoute(_handlePointerEvent);
   }
 
   @override
   void dispose() {
+    GestureBinding.instance.pointerRouter
+        .removeGlobalRoute(_handlePointerEvent);
     HardwareKeyboard.instance.removeHandler(_handleKeyEvent);
     super.dispose();
   }
@@ -219,40 +224,39 @@ class _AppInteractionScopeState extends State<_AppInteractionScope> {
     return false;
   }
 
-  void _handlePointerSignal(PointerSignalEvent event) {
+  void _handlePointerEvent(PointerEvent event) {
     if (event is! PointerScrollEvent || !_modifierPressed) return;
-    _changeZoom(event.scrollDelta.dy < 0 ? _zoomStep : -_zoomStep);
+    GestureBinding.instance.pointerSignalResolver.register(event, (signal) {
+      final scroll = signal as PointerScrollEvent;
+      _changeZoom(scroll.scrollDelta.dy < 0 ? _zoomStep : -_zoomStep);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerSignal: _handlePointerSignal,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
-            return widget.child;
-          }
-          final logicalSize = Size(
-            constraints.maxWidth / _zoom,
-            constraints.maxHeight / _zoom,
-          );
-          return ClipRect(
-            child: Transform.scale(
-              scale: _zoom,
-              alignment: Alignment.topLeft,
-              child: SizedBox.fromSize(
-                size: logicalSize,
-                child: MediaQuery(
-                  data: MediaQuery.of(context).copyWith(size: logicalSize),
-                  child: widget.child,
-                ),
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
+          return widget.child;
+        }
+        final logicalSize = Size(
+          constraints.maxWidth / _zoom,
+          constraints.maxHeight / _zoom,
+        );
+        return ClipRect(
+          child: Transform.scale(
+            scale: _zoom,
+            alignment: Alignment.topLeft,
+            child: SizedBox.fromSize(
+              size: logicalSize,
+              child: MediaQuery(
+                data: MediaQuery.of(context).copyWith(size: logicalSize),
+                child: widget.child,
               ),
             ),
-          );
-        },
-      ),
+          ),
+        );
+      },
     );
   }
 }

@@ -65,11 +65,14 @@ class MetricsRepository {
         params: {'p_payload': payload},
       ));
 
-  Future<void> reorderDashboards(List<String> dashboardIds) async {
-    await _client.rpc(
-      'appgt_reordenar_dashboards_metrics_v1',
+  Future<List<Map<String, dynamic>>> reorderDashboards(
+    List<String> dashboardIds,
+  ) async {
+    final result = _map(await _client.rpc(
+      'appgt_reordenar_dashboards_metrics_v2',
       params: {'p_ids': dashboardIds},
-    );
+    ));
+    return _list(result['dashboards']);
   }
 
   Future<Map<String, dynamic>> saveWidget(
