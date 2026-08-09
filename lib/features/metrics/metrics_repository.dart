@@ -68,18 +68,27 @@ class MetricsRepository {
   Future<List<Map<String, dynamic>>> reorderDashboards(
     List<String> dashboardIds,
   ) async {
-    await _client.rpc(
+    final response = _map(await _client.rpc(
       'appgt_reordenar_dashboards_metrics_v2',
       params: {'p_ids': dashboardIds},
-    );
-    // La confirmación procede de una lectura nueva, no del estado optimista ni
-    // del mismo objeto devuelto por el RPC. Así detectamos cualquier orden que
-    // PostgreSQL no haya conservado antes de mostrar "guardado".
-    final confirmed = await listDashboards();
+    ));
+    // El RPC confirma el orden en la misma transacción que lo guarda. Evitar
+    // una segunda lectura también evita falsos negativos por filtros RLS.
+    if (response['guardado'] != true) {
+      throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
+    }
+    final confirmed = _list(response['dashboards']);
     final confirmedIds = confirmed.map((row) => '${row['id']}').toList();
     if (confirmedIds.length != dashboardIds.length ||
         !_sameSequence(confirmedIds, dashboardIds)) {
       throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
+    }
+    for (var index = 0; index < confirmed.length; index++) {
+      if ((confirmed[index]['orden'] as num?)?.toInt() != index) {
+        throw StateError(
+          'PostgreSQL devolvió un orden de dashboards inconsistente.',
+        );
+      }
     }
     return confirmed;
   }

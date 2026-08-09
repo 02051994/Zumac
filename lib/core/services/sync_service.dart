@@ -848,8 +848,9 @@ class SyncService {
 
   /// Descarga el bootstrap inicial o un delta desde el último checkpoint.
   ///
-  /// [forceConfigurationRefresh] omite la detección de cambios y debe reservarse
-  /// para reparaciones. [cacheOperationalRecords] permite sobrescribir la
+  /// [forceConfigurationRefresh] omite la detección de cambios y obtiene una
+  /// fotografía autoritativa de la configuración; lo usan los botones explícitos
+  /// de "Actualizar datos". [cacheOperationalRecords] permite sobrescribir la
   /// política por plataforma; por defecto es `false` en web y `true` fuera de
   /// web. Los dropdowns y permisos siempre se mantienen disponibles localmente.
   Future<void> downloadAllForOffline(
@@ -1005,11 +1006,11 @@ class SyncService {
     final etapasFenologicas =
         _rowsFromBootstrap(bootstrap, 'etapas_fenologicas');
     final conteoEstadios = _rowsFromBootstrap(bootstrap, 'conteo_estadios');
-    final rubros = _rowsFromBootstrap(bootstrap, 'rubros');
-    final dropdownRules = _rowsFromBootstrap(bootstrap, 'dropdowns');
-    final validationRules = _rowsFromBootstrap(bootstrap, 'validations');
-    final conditionRules = _rowsFromBootstrap(bootstrap, 'conditions');
-    final formulaRules = _rowsFromBootstrap(bootstrap, 'formulas');
+    var rubros = _rowsFromBootstrap(bootstrap, 'rubros');
+    var dropdownRules = _rowsFromBootstrap(bootstrap, 'dropdowns');
+    var validationRules = _rowsFromBootstrap(bootstrap, 'validations');
+    var conditionRules = _rowsFromBootstrap(bootstrap, 'conditions');
+    var formulaRules = _rowsFromBootstrap(bootstrap, 'formulas');
     var dynamicViews = _rowsFromBootstrap(bootstrap, 'dynamic_views');
     bool bootstrapSnapshot(String key) =>
         !incremental && bootstrap[key] is List;
@@ -1027,11 +1028,20 @@ class SyncService {
     final plagasSnapshot = bootstrapSnapshot('plagas_conceptos');
     final fenologiasSnapshot = bootstrapSnapshot('etapas_fenologicas');
     final conteoSnapshot = bootstrapSnapshot('conteo_estadios');
-    final flowRules = <Map<String, dynamic>>[
+    var rubrosSnapshot = bootstrapSnapshot('rubros');
+    var dropdownRulesSnapshot = bootstrapSnapshot('dropdowns');
+    var validationRulesSnapshot = bootstrapSnapshot('validations');
+    var conditionRulesSnapshot = bootstrapSnapshot('conditions');
+    var formulaRulesSnapshot = bootstrapSnapshot('formulas');
+    var flowRules = <Map<String, dynamic>>[
       ..._rowsFromBootstrap(bootstrap, 'flow_rules'),
       ..._rowsFromBootstrap(bootstrap, 'estados_flujo'),
       ..._rowsFromBootstrap(bootstrap, 'matriz_estados_flujo'),
     ];
+    var flowRulesSnapshot = !incremental &&
+        (bootstrap['flow_rules'] is List ||
+            bootstrap['estados_flujo'] is List ||
+            bootstrap['matriz_estados_flujo'] is List);
 
     // Las matrices base se descargan completas solo cuando realmente cambiaron.
     // Como red de seguridad, se hace una verificación completa cada 24 horas por si
@@ -1049,6 +1059,7 @@ class SyncService {
       'MATRIZ_VALIDACIONES_APPGT',
       'MATRIZ_CONDICIONES_APPGT',
       'MATRIZ_FORMULAS_APPGT',
+      'MATRIZ_ESTADOS_FLUJO_APPGT',
     };
     final configChanged = changedTables == null ||
         configTables.any((table) => _tableChanged(changedTables, table));
@@ -1068,7 +1079,18 @@ class SyncService {
         _trySelectAllRowsSnapshot('MATRIZ_SECCIONES_APPGT'),
         _trySelectAllRowsSnapshot('MATRIZ_VISTAS_DINAMICAS_APPGT'),
         _trySelectAllRowsSnapshot('MATRIZ_FORMATOS_ESPECIALES_APPGT'),
+        _trySelectAllRowsSnapshot('RUBROS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_DROPDOWNS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_VALIDACIONES_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_CONDICIONES_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_FORMULAS_APPGT'),
+        _trySelectAllRowsSnapshot('MATRIZ_ESTADOS_FLUJO_APPGT'),
       ]);
+      if (forceConfigurationRefresh && results.any((rows) => rows == null)) {
+        throw Exception(
+          'No se pudo descargar la configuración completa desde Supabase.',
+        );
+      }
       final forcedFields = results[0];
       if (forcedFields != null) {
         fields = forcedFields;
@@ -1104,27 +1126,61 @@ class SyncService {
         specialFormats = forcedSpecialFormats;
         specialFormatsSnapshot = true;
       }
+      final forcedRubros = results[7];
+      if (forcedRubros != null) {
+        rubros = forcedRubros;
+        rubrosSnapshot = true;
+      }
+      final forcedDropdownRules = results[8];
+      if (forcedDropdownRules != null) {
+        dropdownRules = forcedDropdownRules;
+        dropdownRulesSnapshot = true;
+      }
+      final forcedValidationRules = results[9];
+      if (forcedValidationRules != null) {
+        validationRules = forcedValidationRules;
+        validationRulesSnapshot = true;
+      }
+      final forcedConditionRules = results[10];
+      if (forcedConditionRules != null) {
+        conditionRules = forcedConditionRules;
+        conditionRulesSnapshot = true;
+      }
+      final forcedFormulaRules = results[11];
+      if (forcedFormulaRules != null) {
+        formulaRules = forcedFormulaRules;
+        formulaRulesSnapshot = true;
+      }
+      final forcedFlowRules = results[12];
+      if (forcedFlowRules != null) {
+        flowRules = forcedFlowRules;
+        flowRulesSnapshot = true;
+      }
     }
 
     // Los permisos del usuario son pequeños y sí deben comprobarse en cada ingreso/actualización.
     final currentUserId = _supabase.auth.currentUser?.id;
     if (currentUserId != null && currentUserId.isNotEmpty) {
       try {
-        final rows = await _supabase
-            .from('PERMISOS_DE_USUARIOS_APPGT')
-            .select()
-            .eq('user_id', currentUserId);
-        permissions = List<Map<String, dynamic>>.from(rows);
+        final permissionResults = await Future.wait<dynamic>([
+          _supabase
+              .from('PERMISOS_DE_USUARIOS_APPGT')
+              .select()
+              .eq('user_id', currentUserId),
+          _supabase
+              .from('PERMISOS_SECCIONES_APPGT')
+              .select()
+              .eq('user_id', currentUserId),
+        ]);
+        permissions =
+            List<Map<String, dynamic>>.from(permissionResults[0] as List);
+        sectionPermissions =
+            List<Map<String, dynamic>>.from(permissionResults[1] as List);
         permissionsSnapshot = true;
-      } catch (_) {}
-      try {
-        final rows = await _supabase
-            .from('PERMISOS_SECCIONES_APPGT')
-            .select()
-            .eq('user_id', currentUserId);
-        sectionPermissions = List<Map<String, dynamic>>.from(rows);
         sectionPermissionsSnapshot = true;
-      } catch (_) {}
+      } catch (_) {
+        if (forceConfigurationRefresh) rethrow;
+      }
     }
 
     final removedModuleIds = _removedIds(modules);
@@ -1161,7 +1217,8 @@ class SyncService {
     // Los dropdowns dependen de snapshots completos de sus tablas fuente. Solo
     // se descargan las fuentes marcadas como cambiadas, pero esas fuentes se
     // reemplazan completas para reflejar altas, ediciones y eliminaciones.
-    const forceAllSourceTables = false;
+    final forceAllSourceTables =
+        forceConfigurationRefresh || !incremental || changedTables == null;
     progress('Actualizando catálogos y fuentes de dropdown...');
     await _yieldToUi();
     final dropdownSourceRows = fieldsForSourceDetection.isEmpty
@@ -1184,14 +1241,14 @@ class SyncService {
     dynamicSourceRows['MATRIZ_VALIDACIONES_APPGT'] = validationRules;
     dynamicSourceRows['MATRIZ_CONDICIONES_APPGT'] = conditionRules;
     dynamicSourceRows['MATRIZ_FORMULAS_APPGT'] = formulaRules;
-    final flowRulesForCache = flowRules.isNotEmpty
+    final flowRulesForCache = flowRules.isNotEmpty || flowRulesSnapshot
         ? flowRules
         : ((!incremental ||
                 changedTables == null ||
                 _tableChanged(changedTables, 'MATRIZ_ESTADOS_FLUJO_APPGT'))
             ? await _downloadFlowRules()
             : <Map<String, dynamic>>[]);
-    if (flowRulesForCache.isNotEmpty) {
+    if (flowRulesForCache.isNotEmpty || flowRulesSnapshot) {
       dynamicSourceRows['MATRIZ_ESTADOS_FLUJO_APPGT'] = flowRulesForCache;
     }
 
@@ -1234,7 +1291,8 @@ class SyncService {
     final catalogValues = <Map<String, dynamic>>[
       ...await _downloadCatalogValues(
         changedTables: changedTables,
-        forceAll: !incremental || changedTables == null,
+        forceAll:
+            forceConfigurationRefresh || !incremental || changedTables == null,
       ),
       ..._dynamicCatalogValues(fieldsForSourceDetection, dropdownSourceRows),
     ];
@@ -1244,7 +1302,8 @@ class SyncService {
         dropdownSourceRows.keys,
       ),
       for (final spec in _catalogSpecs)
-        if (!incremental ||
+        if (forceConfigurationRefresh ||
+            !incremental ||
             changedTables == null ||
             _tableChanged(changedTables, spec['table']!))
           spec['key']!,
@@ -1754,15 +1813,29 @@ class SyncService {
     await _yieldToUi();
     progress('Guardando caché local de registros...');
     await _yieldToUi();
-    if (incremental && dropdownSourceRows.isNotEmpty) {
+    final snapshotSourceNames = <String>{
+      ...dropdownSourceRows.keys,
+      if (rubrosSnapshot) 'RUBROS_APPGT',
+      if (dropdownRulesSnapshot) 'MATRIZ_DROPDOWNS_APPGT',
+      if (validationRulesSnapshot) 'MATRIZ_VALIDACIONES_APPGT',
+      if (conditionRulesSnapshot) 'MATRIZ_CONDICIONES_APPGT',
+      if (formulaRulesSnapshot) 'MATRIZ_FORMULAS_APPGT',
+      if (flowRulesSnapshot) 'MATRIZ_ESTADOS_FLUJO_APPGT',
+    };
+    final snapshotSourceRows = <String, List<Map<String, dynamic>>>{
+      for (final table in snapshotSourceNames)
+        if (dynamicSourceRows.containsKey(table))
+          table: dynamicSourceRows[table]!,
+    };
+    if (snapshotSourceRows.isNotEmpty) {
       await _local.applyMatrixRowsFromPayloads(
-        dropdownSourceRows,
+        snapshotSourceRows,
         replaceSources: true,
       );
     }
-    final remainingSourceRows = incremental
+    final remainingSourceRows = snapshotSourceRows.isNotEmpty
         ? (Map<String, List<Map<String, dynamic>>>.from(dynamicSourceRows)
-          ..removeWhere((table, _) => dropdownSourceRows.containsKey(table)))
+          ..removeWhere((table, _) => snapshotSourceNames.contains(table)))
         : dynamicSourceRows;
     await _local.applyMatrixRowsFromPayloads(
       remainingSourceRows,
@@ -1857,7 +1930,13 @@ class SyncService {
         sectionsSnapshot &&
         specialFormatsSnapshot &&
         fieldsSnapshot &&
-        dynamicViewsSnapshot;
+        dynamicViewsSnapshot &&
+        rubrosSnapshot &&
+        dropdownRulesSnapshot &&
+        validationRulesSnapshot &&
+        conditionRulesSnapshot &&
+        formulaRulesSnapshot &&
+        flowRulesSnapshot;
     final checkpoints = <String, String>{
       'bootstrap_last_sync_at': syncCheckpoint,
       'sync_checkpoint_config_at': syncCheckpoint,

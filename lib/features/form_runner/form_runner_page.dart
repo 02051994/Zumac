@@ -6,6 +6,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -22,6 +23,7 @@ import '../../core/widgets/responsive_layout.dart';
 import '../../core/services/dynamic_rules_repository.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/formula_engine.dart';
+import '../../core/platform/file_download.dart';
 import '../modules/modules_page.dart';
 
 class FormRunnerPage extends StatefulWidget {
@@ -3513,6 +3515,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       (tableDestino ?? '').trim().toUpperCase() ==
       'GH-REGISTRO_PERSONAL_PLANILLA';
 
+  bool get _isPermissionLeaveForm =>
+      (tableDestino ?? '').trim().toUpperCase() ==
+      'GH_PERMISOS_LICENCIAS_APPGT';
+
   String _payloadText(Map<String, dynamic> payload, List<String> keys) {
     for (final k in keys) {
       for (final e in payload.entries) {
@@ -3604,7 +3610,171 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     await OpenFilex.open(file.path);
   }
 
-  Future<void> saveLocal({bool generarPhotocheck = false}) async {
+  String _permissionDocumentFileName(Map<String, dynamic> payload) {
+    final request = _payloadText(
+      payload,
+      ['numero_solicitud', 'NÚMERO DE SOLICITUD'],
+    );
+    final dni = _payloadText(payload, ['dni', 'DNI', 'DOCUMENTO']);
+    final safeId = (request.isNotEmpty ? request : dni)
+        .replaceAll(RegExp(r'[^A-Za-z0-9_-]'), '_');
+    final stamp =
+        DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\.]'), '-');
+    return 'permiso_licencia_${safeId.isEmpty ? stamp : safeId}.pdf';
+  }
+
+  Future<void> _generatePermissionDocumentFromPayload(
+      Map<String, dynamic> payload) async {
+    final number = _payloadText(
+      payload,
+      ['numero_solicitud', 'NÚMERO DE SOLICITUD'],
+    );
+    final worker = _payloadText(
+      payload,
+      ['trabajador', 'APELLIDOS Y NOMBRES', 'NOMBRE COMPLETO'],
+    );
+    final dni = _payloadText(payload, ['dni', 'DNI', 'DOCUMENTO']);
+    final position = _payloadText(payload, ['puesto', 'PUESTO', 'CARGO']);
+    final area = _payloadText(payload, ['area', 'ÁREA', 'AREA']);
+    final type = _payloadText(
+      payload,
+      ['tipo_permiso', 'TIPO DE PERMISO', 'TIPO'],
+    ).replaceAll('_', ' ');
+    final start = _payloadText(payload, ['fecha_inicio', 'FECHA INICIO']);
+    final end = _payloadText(payload, ['fecha_fin', 'FECHA FIN']);
+    final reason = _payloadText(payload, ['motivo', 'MOTIVO']);
+    final observations =
+        _payloadText(payload, ['observaciones', 'OBSERVACIONES']);
+    final signatureData =
+        _payloadText(payload, ['firma_trabajador', 'FIRMA DEL TRABAJADOR']);
+    Uint8List? signatureBytes;
+    if (signatureData.startsWith('data:image/') &&
+        signatureData.contains(',')) {
+      try {
+        signatureBytes = base64Decode(
+          signatureData.substring(signatureData.indexOf(',') + 1),
+        );
+      } catch (_) {}
+    }
+
+    pw.Widget detailRow(String label, String value) => pw.Padding(
+          padding: const pw.EdgeInsets.symmetric(vertical: 4),
+          child: pw.Row(
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.SizedBox(
+                width: 118,
+                child: pw.Text(
+                  label,
+                  style: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+                ),
+              ),
+              pw.Expanded(child: pw.Text(value.isEmpty ? '—' : value)),
+            ],
+          ),
+        );
+
+    final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(42),
+        build: (_) => pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: [
+            pw.Text(
+              'SOLICITUD DE PERMISO / LICENCIA',
+              textAlign: pw.TextAlign.center,
+              style: pw.TextStyle(
+                fontSize: 17,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+            pw.SizedBox(height: 5),
+            pw.Text(
+              number.isEmpty ? 'Documento laboral' : 'N.° $number',
+              textAlign: pw.TextAlign.center,
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+            pw.SizedBox(height: 24),
+            detailRow('Trabajador:', worker),
+            detailRow('DNI:', dni),
+            detailRow('Puesto:', position),
+            detailRow('Área:', area),
+            pw.Divider(height: 22),
+            detailRow('Tipo:', type),
+            detailRow('Desde:', start),
+            detailRow('Hasta:', end),
+            detailRow('Motivo:', reason),
+            if (observations.isNotEmpty)
+              detailRow('Observaciones:', observations),
+            pw.SizedBox(height: 24),
+            pw.Text(
+              'Declaro que la información consignada es correcta y solicito '
+              'la autorización del permiso o licencia indicado.',
+              textAlign: pw.TextAlign.justify,
+              style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
+            ),
+            pw.Spacer(),
+            pw.Row(
+              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+              crossAxisAlignment: pw.CrossAxisAlignment.end,
+              children: [
+                pw.Column(
+                  children: [
+                    pw.Container(
+                      width: 150,
+                      height: 62,
+                      alignment: pw.Alignment.bottomCenter,
+                      child: signatureBytes == null
+                          ? null
+                          : pw.Image(
+                              pw.MemoryImage(signatureBytes),
+                              fit: pw.BoxFit.contain,
+                            ),
+                    ),
+                    pw.Container(width: 170, height: 1, color: PdfColors.black),
+                    pw.SizedBox(height: 4),
+                    pw.Text('Firma del trabajador',
+                        style: const pw.TextStyle(fontSize: 9)),
+                  ],
+                ),
+                pw.Column(
+                  children: [
+                    pw.SizedBox(width: 170, height: 62),
+                    pw.Container(width: 170, height: 1, color: PdfColors.black),
+                    pw.SizedBox(height: 4),
+                    pw.Text('Visto bueno / autorización',
+                        style: const pw.TextStyle(fontSize: 9)),
+                  ],
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+    final bytes = await pdf.save();
+    final fileName =
+        payload['documento_generado']?.toString().trim().isNotEmpty == true
+            ? payload['documento_generado'].toString().trim()
+            : _permissionDocumentFileName(payload);
+    if (kIsWeb) {
+      await downloadFileBytes(fileName: fileName, bytes: bytes);
+      return;
+    }
+    final dir = Directory(
+        '${Platform.environment['USERPROFILE'] ?? Directory.current.path}\\Downloads');
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final file = File('${dir.path}\\$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    await OpenFilex.open(file.path);
+  }
+
+  Future<void> saveLocal({
+    bool generarPhotocheck = false,
+    bool generarDocumentoLaboral = false,
+  }) async {
     if (savingLocal || capturingPhoto) return;
     FocusScope.of(context).unfocus();
     final cachedUserId = await LocalSession().cachedUserId();
@@ -3758,6 +3928,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final value = _valueForField(field, idLocal);
       if (value != null) payload[campo] = value;
     }
+    if (_isPermissionLeaveForm && generarDocumentoLaboral) {
+      payload['documento_generado'] = _permissionDocumentFileName(payload);
+    }
 
     final currentConfig = _currentFormatTableConfig;
     if (_isDetailTableRow(currentConfig) && _wizardMasterPayload != null) {
@@ -3854,6 +4027,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     if (_isPersonalPlanillaForm && generarPhotocheck) {
       await _generateLocalPhotocheckFromPayload(payload);
+    }
+
+    if (_isPermissionLeaveForm && generarDocumentoLaboral) {
+      try {
+        await _generatePermissionDocumentFromPayload(payload);
+      } catch (error) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'El registro se guardó, pero no se pudo generar el documento: $error',
+              ),
+            ),
+          );
+        }
+      }
     }
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -5265,10 +5454,22 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           ],
           FloatingActionButton.extended(
             heroTag: 'save_${tableDestino ?? ''}',
-            onPressed: saveLocal,
-            tooltip: 'Guardar localmente',
-            icon: const Icon(Icons.save_outlined),
-            label: const Text('Guardar'),
+            onPressed: _isPermissionLeaveForm
+                ? () => saveLocal(generarDocumentoLaboral: true)
+                : saveLocal,
+            tooltip: _isPermissionLeaveForm
+                ? 'Guardar y generar documento para firma'
+                : 'Guardar localmente',
+            icon: Icon(
+              _isPermissionLeaveForm
+                  ? Icons.picture_as_pdf_outlined
+                  : Icons.save_outlined,
+            ),
+            label: Text(
+              _isPermissionLeaveForm
+                  ? 'GUARDAR Y GENERAR'
+                  : 'Guardar',
+            ),
           ),
         ],
       ),

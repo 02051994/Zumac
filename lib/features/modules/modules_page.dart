@@ -1106,9 +1106,9 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   bool _canSection(String sectionId) {
-    // Regla anti-bloqueo: Formatos siempre queda visible si no hay permisos de
-    // secciones descargados. Así el usuario puede volver a actualizar matrices.
-    if (allowedSections.isEmpty) return sectionId == 'modulos';
+    // Sin catálogo de secciones solo se exponen áreas que ya contienen módulos
+    // autorizados en el cache del usuario.
+    if (allowedSections.isEmpty) return _sectionHasFormatModules(sectionId);
     return allowedSections.contains(sectionId);
   }
 
@@ -1366,13 +1366,28 @@ class _ModulesPageState extends State<ModulesPage> {
   Future<void> loadLocal() async {
     if (mounted && !localLoaded) setState(() => busy = true);
 
-    await Future<void>.delayed(const Duration(milliseconds: 1));
-    final rawPermissions = await local.getAll('local_permissions');
-    final rawSectionPerms = await local.getAll('local_section_permissions');
-    final localSections =
-        await local.getAll('local_sections', orderBy: 'orden');
-    final rawProfileRows = await local.getAll('local_profile');
-    final activeEmpresaId = await LocalSession().cachedEmpresaId();
+    final pendingFuture = local.pendingCount();
+    final localReads = await Future.wait<List<Map<String, dynamic>>>([
+      local.getAll('local_permissions'),
+      local.getAll('local_section_permissions'),
+      local.getAll('local_sections', orderBy: 'orden, id'),
+      local.getAll('local_profile'),
+      local.getAll('local_modules', orderBy: 'orden, id'),
+      local.getAll('local_formats', orderBy: 'orden, id'),
+      _loadDynamicViewsForSidebar(),
+    ]);
+    final rawPermissions = localReads[0];
+    final rawSectionPerms = localReads[1];
+    final localSections = localReads[2];
+    final rawProfileRows = localReads[3];
+    final allLocalModules = localReads[4];
+    final allLocalFormats = localReads[5];
+    final remoteDynamicViews = localReads[6];
+    final sessionValues = await Future.wait<String?>([
+      LocalSession().cachedEmpresaId(),
+      LocalSession().cachedUserId(),
+    ]);
+    final activeEmpresaId = sessionValues[0] ?? '';
     bool belongsToActiveEmpresa(Map<String, dynamic> row) {
       final rowEmpresaId = row['empresa_id']?.toString().trim() ?? '';
       return rowEmpresaId.isEmpty || rowEmpresaId == activeEmpresaId;
@@ -1383,10 +1398,9 @@ class _ModulesPageState extends State<ModulesPage> {
     // de cuenta puede quedar información anterior hasta que se actualicen
     // matrices. Se filtra por el usuario activo antes de construir el sidebar.
     final authUserId = Supabase.instance.client.auth.currentUser?.id;
-    final cachedUserId = await LocalSession().cachedUserId();
+    final cachedUserId = sessionValues[1];
     final activeUserId = (authUserId ?? cachedUserId ?? '').trim();
 
-    await Future<void>.delayed(const Duration(milliseconds: 1));
     final permissions = activeUserId.isEmpty
         ? <Map<String, dynamic>>[]
         : rawPermissions
@@ -1424,20 +1438,17 @@ class _ModulesPageState extends State<ModulesPage> {
         .where((e) => e.isNotEmpty)
         .toSet();
 
-    List<Map<String, dynamic>> moduleRows = [];
-    if (allowedModuleIds.isNotEmpty) {
-      final placeholders = List.filled(allowedModuleIds.length, '?').join(',');
-      moduleRows = await local.where(
-        'local_modules',
-        'id in ($placeholders) and activo = 1 and empresa_id = ?',
-        [...allowedModuleIds, activeEmpresaId],
-        orderBy: 'orden',
-      );
-    }
+    final allowedModuleKeys = allowedModuleIds.map(_id).toSet();
+    final moduleRows = allLocalModules
+        .where((row) =>
+            belongsToActiveEmpresa(row) &&
+            _asBool(row['activo'], fallback: true) &&
+            allowedModuleKeys.contains(_id(row['id'])))
+        .toList(growable: false);
 
-    await Future<void>.delayed(const Duration(milliseconds: 1));
     final moduleFormats = <String, List<Map<String, dynamic>>>{};
-    for (final moduleId in allowedModuleIds) {
+    for (final module in moduleRows) {
+      final moduleId = _txt(module['id']);
       final allowedFormatKeys = permissions
           .where(
               (e) => _asBool(e['can_view']) && _sameId(e['modulo'], moduleId))
@@ -1448,25 +1459,19 @@ class _ModulesPageState extends State<ModulesPage> {
         moduleFormats[moduleId] = [];
         continue;
       }
-      final candidates = await local.where(
-        'local_formats',
-        'modulo_id = ? and activo = 1 and empresa_id = ?',
-        [moduleId, activeEmpresaId],
-        orderBy: 'orden',
-      );
+      final candidates = allLocalFormats.where((format) =>
+          belongsToActiveEmpresa(format) &&
+          _asBool(format['activo'], fallback: true) &&
+          _sameId(format['modulo_id'], moduleId));
       moduleFormats[moduleId] = candidates.where((format) {
         return allowedFormatKeys.contains(_id(format['id'])) ||
             allowedFormatKeys.contains(_id(format['tabla_destino']));
       }).toList();
-      await Future<void>.delayed(const Duration(milliseconds: 1));
     }
 
     // Rendimiento/offline: el sidebar usa el cache local de vistas dinámicas.
     // Los cambios de Supabase llegan al presionar Actualizar datos; evitamos consultar
     // internet cada vez que se reconstruye el menú, porque eso vuelve lenta la navegación.
-    final remoteDynamicViews = await _loadDynamicViewsForSidebar();
-
-    await Future<void>.delayed(const Duration(milliseconds: 1));
     final visibleDynamicViews = remoteDynamicViews.where((view) {
       if (!belongsToActiveEmpresa(view)) return false;
       if (!_asBool(view['activo'], fallback: true)) return false;
@@ -1507,7 +1512,7 @@ class _ModulesPageState extends State<ModulesPage> {
       });
     }).toList();
 
-    final p = await local.pendingCount();
+    final p = await pendingFuture;
     if (!mounted) return;
     setState(() {
       _clearDesktopContentCache();
@@ -1541,7 +1546,7 @@ class _ModulesPageState extends State<ModulesPage> {
       final hasCache = await local.hasOfflineBootstrapCache();
       await sync.downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: false,
+        forceConfigurationRefresh: true,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -1642,11 +1647,7 @@ class _ModulesPageState extends State<ModulesPage> {
   String _sectionTitle(Map<String, dynamic> section) {
     final id = section['id']?.toString() ?? '';
     final name = section['nombre']?.toString().trim() ?? '';
-    if (name.isNotEmpty) return name;
-    if (id == 'modulos') return 'Formatos';
-    if (id == 'registros_locales') return 'Registros locales';
-    if (id == 'reportes') return 'Reportes';
-    return id;
+    return name.isNotEmpty ? name : id;
   }
 
   String _mobileAppBarTitle() {

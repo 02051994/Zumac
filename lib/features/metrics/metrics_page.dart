@@ -8,6 +8,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/zumac_feature_header.dart';
+import 'metrics_layout.dart';
 import 'metrics_repository.dart';
 
 const _metricsNavy = Color(0xFF142F49);
@@ -65,6 +66,8 @@ class _MetricsPageState extends State<MetricsPage> {
   bool _addingDashboardFilter = false;
   bool _reorderingDashboards = false;
   int _layoutSaveOperations = 0;
+  int _dashboardLoadRevision = 0;
+  int _datasetLoadRevision = 0;
   String? _resizingWidgetId;
   String? _movingWidgetId;
   double? _desktopCanvasReferenceWidth;
@@ -91,10 +94,16 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _load({String? selectDashboard}) async {
+    final requestRevision = ++_dashboardLoadRevision;
+    ++_datasetLoadRevision;
     if (mounted) setState(() => _loading = true);
     try {
-      final contextData = await _repository.loadContext();
-      final dashboards = await _repository.listDashboards();
+      final initial = await Future.wait<dynamic>([
+        _repository.loadContext(),
+        _repository.listDashboards(),
+      ]);
+      final contextData = initial[0] as Map<String, dynamic>;
+      final dashboards = initial[1] as List<Map<String, dynamic>>;
       var selected = selectDashboard ?? _dashboardId;
       if (!_initialSourceResolved &&
           (widget.initialSourceTable ?? '').trim().isNotEmpty) {
@@ -116,7 +125,7 @@ class _MetricsPageState extends State<MetricsPage> {
         widgets = values[0];
         relations = values[1];
       }
-      if (!mounted) return;
+      if (!mounted || requestRevision != _dashboardLoadRevision) return;
       setState(() {
         _context = contextData;
         _dashboards = dashboards;
@@ -130,9 +139,13 @@ class _MetricsPageState extends State<MetricsPage> {
       });
       await _loadDatasets();
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted && requestRevision == _dashboardLoadRevision) {
+        setState(() => _error = '$error');
+      }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && requestRevision == _dashboardLoadRevision) {
+        setState(() => _loading = false);
+      }
     }
   }
 
@@ -164,6 +177,8 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _selectDashboard(String id) async {
+    final requestRevision = ++_dashboardLoadRevision;
+    ++_datasetLoadRevision;
     setState(() {
       _dashboardId = id;
       _widgets = const [];
@@ -178,14 +193,22 @@ class _MetricsPageState extends State<MetricsPage> {
         _repository.listWidgets(id),
         _repository.listRelations(id),
       ]);
-      if (!mounted) return;
+      if (!mounted ||
+          requestRevision != _dashboardLoadRevision ||
+          _dashboardId != id) {
+        return;
+      }
       setState(() {
         _widgets = values[0];
         _relations = values[1];
       });
       await _loadDatasets();
     } finally {
-      if (mounted) setState(() => _loadingData = false);
+      if (mounted &&
+          requestRevision == _dashboardLoadRevision &&
+          _dashboardId == id) {
+        setState(() => _loadingData = false);
+      }
     }
   }
 
@@ -217,36 +240,60 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _loadDatasets() async {
-    if (_widgets.isEmpty) return;
+    final revision = ++_datasetLoadRevision;
+    final dashboardId = _dashboardId;
+    final widgets = _widgets
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+    final relations = _relations
+        .map((item) => Map<String, dynamic>.from(item))
+        .toList(growable: false);
+    final filters = List<MetricGlobalFilter>.from(_globalFilters);
+    if (widgets.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _datasets.clear();
+          _loadingData = false;
+        });
+      }
+      return;
+    }
     if (mounted) setState(() => _loadingData = true);
-    final next = <String, MetricDataset>{};
-    for (final widget in _widgets) {
+    final entries = await Future.wait(widgets.map((widget) async {
+      final widgetId = '${widget['id']}';
       try {
         if ('${widget['tipo_grafico']}'.toUpperCase() == 'TEXT') {
-          next['${widget['id']}'] = const MetricDataset(points: [], rows: []);
-          continue;
+          return MapEntry(
+            widgetId,
+            const MetricDataset(points: [], rows: []),
+          );
         }
         final ignored =
             (_map(widget['configuracion'])['ignored_filters'] as List? ??
                     const [])
                 .map((value) => value.toString())
                 .toSet();
-        next['${widget['id']}'] = await _repository.queryWidget(
+        final dataset = await _repository.queryWidget(
           widget: widget,
-          relations: _relations,
-          globalFilters: _globalFilters
-              .where((filter) => !ignored.contains(filter.id))
-              .toList(),
+          relations: relations,
+          globalFilters:
+              filters.where((filter) => !ignored.contains(filter.id)).toList(),
         );
+        return MapEntry(widgetId, dataset);
       } catch (_) {
-        next['${widget['id']}'] = const MetricDataset(points: [], rows: []);
+        return MapEntry(
+          widgetId,
+          const MetricDataset(points: [], rows: []),
+        );
       }
-    }
-    if (mounted) {
+    }));
+    if (mounted &&
+        revision == _datasetLoadRevision &&
+        dashboardId == _dashboardId) {
       setState(() {
         _datasets
           ..clear()
-          ..addAll(next);
+          ..addEntries(entries);
         _loadingData = false;
       });
     }
@@ -576,14 +623,14 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
-  /// El panel ocupa espacio real y el lienzo usa todo el ancho y alto restante.
-  /// Al abrirlo se conserva el sistema de coordenadas del lienzo completo y se
-  /// escala de forma uniforme. Ningún gráfico cambia de fila ni de posición.
+  /// Conserva el ancho geométrico del lienzo mientras el panel está abierto.
+  /// El espacio visible puede reducirse, pero las coordenadas y dimensiones de
+  /// los gráficos no cambian ni se escalan por abrir la configuración.
   Widget _dashboardViewport({required bool panelOpen}) {
     return SizedBox.expand(
       child: _dashboardCanvas(
         desktop: true,
-        scaleToAvailableWidth: panelOpen,
+        preserveDesktopGeometry: panelOpen,
       ),
     );
   }
@@ -712,7 +759,7 @@ class _MetricsPageState extends State<MetricsPage> {
 
   Widget _dashboardCanvas({
     required bool desktop,
-    bool scaleToAvailableWidth = false,
+    bool preserveDesktopGeometry = false,
   }) {
     if (_dashboards.isEmpty) {
       return _MetricsEmpty(
@@ -872,13 +919,14 @@ class _MetricsPageState extends State<MetricsPage> {
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.crossAxisExtent;
-                    final referenceWidth = desktop && scaleToAvailableWidth
-                        ? math.max(
-                            _desktopCanvasReferenceWidth ?? width + 430,
-                            width,
+                    final referenceWidth = desktop
+                        ? metricsDesktopGeometryWidth(
+                            availableWidth: width,
+                            panelOpen: preserveDesktopGeometry,
+                            lastFullWidth: _desktopCanvasReferenceWidth,
                           )
                         : width;
-                    if (desktop && !scaleToAvailableWidth) {
+                    if (desktop && !preserveDesktopGeometry) {
                       _desktopCanvasReferenceWidth = width;
                     }
                     final layoutWidth = desktop ? referenceWidth : width;
@@ -890,14 +938,22 @@ class _MetricsPageState extends State<MetricsPage> {
                     const gap = 14.0;
                     final cardWidth =
                         (layoutWidth - gap * (columns - 1)) / columns;
+                    final desktopCanvas = desktop
+                        ? _desktopWidgetCanvas(
+                            viewportWidth: referenceWidth,
+                            geometryWidth: referenceWidth,
+                            columns: columns,
+                            gap: gap,
+                          )
+                        : null;
                     return SliverToBoxAdapter(
                       child: desktop
-                          ? _desktopWidgetCanvas(
-                              viewportWidth: width,
-                              geometryWidth: referenceWidth,
-                              columns: columns,
-                              gap: gap,
-                            )
+                          ? (preserveDesktopGeometry
+                              ? SingleChildScrollView(
+                                  scrollDirection: Axis.horizontal,
+                                  child: desktopCanvas!,
+                                )
+                              : desktopCanvas!)
                           : Wrap(
                               spacing: gap,
                               runSpacing: gap,
@@ -1060,7 +1116,15 @@ class _MetricsPageState extends State<MetricsPage> {
                     ),
                     child: Stack(
                       children: [
-                        Positioned.fill(child: _metricCard(widget)),
+                        Positioned.fill(
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.translucent,
+                            onTap: _editingWidget?.isNotEmpty != true
+                                ? null
+                                : () => unawaited(_editWidget(widget)),
+                            child: _metricCard(widget),
+                          ),
+                        ),
                         if (_canManage && scale >= .999)
                           _widgetMoveHandle(
                             widget: widget,

@@ -152,7 +152,7 @@ class _LoginPageState extends State<LoginPage> {
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: false,
+        forceConfigurationRefresh: true,
         onProgress: (message) {
           if (mounted) {
             setState(() {

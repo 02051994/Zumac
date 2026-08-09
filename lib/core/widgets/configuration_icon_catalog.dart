@@ -50,6 +50,9 @@ const configurationIconChoices = <ConfigurationIconChoice>[
   ConfigurationIconChoice('warehouse', 'Almacén', Icons.warehouse_outlined),
   ConfigurationIconChoice(
       'local_shipping', 'Transporte', Icons.local_shipping_outlined),
+  ConfigurationIconChoice(
+      'public', 'Ventas y exportaciones', Icons.public_outlined),
+  ConfigurationIconChoice('sailing', 'Exportaciones', Icons.sailing_outlined),
   ConfigurationIconChoice('precision_manufacturing', 'Producción',
       Icons.precision_manufacturing_outlined),
   ConfigurationIconChoice('science', 'Laboratorio', Icons.science_outlined),
@@ -61,8 +64,13 @@ const configurationIconChoices = <ConfigurationIconChoice>[
       'shopping_cart', 'Compras', Icons.shopping_cart_outlined),
   ConfigurationIconChoice('sell', 'Ventas', Icons.sell_outlined),
   ConfigurationIconChoice('payments', 'Finanzas', Icons.payments_outlined),
+  ConfigurationIconChoice(
+      'account_balance', 'Contabilidad', Icons.account_balance_outlined),
+  ConfigurationIconChoice('badge', 'Personal y planilla', Icons.badge_outlined),
   ConfigurationIconChoice('groups', 'Equipos', Icons.groups_outlined),
   ConfigurationIconChoice('schedule', 'Programación', Icons.schedule_outlined),
+  ConfigurationIconChoice(
+      'calendar_month', 'Planificación', Icons.calendar_month_outlined),
   ConfigurationIconChoice(
       'notifications', 'Alertas', Icons.notifications_outlined),
   ConfigurationIconChoice('folder', 'Documentos', Icons.folder_outlined),
@@ -72,7 +80,12 @@ const configurationIconChoices = <ConfigurationIconChoice>[
 ];
 
 IconData configurationIconForName(String? name) {
-  final normalized = (name ?? '').trim().toLowerCase();
+  final normalized = (name ?? '')
+      .trim()
+      .toLowerCase()
+      .replaceFirst('icons.', '')
+      .replaceAll(RegExp(r'[-\s]+'), '_')
+      .replaceFirst(RegExp(r'_(outlined|rounded|sharp)$'), '');
   const aliases = <String, String>{
     'app': 'apps',
     'modulos': 'apps',
@@ -101,10 +114,12 @@ IconData configurationIconForName(String? name) {
     'lotes': 'map',
     'variedades': 'eco',
     'centro_costo': 'account_tree',
+    'account_balance_wallet': 'payments',
+    'inventory_2': 'inventory',
   };
   final canonical = aliases[normalized] ?? normalized;
   for (final choice in configurationIconChoices) {
     if (choice.value == canonical) return choice.icon;
   }
-  return Icons.circle_outlined;
+  return Icons.category_outlined;
 }
