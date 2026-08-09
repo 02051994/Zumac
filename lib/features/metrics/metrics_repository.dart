@@ -68,11 +68,20 @@ class MetricsRepository {
   Future<List<Map<String, dynamic>>> reorderDashboards(
     List<String> dashboardIds,
   ) async {
-    final result = _map(await _client.rpc(
+    await _client.rpc(
       'appgt_reordenar_dashboards_metrics_v2',
       params: {'p_ids': dashboardIds},
-    ));
-    return _list(result['dashboards']);
+    );
+    // La confirmación procede de una lectura nueva, no del estado optimista ni
+    // del mismo objeto devuelto por el RPC. Así detectamos cualquier orden que
+    // PostgreSQL no haya conservado antes de mostrar "guardado".
+    final confirmed = await listDashboards();
+    final confirmedIds = confirmed.map((row) => '${row['id']}').toList();
+    if (confirmedIds.length != dashboardIds.length ||
+        !_sameSequence(confirmedIds, dashboardIds)) {
+      throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
+    }
+    return confirmed;
   }
 
   Future<Map<String, dynamic>> saveWidget(
@@ -81,6 +90,20 @@ class MetricsRepository {
       _map(await _client.rpc(
         'appgt_guardar_widget_metrics_v1',
         params: {'p_payload': payload},
+      ));
+
+  Future<Map<String, dynamic>> saveWidgetGeometry({
+    required String widgetId,
+    required String dashboardId,
+    required Map<String, dynamic> geometry,
+  }) async =>
+      _map(await _client.rpc(
+        'appgt_guardar_geometria_widget_metrics_v2',
+        params: {
+          'p_widget_id': widgetId,
+          'p_dashboard_id': dashboardId,
+          'p_geometria': geometry,
+        },
       ));
 
   Future<Map<String, dynamic>> saveRelation(
@@ -434,6 +457,14 @@ class MetricsRepository {
       : const [];
 
   List<Map<String, dynamic>> _maps(dynamic value) => _list(value);
+}
+
+bool _sameSequence(List<String> left, List<String> right) {
+  if (left.length != right.length) return false;
+  for (var index = 0; index < left.length; index++) {
+    if (left[index] != right[index]) return false;
+  }
+  return true;
 }
 
 class MetricGlobalFilter {

@@ -64,8 +64,10 @@ class _MetricsPageState extends State<MetricsPage> {
   bool _filterEditorOpen = false;
   bool _addingDashboardFilter = false;
   bool _reorderingDashboards = false;
+  int _layoutSaveOperations = 0;
   String? _resizingWidgetId;
   String? _movingWidgetId;
+  double? _desktopCanvasReferenceWidth;
   final Map<String, Size> _liveWidgetSizes = {};
   final Map<String, Offset> _liveWidgetPositions = {};
   Offset? _geometryGestureOrigin;
@@ -135,7 +137,9 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _refreshAllData() async {
-    if (_refreshingAll) return;
+    if (_refreshingAll || _reorderingDashboards || _layoutSaveOperations > 0) {
+      return;
+    }
     setState(() => _refreshingAll = true);
     try {
       await _sync.downloadAllForOffline(
@@ -546,7 +550,12 @@ class _MetricsPageState extends State<MetricsPage> {
     );
     final refreshButton = IconButton(
       tooltip: 'Actualizar datos y configuración',
-      onPressed: _loading || _refreshingAll ? null : _refreshAllData,
+      onPressed: _loading ||
+              _refreshingAll ||
+              _reorderingDashboards ||
+              _layoutSaveOperations > 0
+          ? null
+          : _refreshAllData,
       icon: _refreshingAll
           ? const SizedBox.square(
               dimension: 19,
@@ -568,13 +577,13 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   /// El panel ocupa espacio real y el lienzo usa todo el ancho y alto restante.
-  /// Mientras el panel esta abierto, las tarjetas fluyen sin alterar la
-  /// geometria libre que el usuario guardo para la vista normal.
+  /// Al abrirlo se conserva el sistema de coordenadas del lienzo completo y se
+  /// escala de forma uniforme. Ningún gráfico cambia de fila ni de posición.
   Widget _dashboardViewport({required bool panelOpen}) {
     return SizedBox.expand(
       child: _dashboardCanvas(
         desktop: true,
-        fitAvailableWidth: panelOpen,
+        scaleToAvailableWidth: panelOpen,
       ),
     );
   }
@@ -703,7 +712,7 @@ class _MetricsPageState extends State<MetricsPage> {
 
   Widget _dashboardCanvas({
     required bool desktop,
-    bool fitAvailableWidth = false,
+    bool scaleToAvailableWidth = false,
   }) {
     if (_dashboards.isEmpty) {
       return _MetricsEmpty(
@@ -863,17 +872,29 @@ class _MetricsPageState extends State<MetricsPage> {
                 sliver: SliverLayoutBuilder(
                   builder: (context, constraints) {
                     final width = constraints.crossAxisExtent;
-                    final columns = width >= 1280
+                    final referenceWidth = desktop && scaleToAvailableWidth
+                        ? math.max(
+                            _desktopCanvasReferenceWidth ?? width + 430,
+                            width,
+                          )
+                        : width;
+                    if (desktop && !scaleToAvailableWidth) {
+                      _desktopCanvasReferenceWidth = width;
+                    }
+                    final layoutWidth = desktop ? referenceWidth : width;
+                    final columns = layoutWidth >= 1280
                         ? 3
-                        : width >= 720
+                        : layoutWidth >= 720
                             ? 2
                             : 1;
                     const gap = 14.0;
-                    final cardWidth = (width - gap * (columns - 1)) / columns;
+                    final cardWidth =
+                        (layoutWidth - gap * (columns - 1)) / columns;
                     return SliverToBoxAdapter(
-                      child: desktop && !fitAvailableWidth
+                      child: desktop
                           ? _desktopWidgetCanvas(
-                              width: width,
+                              viewportWidth: width,
+                              geometryWidth: referenceWidth,
                               columns: columns,
                               gap: gap,
                             )
@@ -896,16 +917,12 @@ class _MetricsPageState extends State<MetricsPage> {
                                 final config = _map(widget['configuracion']);
                                 final defaultWidth =
                                     cardWidth * span + gap * (span - 1);
-                                final persistedWidth = fitAvailableWidth
-                                    ? null
-                                    : (config['pixel_width'] as num?)
-                                        ?.toDouble();
+                                final persistedWidth =
+                                    (config['pixel_width'] as num?)?.toDouble();
                                 final persistedHeight =
                                     (config['pixel_height'] as num?)
                                         ?.toDouble();
-                                final liveSize = fitAvailableWidth
-                                    ? null
-                                    : _liveWidgetSizes[widgetId];
+                                final liveSize = _liveWidgetSizes[widgetId];
                                 final minimumWidth = math.min(260.0, width);
                                 final sizedWidth = (liveSize?.width ??
                                         persistedWidth ??
@@ -966,11 +983,13 @@ class _MetricsPageState extends State<MetricsPage> {
   /// Cada objeto conserva su posición y tamaño en `configuracion`, de modo
   /// que mover un gráfico no altera el orden ni el diseño de los demás.
   Widget _desktopWidgetCanvas({
-    required double width,
+    required double viewportWidth,
+    required double geometryWidth,
     required int columns,
     required double gap,
   }) {
-    final cellWidth = (width - gap * (columns - 1)) / columns;
+    final scale = math.min(1.0, viewportWidth / geometryWidth);
+    final cellWidth = (geometryWidth - gap * (columns - 1)) / columns;
     final rects = <({Map<String, dynamic> widget, Rect rect})>[];
     for (var index = 0; index < _widgets.length; index++) {
       final widget = _widgets[index];
@@ -980,7 +999,7 @@ class _MetricsPageState extends State<MetricsPage> {
       final size = _liveWidgetSizes[widgetId] ??
           Size(
             ((config['pixel_width'] as num?)?.toDouble() ?? cellWidth)
-                .clamp(260.0, width)
+                .clamp(260.0, geometryWidth)
                 .toDouble(),
             ((config['pixel_height'] as num?)?.toDouble() ?? fallbackHeight)
                 .clamp(190.0, 1000.0)
@@ -998,84 +1017,95 @@ class _MetricsPageState extends State<MetricsPage> {
       rects.add((
         widget: widget,
         rect: Rect.fromLTWH(
-          position.dx.clamp(0.0, math.max(0.0, width - size.width)),
+          position.dx.clamp(0.0, math.max(0.0, geometryWidth - size.width)),
           math.max(0.0, position.dy),
           size.width,
           size.height,
         ),
       ));
     }
-    final height = rects.fold<double>(360, (current, item) {
+    final geometryHeight = rects.fold<double>(360, (current, item) {
       return math.max(current, item.rect.bottom + 24);
     });
     return SizedBox(
-      width: width,
-      height: height,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: rects.map((item) {
-          final widget = item.widget;
-          final rect = item.rect;
-          final widgetId = widget['id']?.toString() ?? '';
-          final selected =
-              _resizingWidgetId == widgetId || _movingWidgetId == widgetId;
-          return Positioned(
-            left: rect.left,
-            top: rect.top,
-            width: rect.width,
-            height: rect.height,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 90),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                border:
-                    selected ? Border.all(color: _metricsTeal, width: 2) : null,
-              ),
-              child: Stack(
-                children: [
-                  Positioned.fill(child: _metricCard(widget)),
-                  if (_canManage)
-                    _widgetMoveHandle(
-                      widget: widget,
-                      rect: rect,
-                      canvasWidth: width,
+      width: viewportWidth,
+      height: geometryHeight * scale,
+      child: ClipRect(
+        child: Transform.scale(
+          scale: scale,
+          alignment: Alignment.topLeft,
+          child: SizedBox(
+            width: geometryWidth,
+            height: geometryHeight,
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: rects.map((item) {
+                final widget = item.widget;
+                final rect = item.rect;
+                final widgetId = widget['id']?.toString() ?? '';
+                final selected = _resizingWidgetId == widgetId ||
+                    _movingWidgetId == widgetId;
+                return Positioned(
+                  left: rect.left,
+                  top: rect.top,
+                  width: rect.width,
+                  height: rect.height,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 90),
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(18),
+                      border: selected
+                          ? Border.all(color: _metricsTeal, width: 2)
+                          : null,
                     ),
-                  if (_canManage && selected) ...[
-                    _geometryEdge(
-                      widget: widget,
-                      rect: rect,
-                      canvasWidth: width,
-                      side: _MetricGeometrySide.left,
+                    child: Stack(
+                      children: [
+                        Positioned.fill(child: _metricCard(widget)),
+                        if (_canManage && scale >= .999)
+                          _widgetMoveHandle(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                          ),
+                        if (_canManage && selected && scale >= .999) ...[
+                          _geometryEdge(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                            side: _MetricGeometrySide.left,
+                          ),
+                          _geometryEdge(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                            side: _MetricGeometrySide.right,
+                          ),
+                          _geometryEdge(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                            side: _MetricGeometrySide.top,
+                          ),
+                          _geometryEdge(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                            side: _MetricGeometrySide.bottom,
+                          ),
+                        ],
+                        Positioned(
+                          right: 3,
+                          bottom: 3,
+                          child: _expandButton(widget),
+                        ),
+                      ],
                     ),
-                    _geometryEdge(
-                      widget: widget,
-                      rect: rect,
-                      canvasWidth: width,
-                      side: _MetricGeometrySide.right,
-                    ),
-                    _geometryEdge(
-                      widget: widget,
-                      rect: rect,
-                      canvasWidth: width,
-                      side: _MetricGeometrySide.top,
-                    ),
-                    _geometryEdge(
-                      widget: widget,
-                      rect: rect,
-                      canvasWidth: width,
-                      side: _MetricGeometrySide.bottom,
-                    ),
-                  ],
-                  Positioned(
-                    right: 3,
-                    bottom: 3,
-                    child: _expandButton(widget),
                   ),
-                ],
-              ),
+                );
+              }).toList(),
             ),
-          );
-        }).toList(),
+          ),
+        ),
       ),
     );
   }
@@ -1301,16 +1331,32 @@ class _MetricsPageState extends State<MetricsPage> {
         ..['pixel_x'] = livePosition.dx.round()
         ..['pixel_y'] = livePosition.dy.round();
     }
-    widget['configuracion'] = config;
+    final geometry = <String, dynamic>{
+      if (liveSize != null) 'pixel_width': liveSize.width.round(),
+      if (liveSize != null) 'pixel_height': liveSize.height.round(),
+      if (livePosition != null) 'pixel_x': livePosition.dx.round(),
+      if (livePosition != null) 'pixel_y': livePosition.dy.round(),
+    };
+    if (mounted) setState(() => _layoutSaveOperations++);
     try {
-      await _repository.saveWidget({
-        ...widget,
-        'dashboard_id': _dashboardId,
-        'configuracion': config,
-        'filtros': _maps(widget['filtros']),
-      });
+      final saved = await _repository.saveWidgetGeometry(
+        widgetId: widgetId,
+        dashboardId: _dashboardId!,
+        geometry: geometry,
+      );
+      final savedConfig = _map(saved['configuracion']);
+      for (final entry in geometry.entries) {
+        final confirmed = (savedConfig[entry.key] as num?)?.round();
+        if (confirmed != entry.value) {
+          throw StateError('PostgreSQL no confirmó ${entry.key}.');
+        }
+      }
       if (mounted) {
         setState(() {
+          widget['configuracion'] = <String, dynamic>{
+            ...config,
+            ...savedConfig,
+          };
           _liveWidgetSizes.remove(widgetId);
           _liveWidgetPositions.remove(widgetId);
         });
@@ -1320,6 +1366,12 @@ class _MetricsPageState extends State<MetricsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo guardar la posición: $error')),
       );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _layoutSaveOperations = math.max(0, _layoutSaveOperations - 1);
+        });
+      }
     }
   }
 
