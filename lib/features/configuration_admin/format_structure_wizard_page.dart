@@ -1409,8 +1409,12 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     return Column(
       children: [
         _question(
-          '¿En qué módulo se mostrará?',
-          'El módulo determina la ubicación del formato en la navegación.',
+          editingPublished
+              ? '¿Mantener o mover este formato?'
+              : '¿En qué módulo se mostrará?',
+          editingPublished
+              ? 'Selecciona otro módulo para mover el formato con toda su configuración y sus tablas.'
+              : 'El módulo determina la ubicación del formato en la navegación.',
           DropdownButtonFormField<String>(
             key: ValueKey('module-$selectedModuleId'),
             initialValue: _availableModuleTemplates.any(
@@ -1418,9 +1422,9 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
             )
                 ? selectedModuleId
                 : null,
-            decoration: const InputDecoration(
-              labelText: 'Módulo *',
-              border: OutlineInputBorder(),
+            decoration: InputDecoration(
+              labelText: editingPublished ? 'Mover al módulo *' : 'Módulo *',
+              border: const OutlineInputBorder(),
             ),
             items: _availableModuleTemplates
                 .map(

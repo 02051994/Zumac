@@ -470,6 +470,8 @@ class _ModulesPageState extends State<ModulesPage> {
   String? _consultantRecordField;
   String? _consultantRecordValue;
   String? _metricsInitialSourceTable;
+  bool _incrementalRefreshRunning = false;
+  bool _incrementalRefreshQueued = false;
 
   String? _desktopContentCacheKey;
   Widget? _desktopContentCache;
@@ -507,11 +509,55 @@ class _ModulesPageState extends State<ModulesPage> {
   void initState() {
     super.initState();
     unawaited(_restoreExperience());
-    loadLocal();
+    unawaited(_loadCachedAndRefresh());
     unawaited(_loadConfigurationAccess());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_maybeOpenOnboarding());
     });
+  }
+
+  Future<void> _loadCachedAndRefresh() async {
+    await loadLocal();
+    await _refreshIncrementallyOnEntry();
+  }
+
+  /// Revalida configuración, permisos y registros al entrar a cualquier vista.
+  /// Las llamadas simultáneas se agrupan para que navegar rápido no dispare
+  /// varias descargas; si hubo otra entrada durante la descarga, se ejecuta un
+  /// último delta al terminar.
+  Future<void> _refreshIncrementallyOnEntry() async {
+    if (Supabase.instance.client.auth.currentUser == null) return;
+    if (_incrementalRefreshRunning) {
+      _incrementalRefreshQueued = true;
+      return;
+    }
+    _incrementalRefreshRunning = true;
+    try {
+      do {
+        _incrementalRefreshQueued = false;
+        try {
+          final hasCache = await local.hasOfflineBootstrapCache();
+          await sync.downloadAllForOffline(
+            allowFullFallback: !hasCache,
+            forceConfigurationRefresh: false,
+          );
+          await loadLocal();
+          await _loadConfigurationAccess();
+          final completedAt = DateTime.now();
+          if (mounted) {
+            setState(() {
+              online = true;
+              lastSyncAt = completedAt;
+            });
+          }
+          unawaited(experience.saveLastSync(completedAt));
+        } catch (_) {
+          if (mounted) setState(() => online = false);
+        }
+      } while (_incrementalRefreshQueued && mounted);
+    } finally {
+      _incrementalRefreshRunning = false;
+    }
   }
 
   Future<void> _restoreExperience() async {
@@ -775,6 +821,7 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   void _activateWorkspaceTool(String tool) {
+    unawaited(_refreshIncrementallyOnEntry());
     _rememberNavigation();
     setState(() {
       _clearDesktopContentCache();
@@ -1923,6 +1970,7 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   void _selectDesktopSection(Map<String, dynamic> section) {
+    unawaited(_refreshIncrementallyOnEntry());
     if (desktopSelectedSection?['id']?.toString() ==
             section['id']?.toString() &&
         desktopSelectedModule == null &&
@@ -1958,6 +2006,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   void _selectDesktopFormat(
       Map<String, dynamic> module, Map<String, dynamic> format) {
+    unawaited(_refreshIncrementallyOnEntry());
     final sameSelection = desktopSelectedModule?['id']?.toString() ==
             module['id']?.toString() &&
         desktopSelectedFormat?['id']?.toString() == format['id']?.toString() &&
@@ -3639,7 +3688,8 @@ class _ModulesPageState extends State<ModulesPage> {
                             ),
                       ],
                     )
-                  : Column(
+                  : ListView(
+                      padding: const EdgeInsets.symmetric(vertical: 4),
                       children: [
                         IconButton(
                           tooltip: 'Inicio',
@@ -3649,26 +3699,36 @@ class _ModulesPageState extends State<ModulesPage> {
                             color: Colors.white,
                           ),
                         ),
-                        IconButton(
-                          tooltip: 'Formatos',
-                          onPressed: () {
-                            desktopSidebarOpen = true;
-                            _clearDesktopSidebarCache();
-                            _desktopSidebarOpenNotifier.value = true;
-                            unawaited(_persistNavigation());
-                          },
-                          icon: const Icon(Icons.apps, color: Colors.white),
-                        ),
-                        IconButton(
-                          tooltip: 'Registros locales',
-                          onPressed: () => _selectDesktopSection({
-                            'id': 'registros_locales',
-                            'nombre': 'Registros locales',
-                            'icono': 'storage'
-                          }),
-                          icon:
-                              const Icon(Icons.storage, color: Colors.white70),
-                        ),
+                        for (final section in visibleSections)
+                          IconButton(
+                            tooltip: _sectionTitle(section),
+                            onPressed: () {
+                              final sectionId = _txt(section['id']);
+                              final expandsTree =
+                                  _sectionHasFormatModules(sectionId) ||
+                                      _sectionUsesDynamicViews(section) ||
+                                      _sectionKind(section) == 'REPORTES';
+                              if (expandsTree) {
+                                setState(() {
+                                  desktopSidebarOpen = true;
+                                  _expandedSectionId = sectionId;
+                                  _clearDesktopSidebarCache();
+                                });
+                                _desktopSidebarOpenNotifier.value = true;
+                                unawaited(_persistNavigation());
+                                unawaited(_refreshIncrementallyOnEntry());
+                              } else {
+                                _sectionTap(section)();
+                              }
+                            },
+                            icon: Icon(
+                              _iconForSection(
+                                _txt(section['id']),
+                                section['icono']?.toString(),
+                              ),
+                              color: Colors.white70,
+                            ),
+                          ),
                       ],
                     ),
             ),

@@ -1217,8 +1217,10 @@ class SyncService {
     // Los dropdowns dependen de snapshots completos de sus tablas fuente. Solo
     // se descargan las fuentes marcadas como cambiadas, pero esas fuentes se
     // reemplazan completas para reflejar altas, ediciones y eliminaciones.
-    final forceAllSourceTables =
-        forceConfigurationRefresh || !incremental || changedTables == null;
+    final forceAllSourceTables = forceConfigurationRefresh ||
+        !incremental ||
+        changedTables == null ||
+        configChanged;
     progress('Actualizando catálogos y fuentes de dropdown...');
     await _yieldToUi();
     final dropdownSourceRows = fieldsForSourceDetection.isEmpty
@@ -1264,7 +1266,7 @@ class SyncService {
         dynamicViewsForDataTables,
         changedTables: changedTables,
         since: incremental ? previousDataSync : null,
-        forceAllTables: !incremental || changedTables == null,
+        forceAllTables: !incremental || changedTables == null || configChanged,
       ));
     }
 
@@ -1280,7 +1282,7 @@ class SyncService {
         formatTables,
         changedTables: changedTables,
         since: incremental ? previousDataSync : null,
-        forceAllTables: !incremental || changedTables == null,
+        forceAllTables: !incremental || changedTables == null || configChanged,
       ));
     } else {
       progress('Web listo: los registros se consultarán por páginas...');

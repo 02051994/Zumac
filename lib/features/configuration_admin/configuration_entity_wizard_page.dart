@@ -954,7 +954,14 @@ class _ConfigurationEntityWizardPageState
               ),
               initialValue: isSection ? selectedRubroId : selectedSectionId,
               decoration: InputDecoration(
-                labelText: isSection ? 'Rubro' : 'Sección',
+                labelText: isSection
+                    ? 'Rubro'
+                    : editingPublished
+                        ? 'Mover a la sección'
+                        : 'Sección',
+                helperText: isModule && editingPublished
+                    ? 'El módulo se moverá con todos los formatos que contiene.'
+                    : null,
                 border: const OutlineInputBorder(),
               ),
               items: (isSection ? rubros : _availableSectionTemplates)

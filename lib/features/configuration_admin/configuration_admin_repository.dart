@@ -169,6 +169,15 @@ class ConfigurationAdminRepository {
   }
 
   Future<List<Map<String, dynamic>>> listPublishedNavigation() async {
+    try {
+      // Creator no mantiene una fotografía paralela: antes de listar, refleja
+      // las matrices canónicas vigentes (incluidos cambios hechos en Supabase).
+      await _client.rpc('appgt_sincronizar_creator_desde_canonico_v2');
+    } on PostgrestException catch (error) {
+      // Permite desplegar la app antes que la migración sin ocultar errores
+      // reales de permisos o integridad una vez que el RPC ya existe.
+      if (error.code != 'PGRST202' && error.code != '42883') rethrow;
+    }
     final results = await Future.wait(
       const ['RUBRO', 'SECCION', 'MODULO', 'FORMATO', 'TABLA']
           .map(_listAllPublishedTemplates),

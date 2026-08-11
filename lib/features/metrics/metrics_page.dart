@@ -74,6 +74,7 @@ class _MetricsPageState extends State<MetricsPage> {
   final Map<String, Size> _liveWidgetSizes = {};
   final Map<String, Offset> _liveWidgetPositions = {};
   Offset? _geometryGestureOrigin;
+  Offset? _geometryPointerPosition;
   String? _error;
 
   bool get _canManage => _context['puede_gestionar'] == true;
@@ -466,20 +467,11 @@ class _MetricsPageState extends State<MetricsPage> {
         reordered.map((dashboard) => '${dashboard['id']}').toList(),
       );
       if (!mounted) return;
-      final savedById = {
-        for (final dashboard in saved) '${dashboard['id']}': dashboard,
-      };
-      final confirmed = reordered.map((dashboard) {
-        final server = savedById['${dashboard['id']}'];
-        return server == null
-            ? dashboard
-            : <String, dynamic>{...dashboard, ...server};
-      }).toList()
-        ..sort((a, b) => ((a['orden'] as num?)?.toInt() ?? 0)
-            .compareTo((b['orden'] as num?)?.toInt() ?? 0));
-      setState(() => _dashboards = confirmed);
+      setState(() => _dashboards = saved);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Orden de dashboards guardado.')),
+        const SnackBar(
+          content: Text('Orden guardado y verificado nuevamente en Supabase.'),
+        ),
       );
     } catch (error) {
       if (!mounted) return;
@@ -548,7 +540,9 @@ class _MetricsPageState extends State<MetricsPage> {
                     text: 'Activa la herramienta para esta empresa.',
                   )
                 : LayoutBuilder(builder: (context, constraints) {
-                    final desktop = constraints.maxWidth >= 920;
+                    // Bajo este ancho se usa la composición fluida: selector
+                    // superior y gráficos apilables sin coordenadas absolutas.
+                    final desktop = constraints.maxWidth >= 1180;
                     final panelOpen =
                         _editingWidget != null || _filterEditorOpen;
                     if (desktop) {
@@ -623,9 +617,9 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
-  /// Conserva el ancho geométrico del lienzo mientras el panel está abierto.
-  /// El espacio visible puede reducirse, pero las coordenadas y dimensiones de
-  /// los gráficos no cambian ni se escalan por abrir la configuración.
+  /// Conserva la geometría del dashboard y reduce visualmente el lienzo cuando
+  /// se abre el panel, como Power BI. El panel ocupa su propia columna y nunca
+  /// tapa ni recorta los gráficos.
   Widget _dashboardViewport({required bool panelOpen}) {
     return SizedBox.expand(
       child: _dashboardCanvas(
@@ -778,6 +772,16 @@ class _MetricsPageState extends State<MetricsPage> {
     }
     final dashboard = _selectedDashboard!;
     final canvasConfig = _map(dashboard['configuracion']);
+    final dashboardTitleSize =
+        ((canvasConfig['dashboard_title_font_size'] as num?)?.toDouble() ?? 28)
+            .clamp(14.0, 72.0)
+            .toDouble();
+    final dashboardTitleFont =
+        canvasConfig['dashboard_title_font']?.toString().trim();
+    final dashboardTitleColor = _color(
+      canvasConfig['dashboard_title_color'],
+      _metricsNavy,
+    );
     final backgroundColor = _color(
       canvasConfig['background_color'] ?? dashboard['color'],
       _metricsCanvas,
@@ -803,8 +807,9 @@ class _MetricsPageState extends State<MetricsPage> {
     }
     return Container(
       decoration: BoxDecoration(
-        color: backgroundColor.withValues(
-          alpha: (canvasConfig['background_opacity'] as num?)?.toDouble() ?? 1,
+        color: _colorWithOpacity(
+          backgroundColor,
+          (canvasConfig['background_opacity'] as num?)?.toDouble() ?? 1,
         ),
         image: backgroundImage,
       ),
@@ -820,70 +825,12 @@ class _MetricsPageState extends State<MetricsPage> {
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
                       if (!desktop) _mobileDashboardPicker(),
-                      Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Expanded(
-                              child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text('${dashboard['nombre']}',
-                                        style: TextStyle(
-                                          color: _metricsNavy,
-                                          fontSize: desktop ? 28 : 23,
-                                          fontWeight: FontWeight.w900,
-                                        )),
-                                    if ('${dashboard['descripcion'] ?? ''}'
-                                        .trim()
-                                        .isNotEmpty)
-                                      Padding(
-                                        padding: const EdgeInsets.only(top: 4),
-                                        child: Text(
-                                            '${dashboard['descripcion']}',
-                                            style: const TextStyle(
-                                                color: _metricsMuted)),
-                                      ),
-                                  ]),
-                            ),
-                            if (_canManage) ...[
-                              IconButton(
-                                tooltip: 'Agregar gráfico',
-                                onPressed: _editWidget,
-                                icon: const Icon(Icons.add_chart_outlined),
-                              ),
-                              IconButton(
-                                tooltip: 'Agregar filtro',
-                                onPressed: _openFilterPanel,
-                                icon: const Icon(Icons.filter_alt_outlined),
-                              ),
-                            ],
-                            if (_canManage)
-                              PopupMenuButton<String>(
-                                tooltip: 'Administrar dashboard',
-                                onSelected: (value) {
-                                  if (value == 'edit') {
-                                    _editDashboard(dashboard);
-                                  }
-                                  if (value == 'relations') {
-                                    _manageRelations();
-                                  }
-                                  if (value == 'delete') {
-                                    _deleteDashboard();
-                                  }
-                                },
-                                itemBuilder: (_) => const [
-                                  PopupMenuItem(
-                                      value: 'edit', child: Text('Editar')),
-                                  PopupMenuItem(
-                                      value: 'relations',
-                                      child: Text('Relacionar tablas')),
-                                  PopupMenuDivider(),
-                                  PopupMenuItem(
-                                      value: 'delete',
-                                      child: Text('Eliminar dashboard')),
-                                ],
-                              ),
-                          ]),
+                      _dashboardHeader(
+                        dashboard: dashboard,
+                        configuredTitleSize: dashboardTitleSize,
+                        titleColor: dashboardTitleColor,
+                        titleFont: dashboardTitleFont,
+                      ),
                       const SizedBox(height: 16),
                       if (_maps(dashboard['filtros_globales']).isNotEmpty)
                         const Text(
@@ -930,9 +877,13 @@ class _MetricsPageState extends State<MetricsPage> {
                       _desktopCanvasReferenceWidth = width;
                     }
                     final layoutWidth = desktop ? referenceWidth : width;
-                    final columns = layoutWidth >= 1280
-                        ? 3
-                        : layoutWidth >= 720
+                    final columns = desktop
+                        ? layoutWidth >= 1280
+                            ? 3
+                            : layoutWidth >= 720
+                                ? 2
+                                : 1
+                        : width >= 1100
                             ? 2
                             : 1;
                     const gap = 14.0;
@@ -940,7 +891,7 @@ class _MetricsPageState extends State<MetricsPage> {
                         (layoutWidth - gap * (columns - 1)) / columns;
                     final desktopCanvas = desktop
                         ? _desktopWidgetCanvas(
-                            viewportWidth: referenceWidth,
+                            viewportWidth: width,
                             geometryWidth: referenceWidth,
                             columns: columns,
                             gap: gap,
@@ -948,12 +899,7 @@ class _MetricsPageState extends State<MetricsPage> {
                         : null;
                     return SliverToBoxAdapter(
                       child: desktop
-                          ? (preserveDesktopGeometry
-                              ? SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: desktopCanvas!,
-                                )
-                              : desktopCanvas!)
+                          ? desktopCanvas!
                           : Wrap(
                               spacing: gap,
                               runSpacing: gap,
@@ -973,18 +919,15 @@ class _MetricsPageState extends State<MetricsPage> {
                                 final config = _map(widget['configuracion']);
                                 final defaultWidth =
                                     cardWidth * span + gap * (span - 1);
-                                final persistedWidth =
-                                    (config['pixel_width'] as num?)?.toDouble();
                                 final persistedHeight =
                                     (config['pixel_height'] as num?)
                                         ?.toDouble();
                                 final liveSize = _liveWidgetSizes[widgetId];
-                                final minimumWidth = math.min(260.0, width);
-                                final sizedWidth = (liveSize?.width ??
-                                        persistedWidth ??
-                                        defaultWidth)
-                                    .clamp(minimumWidth, width)
-                                    .toDouble();
+                                // En modo responsive la geometría libre no se
+                                // usa: cada tarjeta ocupa su celda completa y
+                                // nunca puede desbordar el viewport.
+                                final sizedWidth =
+                                    defaultWidth.clamp(0.0, width).toDouble();
                                 final sizedHeight = (liveSize?.height ??
                                         persistedHeight ??
                                         _widgetHeight(widget, columns))
@@ -1034,6 +977,103 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
+  Widget _dashboardHeader({
+    required Map<String, dynamic> dashboard,
+    required double configuredTitleSize,
+    required Color titleColor,
+    required String? titleFont,
+  }) {
+    final actions = <Widget>[
+      if (_canManage)
+        IconButton(
+          tooltip: 'Agregar gráfico',
+          onPressed: _editWidget,
+          icon: const Icon(Icons.add_chart_outlined),
+        ),
+      if (_canManage)
+        IconButton(
+          tooltip: 'Agregar filtro',
+          onPressed: _openFilterPanel,
+          icon: const Icon(Icons.filter_alt_outlined),
+        ),
+      if (_canManage)
+        PopupMenuButton<String>(
+          tooltip: 'Administrar dashboard',
+          onSelected: (value) {
+            if (value == 'edit') _editDashboard(dashboard);
+            if (value == 'relations') _manageRelations();
+            if (value == 'delete') _deleteDashboard();
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: Text('Editar')),
+            PopupMenuItem(
+              value: 'relations',
+              child: Text('Relacionar tablas'),
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(value: 'delete', child: Text('Eliminar dashboard')),
+          ],
+        ),
+    ];
+    return LayoutBuilder(builder: (context, constraints) {
+      final compact = constraints.maxWidth < 620;
+      final titleSize = metricsResponsiveDashboardTitleSize(
+        configuredSize: configuredTitleSize,
+        availableWidth: constraints.maxWidth,
+      );
+      final title = Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '${dashboard['nombre']}',
+            maxLines: compact ? 3 : 2,
+            softWrap: true,
+            overflow: TextOverflow.fade,
+            style: TextStyle(
+              color: titleColor,
+              fontSize: titleSize,
+              height: 1.08,
+              fontFamily: titleFont?.isEmpty == false ? titleFont : null,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          if ('${dashboard['descripcion'] ?? ''}'.trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${dashboard['descripcion']}',
+                softWrap: true,
+                style: const TextStyle(color: _metricsMuted),
+              ),
+            ),
+        ],
+      );
+      if (compact) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            title,
+            if (actions.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(spacing: 2, runSpacing: 2, children: actions),
+              ),
+            ],
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: title),
+          if (actions.isNotEmpty)
+            Wrap(spacing: 2, runSpacing: 2, children: actions),
+        ],
+      );
+    });
+  }
+
   /// Lienzo libre para pantallas amplias.
   ///
   /// Cada objeto conserva su posición y tamaño en `configuracion`, de modo
@@ -1044,7 +1084,10 @@ class _MetricsPageState extends State<MetricsPage> {
     required int columns,
     required double gap,
   }) {
-    final scale = math.min(1.0, viewportWidth / geometryWidth);
+    final scale = metricsDesktopCanvasScale(
+      viewportWidth: viewportWidth,
+      geometryWidth: geometryWidth,
+    );
     final cellWidth = (geometryWidth - gap * (columns - 1)) / columns;
     final rects = <({Map<String, dynamic> widget, Rect rect})>[];
     for (var index = 0; index < _widgets.length; index++) {
@@ -1125,43 +1168,55 @@ class _MetricsPageState extends State<MetricsPage> {
                             child: _metricCard(widget),
                           ),
                         ),
-                        if (_canManage && scale >= .999)
+                        if (_canManage)
                           _widgetMoveHandle(
                             widget: widget,
                             rect: rect,
                             canvasWidth: geometryWidth,
+                            canvasScale: scale,
                           ),
-                        if (_canManage && selected && scale >= .999) ...[
+                        if (_canManage) ...[
                           _geometryEdge(
                             widget: widget,
                             rect: rect,
                             canvasWidth: geometryWidth,
+                            canvasScale: scale,
                             side: _MetricGeometrySide.left,
                           ),
                           _geometryEdge(
                             widget: widget,
                             rect: rect,
                             canvasWidth: geometryWidth,
+                            canvasScale: scale,
                             side: _MetricGeometrySide.right,
                           ),
                           _geometryEdge(
                             widget: widget,
                             rect: rect,
                             canvasWidth: geometryWidth,
+                            canvasScale: scale,
                             side: _MetricGeometrySide.top,
                           ),
                           _geometryEdge(
                             widget: widget,
                             rect: rect,
                             canvasWidth: geometryWidth,
+                            canvasScale: scale,
                             side: _MetricGeometrySide.bottom,
                           ),
                         ],
                         Positioned(
-                          right: 3,
+                          left: 3,
                           bottom: 3,
                           child: _expandButton(widget),
                         ),
+                        if (_canManage)
+                          _widgetResizeHandle(
+                            widget: widget,
+                            rect: rect,
+                            canvasWidth: geometryWidth,
+                            canvasScale: scale,
+                          ),
                       ],
                     ),
                   ),
@@ -1193,45 +1248,65 @@ class _MetricsPageState extends State<MetricsPage> {
     required Map<String, dynamic> widget,
     required Rect rect,
     required double canvasWidth,
+    required double canvasScale,
   }) {
     final widgetId = widget['id']?.toString() ?? '';
+    final safeScale = math.max(.1, canvasScale);
+    final handleSize = 34 / safeScale;
     return Positioned(
-      left: 8,
-      top: 8,
-      width: 34,
-      height: 34,
+      left: 8 / safeScale,
+      top: 8 / safeScale,
+      width: handleSize,
+      height: handleSize,
       child: MouseRegion(
         cursor: SystemMouseCursors.move,
         child: Tooltip(
           message: 'Arrastra para mover el gráfico',
           child: GestureDetector(
             behavior: HitTestBehavior.opaque,
-            onPanStart: (_) {
+            onPanStart: (details) {
               _geometryGestureOrigin =
                   _liveWidgetPositions[widgetId] ?? rect.topLeft;
+              _geometryPointerPosition = details.globalPosition;
               setState(() => _movingWidgetId = widgetId);
             },
             onPanUpdate: (details) {
               final current = _liveWidgetPositions[widgetId] ?? rect.topLeft;
+              final previousPointer =
+                  _geometryPointerPosition ?? details.globalPosition;
+              final screenDelta = details.globalPosition - previousPointer;
+              _geometryPointerPosition = details.globalPosition;
+              final canvasDelta = Offset(
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dx,
+                  canvasScale: safeScale,
+                ),
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dy,
+                  canvasScale: safeScale,
+                ),
+              );
               final next = Offset(
-                (current.dx + details.delta.dx)
+                (current.dx + canvasDelta.dx)
                     .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
-                math.max(0.0, current.dy + details.delta.dy),
+                math.max(0.0, current.dy + canvasDelta.dy),
               );
               setState(() => _liveWidgetPositions[widgetId] = next);
             },
             onPanEnd: (_) async {
               _geometryGestureOrigin = null;
+              _geometryPointerPosition = null;
               await _persistWidgetGeometry(widget);
               if (mounted) setState(() => _movingWidgetId = null);
             },
             onPanCancel: () {
               _geometryGestureOrigin = null;
+              _geometryPointerPosition = null;
               if (mounted) setState(() => _movingWidgetId = null);
             },
-            child: const Icon(
+            child: Icon(
               Icons.drag_indicator_rounded,
-              size: 21,
+              size: 21 / safeScale,
               color: _metricsMuted,
             ),
           ),
@@ -1244,8 +1319,11 @@ class _MetricsPageState extends State<MetricsPage> {
     required Map<String, dynamic> widget,
     required Rect rect,
     required double canvasWidth,
+    required double canvasScale,
     required _MetricGeometrySide side,
   }) {
+    final safeScale = math.max(.1, canvasScale);
+    final widgetId = widget['id']?.toString() ?? '';
     final horizontalBorder =
         side == _MetricGeometrySide.top || side == _MetricGeometrySide.bottom;
     final edge = MouseRegion(
@@ -1258,46 +1336,214 @@ class _MetricsPageState extends State<MetricsPage> {
             : 'Arrastra para ajustar el ancho; mantén presionado para mover',
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onPanUpdate: (details) => _resizeWidgetFromEdge(
-            widget,
-            rect,
-            details.delta,
-            side: side,
-            canvasWidth: canvasWidth,
-          ),
-          onPanEnd: (_) => unawaited(_persistWidgetGeometry(widget)),
-          onLongPressStart: (_) {
+          onPanStart: (details) {
+            _geometryPointerPosition = details.globalPosition;
+            setState(() => _resizingWidgetId = widgetId);
+          },
+          onPanUpdate: (details) {
+            final previousPointer =
+                _geometryPointerPosition ?? details.globalPosition;
+            final screenDelta = details.globalPosition - previousPointer;
+            _geometryPointerPosition = details.globalPosition;
+            _resizeWidgetFromEdge(
+              widget,
+              rect,
+              Offset(
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dx,
+                  canvasScale: safeScale,
+                ),
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dy,
+                  canvasScale: safeScale,
+                ),
+              ),
+              side: side,
+              canvasWidth: canvasWidth,
+            );
+          },
+          onPanEnd: (_) async {
+            _geometryPointerPosition = null;
+            await _persistWidgetGeometry(widget);
+            if (mounted && _editingWidget?['id']?.toString() != widgetId) {
+              setState(() => _resizingWidgetId = null);
+            }
+          },
+          onPanCancel: () {
+            _geometryPointerPosition = null;
+            if (mounted && _editingWidget?['id']?.toString() != widgetId) {
+              setState(() => _resizingWidgetId = null);
+            }
+          },
+          onLongPressStart: (details) {
             _geometryGestureOrigin =
-                _liveWidgetPositions['${widget['id']}'] ?? rect.topLeft;
+                _liveWidgetPositions[widgetId] ?? rect.topLeft;
+            _geometryPointerPosition = details.globalPosition;
+            setState(() => _movingWidgetId = widgetId);
           },
           onLongPressMoveUpdate: (details) {
-            final widgetId = widget['id']?.toString() ?? '';
             final origin = _geometryGestureOrigin ?? rect.topLeft;
+            final pointerOrigin =
+                _geometryPointerPosition ?? details.globalPosition;
+            final screenDelta = details.globalPosition - pointerOrigin;
             final next = Offset(
-              (origin.dx + details.offsetFromOrigin.dx)
+              (origin.dx +
+                      metricsCanvasGestureDelta(
+                        screenDelta: screenDelta.dx,
+                        canvasScale: safeScale,
+                      ))
                   .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
-              math.max(0.0, origin.dy + details.offsetFromOrigin.dy),
+              math.max(
+                0.0,
+                origin.dy +
+                    metricsCanvasGestureDelta(
+                      screenDelta: screenDelta.dy,
+                      canvasScale: safeScale,
+                    ),
+              ),
             );
             setState(() => _liveWidgetPositions[widgetId] = next);
           },
-          onLongPressEnd: (_) {
+          onLongPressEnd: (_) async {
             _geometryGestureOrigin = null;
-            unawaited(_persistWidgetGeometry(widget));
+            _geometryPointerPosition = null;
+            await _persistWidgetGeometry(widget);
+            if (mounted) setState(() => _movingWidgetId = null);
           },
           child: const SizedBox.expand(),
         ),
       ),
     );
     return switch (side) {
-      _MetricGeometrySide.left =>
-        Positioned(left: 0, top: 12, bottom: 12, width: 8, child: edge),
-      _MetricGeometrySide.right =>
-        Positioned(right: 0, top: 12, bottom: 42, width: 8, child: edge),
-      _MetricGeometrySide.top =>
-        Positioned(left: 12, right: 12, top: 0, height: 8, child: edge),
-      _MetricGeometrySide.bottom =>
-        Positioned(left: 12, right: 42, bottom: 0, height: 8, child: edge),
+      _MetricGeometrySide.left => Positioned(
+          left: 0,
+          top: 12 / safeScale,
+          bottom: 12 / safeScale,
+          width: 8 / safeScale,
+          child: edge,
+        ),
+      _MetricGeometrySide.right => Positioned(
+          right: 0,
+          top: 12 / safeScale,
+          bottom: 42 / safeScale,
+          width: 8 / safeScale,
+          child: edge,
+        ),
+      _MetricGeometrySide.top => Positioned(
+          left: 12 / safeScale,
+          right: 12 / safeScale,
+          top: 0,
+          height: 8 / safeScale,
+          child: edge,
+        ),
+      _MetricGeometrySide.bottom => Positioned(
+          left: 12 / safeScale,
+          right: 42 / safeScale,
+          bottom: 0,
+          height: 8 / safeScale,
+          child: edge,
+        ),
     };
+  }
+
+  Widget _widgetResizeHandle({
+    required Map<String, dynamic> widget,
+    required Rect rect,
+    required double canvasWidth,
+    required double canvasScale,
+  }) {
+    final widgetId = widget['id']?.toString() ?? '';
+    final safeScale = math.max(.1, canvasScale);
+    final hitSize = 44 / safeScale;
+    final buttonSize = 34 / safeScale;
+
+    void finishResize() {
+      _geometryPointerPosition = null;
+      unawaited(
+        _persistWidgetGeometry(widget).whenComplete(() {
+          if (mounted && _editingWidget?['id']?.toString() != widgetId) {
+            setState(() => _resizingWidgetId = null);
+          }
+        }),
+      );
+    }
+
+    void cancelResize() {
+      _geometryPointerPosition = null;
+      if (mounted && _editingWidget?['id']?.toString() != widgetId) {
+        setState(() => _resizingWidgetId = null);
+      }
+    }
+
+    return Positioned(
+      left: 48 / safeScale,
+      top: 3 / safeScale,
+      width: hitSize,
+      height: hitSize,
+      child: MouseRegion(
+        cursor: SystemMouseCursors.resizeDownRight,
+        child: Tooltip(
+          message: 'Arrastra para cambiar el tamaño del gráfico',
+          child: Listener(
+            behavior: HitTestBehavior.opaque,
+            onPointerDown: (event) {
+              _geometryPointerPosition = event.position;
+              if (mounted) {
+                setState(() => _resizingWidgetId = widgetId);
+              }
+            },
+            onPointerMove: (event) {
+              final previousPointer =
+                  _geometryPointerPosition ?? event.position;
+              final screenDelta = event.position - previousPointer;
+              _geometryPointerPosition = event.position;
+              final canvasDelta = Offset(
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dx,
+                  canvasScale: safeScale,
+                ),
+                metricsCanvasGestureDelta(
+                  screenDelta: screenDelta.dy,
+                  canvasScale: safeScale,
+                ),
+              );
+              _resizeWidgetFromEdge(
+                widget,
+                rect,
+                Offset(canvasDelta.dx, 0),
+                side: _MetricGeometrySide.right,
+                canvasWidth: canvasWidth,
+              );
+              _resizeWidgetFromEdge(
+                widget,
+                rect,
+                Offset(0, canvasDelta.dy),
+                side: _MetricGeometrySide.bottom,
+                canvasWidth: canvasWidth,
+              );
+            },
+            onPointerUp: (_) => finishResize(),
+            onPointerCancel: (_) => cancelResize(),
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Material(
+                color: Colors.white.withValues(alpha: .94),
+                shape: const CircleBorder(),
+                elevation: 1,
+                child: SizedBox.square(
+                  dimension: buttonSize,
+                  child: Icon(
+                    Icons.aspect_ratio_rounded,
+                    size: 18 / safeScale,
+                    color: _metricsTeal,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _resizeWidgetFromEdge(
@@ -4694,9 +4940,14 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
   late final TextEditingController _name;
   late final TextEditingController _description;
   late final TextEditingController _userSearch;
+  late final TextEditingController _backgroundColorController;
+  late final TextEditingController _titleColorController;
   String _color = '#176B87';
   String _backgroundImage = '';
   double _backgroundOpacity = 1;
+  double _titleFontSize = 28;
+  String _titleFontFamily = 'Roboto';
+  String _titleColor = '#142F49';
   String _visibility = 'ALL';
   final Set<String> _selectedUsers = <String>{};
 
@@ -4707,11 +4958,20 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
     _description =
         TextEditingController(text: '${widget.initial?['descripcion'] ?? ''}');
     _userSearch = TextEditingController()..addListener(_refreshUserSearch);
-    _color = '${widget.initial?['color'] ?? '#176B87'}';
     final config = _map(widget.initial?['configuracion']);
+    _color = config['background_color']?.toString() ??
+        '${widget.initial?['color'] ?? '#176B87'}';
+    _backgroundColorController = TextEditingController(text: _color);
     _backgroundImage = config['background_image']?.toString() ?? '';
     _backgroundOpacity =
         (config['background_opacity'] as num?)?.toDouble() ?? 1;
+    _titleFontSize =
+        ((config['dashboard_title_font_size'] as num?)?.toDouble() ?? 28)
+            .clamp(14.0, 72.0)
+            .toDouble();
+    _titleFontFamily = config['dashboard_title_font']?.toString() ?? 'Roboto';
+    _titleColor = config['dashboard_title_color']?.toString() ?? '#142F49';
+    _titleColorController = TextEditingController(text: _titleColor);
     _visibility = config['visibility']?.toString() ?? 'ALL';
     _selectedUsers.addAll((config['users'] as List? ?? const [])
         .map((value) => value.toString()));
@@ -4721,6 +4981,8 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
   void dispose() {
     _name.dispose();
     _description.dispose();
+    _backgroundColorController.dispose();
+    _titleColorController.dispose();
     _userSearch
       ..removeListener(_refreshUserSearch)
       ..dispose();
@@ -4728,6 +4990,32 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
   }
 
   void _refreshUserSearch() => setState(() {});
+
+  void _setBackgroundColor(String value) {
+    _backgroundColorController.text = value;
+    setState(() => _color = value);
+  }
+
+  void _setTitleColor(String value) {
+    _titleColorController.text = value;
+    setState(() => _titleColor = value);
+  }
+
+  Future<void> _openColorPalette({required bool title}) async {
+    final value = await showDialog<String>(
+      context: context,
+      builder: (_) => _MetricsColorPickerDialog(
+        initial: title ? _titleColor : _color,
+        allowTransparent: !title,
+      ),
+    );
+    if (!mounted || value == null) return;
+    if (title) {
+      _setTitleColor(value);
+    } else {
+      _setBackgroundColor(value);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -4753,8 +5041,91 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
                 labelText: 'Descripción', border: OutlineInputBorder()),
           ),
           const SizedBox(height: 12),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Text(
+              'Estilo del título',
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: DropdownButtonFormField<String>(
+                  initialValue: _titleFontFamily,
+                  decoration: const InputDecoration(
+                    labelText: 'Tipo de letra',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    'Roboto',
+                    'Arial',
+                    'Calibri',
+                    'Verdana',
+                    'Georgia',
+                    'Times New Roman',
+                  ]
+                      .map((font) => DropdownMenuItem(
+                            value: font,
+                            child:
+                                Text(font, style: TextStyle(fontFamily: font)),
+                          ))
+                      .toList(),
+                  onChanged: (value) => setState(
+                    () => _titleFontFamily = value ?? 'Roboto',
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: TextFormField(
+                  controller: _titleColorController,
+                  decoration: InputDecoration(
+                    labelText: 'Color del título',
+                    hintText: '#142F49',
+                    prefixIcon: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: CircleAvatar(
+                        radius: 9,
+                        backgroundColor: _colorFromHex(_titleColor),
+                      ),
+                    ),
+                    suffixIcon: IconButton(
+                      tooltip: 'Abrir paleta de colores',
+                      onPressed: () => _openColorPalette(title: true),
+                      icon: const Icon(Icons.palette_outlined),
+                    ),
+                    border: const OutlineInputBorder(),
+                  ),
+                  onChanged: (value) => setState(() => _titleColor = value),
+                ),
+              ),
+            ],
+          ),
+          Row(
+            children: [
+              const Text('Tamaño'),
+              Expanded(
+                child: Slider(
+                  value: _titleFontSize,
+                  min: 14,
+                  max: 72,
+                  divisions: 58,
+                  label: '${_titleFontSize.round()} px',
+                  onChanged: (value) => setState(() => _titleFontSize = value),
+                ),
+              ),
+              SizedBox(
+                width: 52,
+                child: Text('${_titleFontSize.round()} px'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
           TextFormField(
-            initialValue: _color,
+            controller: _backgroundColorController,
             decoration: InputDecoration(
               labelText: 'Color de fondo · Hex o RGB',
               hintText: '#176B87 o rgb(23,107,135)',
@@ -4764,6 +5135,11 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
                   radius: 9,
                   backgroundColor: _colorFromHex(_color),
                 ),
+              ),
+              suffixIcon: IconButton(
+                tooltip: 'Abrir paleta completa de colores',
+                onPressed: () => _openColorPalette(title: false),
+                icon: const Icon(Icons.palette_outlined),
               ),
               border: const OutlineInputBorder(),
             ),
@@ -4785,7 +5161,7 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
                   .map((value) => Tooltip(
                       message: value == 'transparent' ? 'Sin color' : value,
                       child: InkWell(
-                        onTap: () => setState(() => _color = value),
+                        onTap: () => _setBackgroundColor(value),
                         borderRadius: BorderRadius.circular(20),
                         child: Container(
                           width: 30,
@@ -4965,6 +5341,9 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
                       'background_color': _color,
                       'background_image': _backgroundImage,
                       'background_opacity': _backgroundOpacity,
+                      'dashboard_title_font_size': _titleFontSize,
+                      'dashboard_title_font': _titleFontFamily,
+                      'dashboard_title_color': _titleColor,
                       'visibility': _visibility,
                       'users': _selectedUsers.toList(),
                     },
@@ -4974,6 +5353,249 @@ class _DashboardEditorDialogState extends State<_DashboardEditorDialog> {
       ],
     );
   }
+}
+
+class _MetricsColorPickerDialog extends StatefulWidget {
+  const _MetricsColorPickerDialog({
+    required this.initial,
+    required this.allowTransparent,
+  });
+
+  final String initial;
+  final bool allowTransparent;
+
+  @override
+  State<_MetricsColorPickerDialog> createState() =>
+      _MetricsColorPickerDialogState();
+}
+
+class _MetricsColorPickerDialogState extends State<_MetricsColorPickerDialog> {
+  late HSVColor _hsv;
+  late bool _transparent;
+  late final TextEditingController _hex;
+
+  static const _swatches = <Color>[
+    Color(0xFF142F49),
+    Color(0xFF176B87),
+    Color(0xFF00838F),
+    Color(0xFF00695C),
+    Color(0xFF2E7D32),
+    Color(0xFF558B2F),
+    Color(0xFF9E9D24),
+    Color(0xFFF9A825),
+    Color(0xFFEF6C00),
+    Color(0xFFD84315),
+    Color(0xFFC62828),
+    Color(0xFFAD1457),
+    Color(0xFF6A1B9A),
+    Color(0xFF4527A0),
+    Color(0xFF283593),
+    Color(0xFF1565C0),
+    Color(0xFF0277BD),
+    Color(0xFF455A64),
+    Color(0xFF5D4037),
+    Color(0xFF616161),
+    Color(0xFFFFFFFF),
+    Color(0xFFECEFF1),
+    Color(0xFF90A4AE),
+    Color(0xFF000000),
+  ];
+
+  @override
+  void initState() {
+    super.initState();
+    _transparent = widget.initial.trim().toLowerCase() == 'transparent';
+    final initialColor =
+        _transparent ? _metricsTeal : _color(widget.initial, _metricsTeal);
+    _hsv = HSVColor.fromColor(initialColor);
+    _hex = TextEditingController(
+      text: _transparent ? 'transparent' : _hexValue(initialColor),
+    );
+  }
+
+  @override
+  void dispose() {
+    _hex.dispose();
+    super.dispose();
+  }
+
+  static String _hexValue(Color color) =>
+      '#${(color.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+  void _selectColor(Color color) {
+    setState(() {
+      _transparent = false;
+      _hsv = HSVColor.fromColor(color);
+      _hex.text = _hexValue(color);
+    });
+  }
+
+  void _updateHsv(HSVColor value) {
+    setState(() {
+      _transparent = false;
+      _hsv = value;
+      _hex.text = _hexValue(value.toColor());
+    });
+  }
+
+  void _applyTypedColor(String value) {
+    final normalized = value.trim();
+    if (widget.allowTransparent && normalized.toLowerCase() == 'transparent') {
+      setState(() => _transparent = true);
+      return;
+    }
+    _selectColor(_color(normalized, _hsv.toColor()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _hsv.toColor();
+    return AlertDialog(
+      scrollable: true,
+      title: const Text('Paleta de colores'),
+      content: SizedBox(
+        width: 430,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              height: 62,
+              decoration: BoxDecoration(
+                color: _transparent ? Colors.transparent : selected,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFB9C8D0)),
+              ),
+              alignment: Alignment.center,
+              child: _transparent
+                  ? const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.block),
+                        SizedBox(width: 8),
+                        Text('Fondo transparente'),
+                      ],
+                    )
+                  : null,
+            ),
+            const SizedBox(height: 14),
+            Wrap(
+              spacing: 9,
+              runSpacing: 9,
+              children: _swatches
+                  .map((color) => InkWell(
+                        onTap: () => _selectColor(color),
+                        borderRadius: BorderRadius.circular(18),
+                        child: Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: color,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: !_transparent &&
+                                      selected.toARGB32() == color.toARGB32()
+                                  ? _metricsTeal
+                                  : const Color(0xFFB9C8D0),
+                              width: 2,
+                            ),
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            ),
+            const SizedBox(height: 14),
+            TextFormField(
+              controller: _hex,
+              decoration: const InputDecoration(
+                labelText: 'Hex, RGB o RGBA',
+                border: OutlineInputBorder(),
+              ),
+              onFieldSubmitted: _applyTypedColor,
+            ),
+            if (widget.allowTransparent)
+              SwitchListTile.adaptive(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Sin color (transparente)'),
+                value: _transparent,
+                onChanged: (value) => setState(() {
+                  _transparent = value;
+                  _hex.text = value ? 'transparent' : _hexValue(selected);
+                }),
+              ),
+            _ColorSlider(
+              label: 'Matiz',
+              value: _hsv.hue,
+              max: 360,
+              enabled: !_transparent,
+              onChanged: (value) => _updateHsv(_hsv.withHue(value)),
+            ),
+            _ColorSlider(
+              label: 'Saturación',
+              value: _hsv.saturation,
+              max: 1,
+              enabled: !_transparent,
+              onChanged: (value) => _updateHsv(_hsv.withSaturation(value)),
+            ),
+            _ColorSlider(
+              label: 'Brillo',
+              value: _hsv.value,
+              max: 1,
+              enabled: !_transparent,
+              onChanged: (value) => _updateHsv(_hsv.withValue(value)),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancelar'),
+        ),
+        FilledButton.icon(
+          onPressed: () {
+            _applyTypedColor(_hex.text);
+            Navigator.pop(
+              context,
+              _transparent ? 'transparent' : _hexValue(_hsv.toColor()),
+            );
+          },
+          icon: const Icon(Icons.check_rounded),
+          label: const Text('Elegir'),
+        ),
+      ],
+    );
+  }
+}
+
+class _ColorSlider extends StatelessWidget {
+  const _ColorSlider({
+    required this.label,
+    required this.value,
+    required this.max,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String label;
+  final double value;
+  final double max;
+  final bool enabled;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          SizedBox(width: 82, child: Text(label)),
+          Expanded(
+            child: Slider(
+              value: value.clamp(0.0, max).toDouble(),
+              max: max,
+              onChanged: enabled ? onChanged : null,
+            ),
+          ),
+        ],
+      );
 }
 
 class MetricWidgetEditorPage extends StatefulWidget {
@@ -7277,6 +7899,14 @@ Color _color(dynamic value, Color fallback) {
   final text = raw.replaceAll('#', '');
   final parsed = int.tryParse(text.length == 6 ? 'FF$text' : text, radix: 16);
   return parsed == null ? fallback : Color(parsed);
+}
+
+Color _colorWithOpacity(Color color, double opacity) {
+  final sourceAlpha = (color.toARGB32() >> 24) & 0xFF;
+  if (sourceAlpha == 0) return Colors.transparent;
+  return color.withValues(
+    alpha: (opacity.clamp(0.0, 1.0) * sourceAlpha / 255).toDouble(),
+  );
 }
 
 double? _number(dynamic value) {

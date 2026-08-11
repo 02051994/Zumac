@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'metrics_layout.dart';
+
 /// Acceso a la configuración y a los datos de Metrics.
 ///
 /// Los dashboards, gráficos y relaciones son metadatos: agregar una nueva
@@ -16,14 +18,21 @@ class MetricsRepository {
   Future<Map<String, dynamic>> loadContext() async =>
       _map(await _client.rpc('appgt_metrics_contexto_v1'));
 
-  Future<List<Map<String, dynamic>>> listDashboards() async =>
-      _list(await _client
-          .from('ZUMAC_METRICS_DASHBOARDS_APPGT')
-          .select()
-          .eq('activo', true)
-          .filter('deleted_at', 'is', null)
-          .order('orden')
-          .order('created_at'));
+  Future<List<Map<String, dynamic>>> listDashboards() async {
+    try {
+      final response = _map(
+        await _client.rpc('appgt_listar_dashboards_metrics_v1'),
+      );
+      return _list(response['dashboards']);
+    } on PostgrestException catch (error) {
+      if (_isMissingRpc(error)) {
+        throw StateError(
+          'Falta aplicar la migración 039 de Metrics en Supabase.',
+        );
+      }
+      rethrow;
+    }
+  }
 
   Future<List<Map<String, dynamic>>> listWidgets(String dashboardId) async =>
       _list(await _client
@@ -68,29 +77,34 @@ class MetricsRepository {
   Future<List<Map<String, dynamic>>> reorderDashboards(
     List<String> dashboardIds,
   ) async {
-    final response = _map(await _client.rpc(
-      'appgt_reordenar_dashboards_metrics_v2',
-      params: {'p_ids': dashboardIds},
-    ));
-    // El RPC confirma el orden en la misma transacción que lo guarda. Evitar
-    // una segunda lectura también evita falsos negativos por filtros RLS.
+    late final Map<String, dynamic> response;
+    try {
+      response = _map(await _client.rpc(
+        'appgt_reordenar_dashboards_metrics_v4',
+        params: {'p_ids': dashboardIds},
+      ));
+    } on PostgrestException catch (error) {
+      // V2/V3 no ofrecen la verificación independiente de este flujo. Volver a
+      // ellas haría posible mostrar nuevamente un falso “guardado”.
+      if (_isMissingRpc(error)) {
+        throw StateError(
+          'Falta aplicar la migración 039 de Metrics en Supabase.',
+        );
+      }
+      rethrow;
+    }
     if (response['guardado'] != true) {
       throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
     }
-    final confirmed = _list(response['dashboards']);
-    final confirmedIds = confirmed.map((row) => '${row['id']}').toList();
-    if (confirmedIds.length != dashboardIds.length ||
-        !_sameSequence(confirmedIds, dashboardIds)) {
-      throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
-    }
-    for (var index = 0; index < confirmed.length; index++) {
-      if ((confirmed[index]['orden'] as num?)?.toInt() != index) {
-        throw StateError(
-          'PostgreSQL devolvió un orden de dashboards inconsistente.',
-        );
-      }
-    }
-    return confirmed;
+    metricsVerifiedDashboardOrder(
+      _list(response['dashboards']),
+      dashboardIds,
+    );
+
+    // Segunda solicitud, fuera de la transacción que acaba de escribir. Es la
+    // misma lectura que se ejecutará al actualizar la página.
+    final reloaded = await listDashboards();
+    return metricsVerifiedDashboardOrder(reloaded, dashboardIds);
   }
 
   Future<Map<String, dynamic>> saveWidget(
@@ -466,14 +480,9 @@ class MetricsRepository {
       : const [];
 
   List<Map<String, dynamic>> _maps(dynamic value) => _list(value);
-}
 
-bool _sameSequence(List<String> left, List<String> right) {
-  if (left.length != right.length) return false;
-  for (var index = 0; index < left.length; index++) {
-    if (left[index] != right[index]) return false;
-  }
-  return true;
+  bool _isMissingRpc(PostgrestException error) =>
+      error.code == 'PGRST202' || error.code == '42883';
 }
 
 class MetricGlobalFilter {

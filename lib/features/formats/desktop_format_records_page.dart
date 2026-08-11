@@ -1093,7 +1093,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     // Primero intentamos la caché local completa generada por "Actualizar datos":
     // evita el caso observado donde SELECT directo devolvía solo 56/59 filas,
     // mientras la exportación completa sí tenía miles de registros.
-    // Si no hay caché local para la tabla, se usa SELECT directo/RPC como respaldo.
+    // Si no hay caché local para la tabla, se usa el RPC con orden estable.
+    // El SELECT directo queda como último respaldo porque PostgREST no puede
+    // ordenar por una columna genérica que no existe en todas las tablas.
     if (!fetchAll && !preferRemote) {
       try {
         final localPaged = await _fetchLocalMatrixRecordsPaged(
@@ -1103,24 +1105,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         );
         if (localPaged.rows.isNotEmpty) return localPaged;
       } catch (_) {}
-
-      try {
-        final directResult = await _fetchDirectDesktopRecordsPaged(
-          cleanTable,
-          page: page,
-          pageSize: pageSize,
-          fetchAll: false,
-        );
-        // Si SELECT directo devuelve una página sospechosamente pequeña, no cortamos
-        // aquí: dejamos que el RPC fallback intente recuperar una página real.
-        if (directResult.rows.length >= pageSize || page > 0)
-          return directResult;
-      } catch (_) {
-        // Si RLS/policies bloquean SELECT directo, caemos al RPC SECURITY DEFINER.
-      }
     }
 
-    // Ruta RPC como respaldo para tablas sin SELECT directo por RLS o permisos.
+    // Ruta remota principal: el RPC valida el formato y aplica ORDER BY estable
+    // antes de LIMIT/OFFSET, evitando que las filas cambien entre páginas.
     try {
       final rpcData = await supabase.rpc(
         'appgt_select_format_records',
@@ -2189,14 +2177,32 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
       return true;
     }).toList();
+    String stableRowKey(Map<String, dynamic> row) {
+      for (final candidate in const [
+        'id_local',
+        'ID_LOCAL',
+        'id',
+        'ID',
+        'ID_REGISTRO',
+        'id_registro',
+        'Dni',
+        'DNI',
+      ]) {
+        final value = _valueByColumn(row, candidate)?.toString().trim() ?? '';
+        if (value.isNotEmpty) return '$candidate:$value';
+      }
+      final keys = row.keys.toList()..sort();
+      return jsonEncode({for (final key in keys) key: row[key]});
+    }
+
     final sortColumn = _sortColumn;
-    if (sortColumn != null) {
-      filtered.sort((a, b) {
+    filtered.sort((a, b) {
+      var result = 0;
+      if (sortColumn != null) {
         final av = _valueByColumn(a, sortColumn);
         final bv = _valueByColumn(b, sortColumn);
         final an = num.tryParse(av?.toString() ?? '');
         final bn = num.tryParse(bv?.toString() ?? '');
-        int result;
         if (an != null && bn != null) {
           result = an.compareTo(bn);
         } else {
@@ -2210,9 +2216,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 .compareTo((bv?.toString() ?? '').toLowerCase());
           }
         }
-        return _sortAscending ? result : -result;
-      });
-    }
+        if (!_sortAscending) result = -result;
+      }
+      if (result != 0) return result;
+      return stableRowKey(a).compareTo(stableRowKey(b));
+    });
     return filtered;
   }
 
