@@ -3519,6 +3519,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       (tableDestino ?? '').trim().toUpperCase() ==
       'GH_PERMISOS_LICENCIAS_APPGT';
 
+  bool get _permissionIsApproved {
+    if (!_isPermissionLeaveForm) return false;
+    for (final entry in controllers.entries) {
+      final key = _normalizarNombreCampo(entry.key);
+      if (key == 'ESTADO_APROBACION' || key == 'ESTADO') {
+        if (entry.value.text.trim().toUpperCase() == 'APROBADO') return true;
+      }
+    }
+    final payload = widget.initialPayload ?? const <String, dynamic>{};
+    return _payloadText(payload, ['ESTADO_APROBACION', 'estado'])
+            .toUpperCase() ==
+        'APROBADO';
+  }
+
   String _payloadText(Map<String, dynamic> payload, List<String> keys) {
     for (final k in keys) {
       for (final e in payload.entries) {
@@ -3645,6 +3659,37 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final reason = _payloadText(payload, ['motivo', 'MOTIVO']);
     final observations =
         _payloadText(payload, ['observaciones', 'OBSERVACIONES']);
+    final approvalState = _payloadText(
+      payload,
+      ['ESTADO_APROBACION', 'estado'],
+    ).toUpperCase();
+    final approved = approvalState == 'APROBADO';
+    final isMedicalLeave = _normalizarNombreCampo(type) == 'DESCANSO_MEDICO';
+    final company = _payloadText(
+      payload,
+      ['empresa_nombre', 'EMPRESA', 'RAZON_SOCIAL'],
+    );
+    final companyRuc = _payloadText(payload, ['empresa_ruc', 'RUC']);
+    final representative = _payloadText(
+      payload,
+      ['representante_nombre', 'REPRESENTANTE'],
+    );
+    final representativeRole = _payloadText(
+      payload,
+      ['representante_cargo', 'CARGO_REPRESENTANTE'],
+    );
+    final issuePlace = _payloadText(
+      payload,
+      ['lugar_emision', 'LUGAR_EMISION'],
+    );
+    final returnDate = _payloadText(
+      payload,
+      ['fecha_reincorporacion', 'FECHA_REINCORPORACION'],
+    );
+    final requestedDays = _payloadText(
+      payload,
+      ['dias_solicitados', 'DIAS_SOLICITADOS'],
+    );
     final signatureData =
         _payloadText(payload, ['firma_trabajador', 'FIRMA DEL TRABAJADOR']);
     Uint8List? signatureBytes;
@@ -3674,86 +3719,216 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           ),
         );
 
+    DateTime? parseDate(String value) {
+      final clean = value.trim();
+      if (clean.isEmpty) return null;
+      final iso = DateTime.tryParse(
+          clean.length >= 10 ? clean.substring(0, 10) : clean);
+      if (iso != null) return iso;
+      final parts = clean.split('/');
+      if (parts.length != 3) return null;
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (day == null || month == null || year == null) return null;
+      return DateTime(year, month, day);
+    }
+
+    const months = <String>[
+      'ENERO',
+      'FEBRERO',
+      'MARZO',
+      'ABRIL',
+      'MAYO',
+      'JUNIO',
+      'JULIO',
+      'AGOSTO',
+      'SEPTIEMBRE',
+      'OCTUBRE',
+      'NOVIEMBRE',
+      'DICIEMBRE'
+    ];
+    String longDate(DateTime? date) => date == null
+        ? 'FECHA NO REGISTRADA'
+        : '${date.day.toString().padLeft(2, '0')} de '
+            '${months[date.month - 1]} de ${date.year}';
+    String shortDate(DateTime? date, String fallback) => date == null
+        ? fallback
+        : '${date.day.toString().padLeft(2, '0')}/'
+            '${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+    final startDate = parseDate(start);
+    final endDate = parseDate(end);
+    final rejoinDate =
+        parseDate(returnDate) ?? endDate?.add(const Duration(days: 1));
+    final days = int.tryParse(requestedDays) ??
+        (startDate != null && endDate != null
+            ? endDate.difference(startDate).inDays + 1
+            : 1);
+    final emissionDate = DateTime.now();
+    final resolvedCompany = company.isEmpty ? 'EMPRESA' : company;
+    final resolvedPlace = issuePlace.isEmpty ? 'CHICLAYO' : issuePlace;
+
+    pw.Widget signatures() => pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+          crossAxisAlignment: pw.CrossAxisAlignment.end,
+          children: [
+            pw.Column(children: [
+              pw.SizedBox(width: 190, height: 62),
+              pw.Container(width: 190, height: 1, color: PdfColors.black),
+              pw.SizedBox(height: 5),
+              pw.Text('REPRESENTANTE',
+                  style: pw.TextStyle(
+                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              if (representative.isNotEmpty)
+                pw.Text('NOMBRE: ${representative.toUpperCase()}',
+                    style: const pw.TextStyle(fontSize: 8)),
+              if (representativeRole.isNotEmpty)
+                pw.Text('CARGO: ${representativeRole.toUpperCase()}',
+                    style: const pw.TextStyle(fontSize: 8)),
+            ]),
+            pw.Column(children: [
+              pw.Container(
+                width: 190,
+                height: 62,
+                alignment: pw.Alignment.bottomCenter,
+                child: signatureBytes == null
+                    ? null
+                    : pw.Image(pw.MemoryImage(signatureBytes),
+                        fit: pw.BoxFit.contain),
+              ),
+              pw.Container(width: 190, height: 1, color: PdfColors.black),
+              pw.SizedBox(height: 5),
+              pw.Text('TRABAJADOR',
+                  style: pw.TextStyle(
+                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
+              pw.Text('NOMBRE: ${worker.toUpperCase()}',
+                  style: const pw.TextStyle(fontSize: 8)),
+              pw.Text('DNI N.° $dni', style: const pw.TextStyle(fontSize: 8)),
+            ]),
+          ],
+        );
+
     final pdf = pw.Document();
-    pdf.addPage(
-      pw.Page(
+    if (approved && isMedicalLeave) {
+      pdf.addPage(pw.MultiPage(
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(42),
-        build: (_) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: [
-            pw.Text(
-              'SOLICITUD DE PERMISO / LICENCIA',
-              textAlign: pw.TextAlign.center,
-              style: pw.TextStyle(
-                fontSize: 17,
-                fontWeight: pw.FontWeight.bold,
-              ),
-            ),
-            pw.SizedBox(height: 5),
-            pw.Text(
-              number.isEmpty ? 'Documento laboral' : 'N.° $number',
-              textAlign: pw.TextAlign.center,
-              style: const pw.TextStyle(fontSize: 10),
-            ),
-            pw.SizedBox(height: 24),
-            detailRow('Trabajador:', worker),
-            detailRow('DNI:', dni),
-            detailRow('Puesto:', position),
-            detailRow('Área:', area),
-            pw.Divider(height: 22),
-            detailRow('Tipo:', type),
-            detailRow('Desde:', start),
-            detailRow('Hasta:', end),
-            detailRow('Motivo:', reason),
-            if (observations.isNotEmpty)
-              detailRow('Observaciones:', observations),
-            pw.SizedBox(height: 24),
-            pw.Text(
-              'Declaro que la información consignada es correcta y solicito '
-              'la autorización del permiso o licencia indicado.',
-              textAlign: pw.TextAlign.justify,
-              style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
-            ),
-            pw.Spacer(),
-            pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
-              crossAxisAlignment: pw.CrossAxisAlignment.end,
-              children: [
-                pw.Column(
-                  children: [
-                    pw.Container(
-                      width: 150,
-                      height: 62,
-                      alignment: pw.Alignment.bottomCenter,
-                      child: signatureBytes == null
-                          ? null
-                          : pw.Image(
-                              pw.MemoryImage(signatureBytes),
-                              fit: pw.BoxFit.contain,
-                            ),
-                    ),
-                    pw.Container(width: 170, height: 1, color: PdfColors.black),
-                    pw.SizedBox(height: 4),
-                    pw.Text('Firma del trabajador',
-                        style: const pw.TextStyle(fontSize: 9)),
-                  ],
-                ),
-                pw.Column(
-                  children: [
-                    pw.SizedBox(width: 170, height: 62),
-                    pw.Container(width: 170, height: 1, color: PdfColors.black),
-                    pw.SizedBox(height: 4),
-                    pw.Text('Visto bueno / autorización',
-                        style: const pw.TextStyle(fontSize: 9)),
-                  ],
-                ),
-              ],
-            ),
+        build: (_) => [
+          pw.Text(
+            'CONSTANCIA DE PERMISO CON GOCE DE HABER POR DESCANSO MÉDICO',
+            textAlign: pw.TextAlign.center,
+            style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 6),
+          if (number.isNotEmpty)
+            pw.Text('N.° $number',
+                textAlign: pw.TextAlign.center,
+                style: const pw.TextStyle(fontSize: 9)),
+          pw.SizedBox(height: 22),
+          pw.Text(
+            'Por medio del presente documento, la empresa $resolvedCompany, '
+            '${companyRuc.isEmpty ? '' : 'identificada con RUC N.° $companyRuc, '}'
+            'deja constancia de que se otorga al trabajador(a):',
+            textAlign: pw.TextAlign.justify,
+            style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
+          ),
+          pw.SizedBox(height: 12),
+          detailRow('Apellidos y nombres:', worker),
+          detailRow('DNI:', dni),
+          detailRow('Cargo:', position),
+          detailRow('Área:', area),
+          pw.SizedBox(height: 12),
+          pw.Text(
+            'PERMISO CON GOCE DE HABER POR MOTIVO DE DESCANSO MÉDICO, '
+            'debidamente sustentado mediante el certificado médico y/o '
+            'Certificado de Incapacidad Temporal para el Trabajo correspondiente.',
+            textAlign: pw.TextAlign.justify,
+            style: pw.TextStyle(
+                fontSize: 10.5, lineSpacing: 3, fontWeight: pw.FontWeight.bold),
+          ),
+          pw.SizedBox(height: 12),
+          pw.Text('El período otorgado comprende:',
+              style: const pw.TextStyle(fontSize: 10.5)),
+          pw.SizedBox(height: 6),
+          detailRow('Fecha de inicio:', shortDate(startDate, start)),
+          detailRow('Fecha de término:', shortDate(endDate, end)),
+          detailRow('Total:', '$days día${days == 1 ? '' : 's'} calendario'),
+          pw.SizedBox(height: 12),
+          pw.Text(
+            'Durante dicho período, el trabajador queda exonerado de prestar '
+            'servicios debido a la incapacidad temporal acreditada mediante la '
+            'documentación médica presentada.',
+            textAlign: pw.TextAlign.justify,
+            style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
+          ),
+          pw.SizedBox(height: 10),
+          pw.Text(
+            'El trabajador declara haber tomado conocimiento del período de '
+            'descanso médico y se compromete a reincorporarse a sus labores el '
+            'día ${shortDate(rejoinDate, returnDate)}, salvo ampliación '
+            'debidamente sustentada.',
+            textAlign: pw.TextAlign.justify,
+            style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
+          ),
+          if (reason.isNotEmpty) ...[
+            pw.SizedBox(height: 10),
+            detailRow('Motivo registrado:', reason),
           ],
-        ),
-      ),
-    );
+          if (observations.isNotEmpty)
+            detailRow('Observaciones:', observations),
+          pw.SizedBox(height: 16),
+          pw.Text(
+            'Se firma la presente constancia en señal de conocimiento y recepción.',
+            textAlign: pw.TextAlign.justify,
+            style: const pw.TextStyle(fontSize: 10.5),
+          ),
+          pw.SizedBox(height: 18),
+          pw.Text(
+            '${resolvedPlace.toUpperCase()}, ${longDate(emissionDate)}.',
+            style: const pw.TextStyle(fontSize: 10),
+          ),
+          pw.SizedBox(height: 54),
+          signatures(),
+        ],
+      ));
+    } else {
+      pdf.addPage(pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(42),
+        build: (_) => [
+          pw.Text('SOLICITUD DE PERMISO / LICENCIA',
+              textAlign: pw.TextAlign.center,
+              style:
+                  pw.TextStyle(fontSize: 17, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 5),
+          pw.Text(number.isEmpty ? 'Documento laboral' : 'N.° $number',
+              textAlign: pw.TextAlign.center,
+              style: const pw.TextStyle(fontSize: 10)),
+          pw.SizedBox(height: 24),
+          detailRow('Trabajador:', worker),
+          detailRow('DNI:', dni),
+          detailRow('Puesto:', position),
+          detailRow('Área:', area),
+          pw.Divider(height: 22),
+          detailRow('Tipo:', type),
+          detailRow('Desde:', start),
+          detailRow('Hasta:', end),
+          detailRow('Motivo:', reason),
+          if (observations.isNotEmpty)
+            detailRow('Observaciones:', observations),
+          pw.SizedBox(height: 24),
+          pw.Text(
+            'Declaro que la información consignada es correcta y solicito la '
+            'autorización del permiso o licencia indicado.',
+            textAlign: pw.TextAlign.justify,
+            style: const pw.TextStyle(fontSize: 10.5, lineSpacing: 3),
+          ),
+          pw.SizedBox(height: 60),
+          signatures(),
+        ],
+      ));
+    }
     final bytes = await pdf.save();
     final fileName =
         payload['documento_generado']?.toString().trim().isNotEmpty == true
@@ -5455,19 +5630,27 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           FloatingActionButton.extended(
             heroTag: 'save_${tableDestino ?? ''}',
             onPressed: _isPermissionLeaveForm
-                ? () => saveLocal(generarDocumentoLaboral: true)
+                ? () => saveLocal(
+                      generarDocumentoLaboral: _permissionIsApproved,
+                    )
                 : saveLocal,
             tooltip: _isPermissionLeaveForm
-                ? 'Guardar y generar documento para firma'
+                ? (_permissionIsApproved
+                    ? 'Guardar y generar la constancia aprobada'
+                    : 'Guardar solicitud para revisión y aprobación')
                 : 'Guardar localmente',
             icon: Icon(
               _isPermissionLeaveForm
-                  ? Icons.picture_as_pdf_outlined
+                  ? (_permissionIsApproved
+                      ? Icons.picture_as_pdf_outlined
+                      : Icons.send_outlined)
                   : Icons.save_outlined,
             ),
             label: Text(
               _isPermissionLeaveForm
-                  ? 'GUARDAR Y GENERAR'
+                  ? (_permissionIsApproved
+                      ? 'GENERAR CONSTANCIA'
+                      : 'GUARDAR SOLICITUD')
                   : 'Guardar',
             ),
           ),

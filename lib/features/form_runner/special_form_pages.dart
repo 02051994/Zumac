@@ -933,6 +933,9 @@ class _AsistenciaPersonalSpecialPageState
   List<Map<String, dynamic>> asistenciaWorkers = [];
   String tipoMovimiento = 'INGRESO';
   bool saving = false;
+  String? selectedMobilityEntryId;
+  String mobilityValidationMessage = '';
+  bool validatingMobility = false;
 
   @override
   void initState() {
@@ -1245,6 +1248,236 @@ class _AsistenciaPersonalSpecialPageState
     return null;
   }
 
+  bool _boolValue(dynamic value) {
+    if (value == true || value == 1) return true;
+    final text = value?.toString().trim().toUpperCase() ?? '';
+    return text == 'TRUE' ||
+        text == 'SI' ||
+        text == 'SÍ' ||
+        text == 'YES' ||
+        text == '1';
+  }
+
+  DateTime? _dateValue(dynamic value) {
+    final text = value?.toString().trim() ?? '';
+    if (text.isEmpty || text.toLowerCase() == 'null') return null;
+    final iso =
+        DateTime.tryParse(text.length >= 10 ? text.substring(0, 10) : text);
+    if (iso != null) return DateTime(iso.year, iso.month, iso.day);
+    final parts = text.split('/');
+    if (parts.length == 3) {
+      final day = int.tryParse(parts[0]);
+      final month = int.tryParse(parts[1]);
+      final year = int.tryParse(parts[2]);
+      if (day != null && month != null && year != null) {
+        return DateTime(year, month, day);
+      }
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>> _localPayloadsForTable(
+      String table) async {
+    final out = <Map<String, dynamic>>[];
+    final wanted = table.trim().toUpperCase();
+    for (final source in {table, table.replaceAll('_', '-')}) {
+      final rows = await local.where(
+        'local_matrix_rows',
+        'source_table = ?',
+        [source],
+      );
+      for (final row in rows) {
+        try {
+          final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}');
+          if (decoded is Map) out.add(Map<String, dynamic>.from(decoded));
+        } catch (_) {}
+      }
+    }
+    for (final row in await local.allRecords()) {
+      if ((row['tabla_destino']?.toString() ?? '').trim().toUpperCase() !=
+          wanted) {
+        continue;
+      }
+      try {
+        final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}');
+        if (decoded is Map) out.add(Map<String, dynamic>.from(decoded));
+      } catch (_) {}
+    }
+    return out;
+  }
+
+  Future<String?> _attendanceBlockReason(
+    Map<String, dynamic> worker,
+    String dni,
+    DateTime attendanceDate,
+  ) async {
+    final status = _norm(
+      (_rowValue(worker, ['Status', 'ESTADO', 'ESTADO_PERSONAL']) ?? '')
+          .toString(),
+    );
+    final contractEnd = _dateValue(_rowValue(worker, [
+      'Fecha fin de Contrato',
+      'FECHA_FIN_CONTRATO',
+      'FECHA FIN DE CONTRATO',
+    ]));
+    if (status.isNotEmpty && status != 'ACTIVO') {
+      return status == 'PENDIENTERENOVACION'
+          ? 'Contrato vencido. Derivar a Gestión Humana para su renovación.'
+          : 'El trabajador no está activo: ${status.replaceAll('_', ' ')}.';
+    }
+    if (contractEnd == null) {
+      return 'El trabajador no tiene fecha de fin de contrato configurada.';
+    }
+    final day =
+        DateTime(attendanceDate.year, attendanceDate.month, attendanceDate.day);
+    if (contractEnd.isBefore(day)) {
+      return 'Contrato vencido el ${contractEnd.day.toString().padLeft(2, '0')}/'
+          '${contractEnd.month.toString().padLeft(2, '0')}/${contractEnd.year}.';
+    }
+
+    final sanctions =
+        await _localPayloadsForTable('GH_SANCIONES_PERSONAL_APPGT');
+    for (final sanction in sanctions.reversed) {
+      final sanctionDni = _digits(
+        (_rowValue(sanction, ['dni', 'DNI', 'DOCUMENTO']) ?? '').toString(),
+      );
+      if (sanctionDni != _digits(dni)) continue;
+      final state = _norm(
+        (_rowValue(sanction, ['estado', 'ESTADO']) ?? '').toString(),
+      );
+      if (state != 'VIGENTE' ||
+          !_boolValue(_rowValue(
+              sanction, ['bloquea_asistencia', 'BLOQUEA_ASISTENCIA']))) {
+        continue;
+      }
+      final start =
+          _dateValue(_rowValue(sanction, ['fecha_inicio', 'FECHA_INICIO']));
+      final end = _dateValue(_rowValue(sanction, ['fecha_fin', 'FECHA_FIN']));
+      if (start == null ||
+          end == null ||
+          day.isBefore(start) ||
+          day.isAfter(end)) {
+        continue;
+      }
+      final type = (_rowValue(sanction, ['tipo_sancion', 'TIPO_SANCION']) ??
+              'sanción vigente')
+          .toString()
+          .trim()
+          .toLowerCase();
+      return 'El trabajador cuenta con $type hasta '
+          '${end.day.toString().padLeft(2, '0')}/'
+          '${end.month.toString().padLeft(2, '0')}/${end.year}.';
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> _formalMobilityEntry(
+      {bool updateState = true}) async {
+    final header = _asistenciaHeaderPayload();
+    final plate = (header['PLACA'] ?? placaCtrl.text).toString().trim();
+    final date = _dateValue(header['FECHA'] ?? fechaCtrl.text);
+    if (plate.isEmpty || date == null) {
+      if (updateState && mounted) {
+        setState(() {
+          selectedMobilityEntryId = null;
+          mobilityValidationMessage = plate.isEmpty
+              ? 'Sin movilidad: la asistencia se registrará como ingreso peatonal.'
+              : 'Seleccione una fecha válida.';
+        });
+      }
+      return null;
+    }
+    if (updateState && mounted) setState(() => validatingMobility = true);
+    Map<String, dynamic>? match;
+    String message =
+        'La placa $plate no tiene un ingreso formal admitido para esta fecha.';
+    try {
+      final entries =
+          await _localPayloadsForTable('GT_INGRESO_MOVILIDADES_APPGT');
+      for (final entry in entries.reversed) {
+        final entryPlate =
+            (_rowValue(entry, ['placa', 'PLACA']) ?? '').toString();
+        final entryDate = _dateValue(_rowValue(entry, ['fecha', 'FECHA']));
+        final state =
+            _norm((_rowValue(entry, ['estado', 'ESTADO']) ?? '').toString());
+        if (_norm(entryPlate) != _norm(plate) ||
+            entryDate == null ||
+            entryDate.year != date.year ||
+            entryDate.month != date.month ||
+            entryDate.day != date.day ||
+            (state != 'ADMITIDA' && state != 'CERRADA')) {
+          continue;
+        }
+        final expirations = <MapEntry<String, DateTime?>>[
+          MapEntry(
+              'licencia', _dateValue(_rowValue(entry, ['licencia_vigencia']))),
+          MapEntry('SOAT', _dateValue(_rowValue(entry, ['soat_vigencia']))),
+          MapEntry('revisión técnica',
+              _dateValue(_rowValue(entry, ['revision_tecnica_vigencia']))),
+        ];
+        final expired = expirations.where(
+          (item) => item.value != null && item.value!.isBefore(date),
+        );
+        if (expired.isNotEmpty) {
+          message =
+              'Movilidad bloqueada: ${expired.map((e) => e.key).join(', ')} vencido.';
+          continue;
+        }
+        match = entry;
+        message = 'Movilidad validada: $plate · '
+            '${(_rowValue(entry, [
+                      'conductor_nombre'
+                    ]) ?? 'conductor registrado')}';
+        break;
+      }
+    } finally {
+      if (updateState && mounted) {
+        setState(() {
+          validatingMobility = false;
+          selectedMobilityEntryId = match == null
+              ? null
+              : (_rowValue(match, ['id', 'id_local']) ?? '').toString();
+          mobilityValidationMessage = message;
+        });
+      }
+    }
+    return match;
+  }
+
+  Future<void> _openMobilityRegistration() async {
+    final formats = await local.getAll('local_formats', orderBy: 'orden');
+    Map<String, dynamic>? format;
+    for (final row in formats) {
+      if ((row['tabla_destino']?.toString() ?? '').trim().toUpperCase() ==
+          'GT_INGRESO_MOVILIDADES_APPGT') {
+        format = Map<String, dynamic>.from(row);
+        break;
+      }
+    }
+    if (!mounted) return;
+    if (format == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text(
+            'Actualiza datos para cargar el formato Ingreso de Movilidades.'),
+      ));
+      return;
+    }
+    final resolvedFormat = format;
+    final header = _asistenciaHeaderPayload();
+    await Navigator.of(context).push(MaterialPageRoute(
+      builder: (_) => FormRunnerPage(
+        moduleId: resolvedFormat['modulo_id']?.toString() ?? widget.moduleId,
+        format: resolvedFormat,
+        initialPayload: {
+          'fecha': header['FECHA'] ?? fechaCtrl.text,
+          'placa': header['PLACA'] ?? placaCtrl.text,
+          'estado': 'ADMITIDA',
+        },
+      ),
+    ));
+    await _formalMobilityEntry();
+  }
+
   double? _hoursBetween(String ingreso, String salida) {
     try {
       final i = ingreso.split(':');
@@ -1411,6 +1644,39 @@ class _AsistenciaPersonalSpecialPageState
                 ['PUESTO', 'Puesto', 'CARGO']) ??
             '')
         .toString();
+    final attendanceDate = _dateValue(
+          _headerValue(['FECHA'], fallback: fechaCtrl.text.trim()),
+        ) ??
+        DateTime.now();
+    if (tipoMovimiento == 'INGRESO') {
+      final blockReason = await _attendanceBlockReason(
+        resolvedWorker ?? const <String, dynamic>{},
+        dni,
+        attendanceDate,
+      );
+      if (blockReason != null) {
+        await _showAppGtAlert(context, blockReason, playSound: true);
+        return;
+      }
+      final headerPlate = _headerValue(
+        ['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'],
+        fallback: placaCtrl.text.trim(),
+      );
+      if (headerPlate.trim().isNotEmpty) {
+        final mobility = await _formalMobilityEntry();
+        if (mobility == null) {
+          if (!mounted) return;
+          await _showAppGtAlert(
+            context,
+            mobilityValidationMessage.isEmpty
+                ? 'Registre y admita la movilidad antes de marcar asistencia.'
+                : mobilityValidationMessage,
+            playSound: true,
+          );
+          return;
+        }
+      }
+    }
     final now = DateTime.now();
     final time = _timeHm(now);
     final headerPayload = _asistenciaHeaderPayload();
@@ -1448,6 +1714,9 @@ class _AsistenciaPersonalSpecialPageState
             'PLACA': headerPlaca,
             'RECLUTADOR': headerReclutador,
             'MARCADOR_ASISTENCIA': await _activeUserName(),
+            if (selectedMobilityEntryId?.isNotEmpty == true)
+              'INGRESO_MOVILIDAD_ID': selectedMobilityEntryId,
+            'VALIDACION_LABORAL': 'VALIDADO',
             'estado_registro': 'COMPLETO',
           }
         : Map<String, dynamic>.from(existing['payload'] as Map);
@@ -1491,6 +1760,9 @@ class _AsistenciaPersonalSpecialPageState
       'FECHA_SALIDA',
       'HORAS_ASISTENCIA',
       'MARCADOR_ASISTENCIA',
+      'INGRESO_MOVILIDAD_ID',
+      'VALIDACION_LABORAL',
+      'BLOQUEO_MOTIVO',
       'estado_registro'
     ]);
     await _saveAttendancePayload(
@@ -1645,6 +1917,37 @@ class _AsistenciaPersonalSpecialPageState
         const SizedBox(height: 14),
         ...asistenciaHeader.buildFields(context, setState,
             filter: (field) => !_isAsistenciaMovementField(field)),
+        Row(children: [
+          Expanded(
+            child: Text(
+              mobilityValidationMessage.isEmpty
+                  ? 'Si registra una placa, primero debe existir un ingreso formal admitido.'
+                  : mobilityValidationMessage,
+              style: TextStyle(
+                color: selectedMobilityEntryId == null
+                    ? Colors.orange.shade800
+                    : Colors.green.shade700,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+          const SizedBox(width: 10),
+          OutlinedButton.icon(
+            onPressed: validatingMobility ? null : _openMobilityRegistration,
+            icon: const Icon(Icons.airport_shuttle_outlined),
+            label: const Text('Registrar movilidad'),
+          ),
+          IconButton(
+            onPressed: validatingMobility ? null : _formalMobilityEntry,
+            tooltip: 'Validar movilidad',
+            icon: validatingMobility
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.verified_outlined),
+          ),
+        ]),
         const SizedBox(height: 2),
         _workerSearchBox(),
       ]),
@@ -2454,6 +2757,93 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
   }
 
+  Future<double> _existingTareoHours(String dni, String fecha) async {
+    var total = 0.0;
+    for (final record in await local.allRecords()) {
+      if ((record['tabla_destino']?.toString() ?? '').toUpperCase() !=
+          'GT-TAREO_PERSONAL') {
+        continue;
+      }
+      final id = record['id_local']?.toString() ?? '';
+      if (id == draftIdLocal || id.startsWith('${draftIdLocal}_')) continue;
+      try {
+        final payload = jsonDecode(record['payload_json']?.toString() ?? '{}');
+        if (payload is! Map) continue;
+        final row = Map<String, dynamic>.from(payload);
+        final rowDni = _digits(
+          (_rowValue(row, ['DNI', 'DOCUMENTO']) ?? '').toString(),
+        );
+        final rowDate = (_rowValue(row, ['FECHA']) ?? '').toString().trim();
+        final state = _norm(
+          (_rowValue(row, ['ESTADO_APROBACION']) ?? 'BORRADOR').toString(),
+        );
+        if (rowDni != _digits(dni) ||
+            rowDate != fecha ||
+            state == 'RECHAZADO' ||
+            state == 'ANULADO') {
+          continue;
+        }
+        total += double.tryParse(
+              (_rowValue(row, ['HORAS_TRABAJADAS']) ?? '0')
+                  .toString()
+                  .replaceAll(',', '.'),
+            ) ??
+            0;
+      } catch (_) {}
+    }
+    return total;
+  }
+
+  Future<String?> _requestOvertimeReason(double maxOvertime) async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Autorización de horas extra'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Este tareo genera hasta ${maxOvertime.toStringAsFixed(2)} '
+                'hora(s) extra por trabajador. Indique el motivo para enviar '
+                'la solicitud de autorización.',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: controller,
+                autofocus: true,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Motivo de horas extra',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () {
+                final value = controller.text.trim();
+                if (value.isEmpty) return;
+                Navigator.pop(dialogContext, value);
+              },
+              child: const Text('Solicitar y cerrar'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
   bool _timeEndsBeforeStart(String start, String end) {
     try {
       final startParts = start.trim().split(':');
@@ -2525,7 +2915,10 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return payload;
   }
 
-  Future<void> _saveDraft({required bool goNext}) async {
+  Future<void> _saveDraft({
+    required bool goNext,
+    bool closeTareo = false,
+  }) async {
     if (selectedWorkers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Agrega al menos un trabajador.')));
@@ -2554,6 +2947,36 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final horas = horasMatriz.trim().isNotEmpty
         ? horasMatriz.trim()
         : _hoursBetween(horaInicio, horaFin);
+    if (closeTareo && (horaFin.isEmpty || horas == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Complete HORA_FIN antes de cerrar el tareo.'),
+      ));
+      return;
+    }
+    final currentHours = double.tryParse(
+          (horas ?? 0).toString().replaceAll(',', '.'),
+        ) ??
+        0;
+    final fecha = tareoHeader
+        .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim());
+    final overtimeByDni = <String, double>{};
+    if (closeTareo && currentHours > 0) {
+      for (final worker in selectedWorkers) {
+        final dni = worker['DNI']?.toString().trim() ?? '';
+        final previous = await _existingTareoHours(dni, fecha);
+        overtimeByDni[dni] =
+            (previous + currentHours - 8).clamp(0, double.infinity);
+      }
+    }
+    final maxOvertime = overtimeByDni.values.fold<double>(
+      0,
+      (maximum, value) => value > maximum ? value : maximum,
+    );
+    String? overtimeReason;
+    if (maxOvertime > 0) {
+      overtimeReason = await _requestOvertimeReason(maxOvertime);
+      if (overtimeReason == null || !mounted) return;
+    }
     final basePayloadRaw = <String, dynamic>{
       ...headerPayload,
       'FECHA': tareoHeader
@@ -2569,7 +2992,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'HORA_FIN': horaFin,
       'HORAS_TRABAJADAS': horas,
       'TAREADOR': tareador,
-      'estado_registro': 'COMPLETO',
+      'estado_registro': closeTareo ? 'COMPLETO' : 'PENDIENTE',
     };
     final allowed = await _destinationFieldNorms('GT-TAREO_PERSONAL', extra: [
       'id_local',
@@ -2583,6 +3006,13 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'TAREADOR',
       'DNI',
       'APELLIDOS Y NOMBRES',
+      'ESTADO_APROBACION',
+      'REQUIERE_HORAS_EXTRA',
+      'HORAS_EXTRA_SOLICITADAS',
+      'MOTIVO_HORAS_EXTRA',
+      'ESTADO_HORAS_EXTRA',
+      'CERRADO_POR',
+      'CERRADO_AT',
       'estado_registro'
     ]);
     final basePayload = _filterPayloadForNorms(basePayloadRaw, allowed);
@@ -2601,6 +3031,16 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
           'DNI': worker['DNI']?.toString().trim() ?? '',
           'APELLIDOS Y NOMBRES':
               worker['APELLIDOS Y NOMBRES']?.toString().trim() ?? '',
+          'ESTADO_APROBACION': closeTareo ? 'CERRADO' : 'BORRADOR',
+          'REQUIERE_HORAS_EXTRA':
+              (overtimeByDni[worker['DNI']?.toString().trim() ?? ''] ?? 0) > 0,
+          'HORAS_EXTRA_SOLICITADAS':
+              overtimeByDni[worker['DNI']?.toString().trim() ?? ''] ?? 0,
+          'MOTIVO_HORAS_EXTRA': overtimeReason,
+          'ESTADO_HORAS_EXTRA':
+              (overtimeByDni[worker['DNI']?.toString().trim() ?? ''] ?? 0) > 0
+                  ? 'SOLICITADO'
+                  : 'NO_REQUIERE',
         };
         await local.insertPending({
           'id_local': rowIdLocal,
@@ -2620,6 +3060,11 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       if (goNext) {
         setState(() => secondStep = true);
       } else if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(closeTareo
+              ? 'Tareo cerrado y enviado para aprobación.'
+              : 'Tareo guardado como borrador.'),
+        ));
         widget.onSavedAndExit?.call();
         Navigator.pop(context);
       }
@@ -2766,9 +3211,25 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
                 suffixIcon: Icon(Icons.access_time))),
       ],
       const SizedBox(height: 18),
-      FilledButton(
-          onPressed: saving ? null : () => _saveDraft(goNext: false),
-          child: const Icon(Icons.save)),
+      Row(children: [
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: saving ? null : () => _saveDraft(goNext: false),
+            icon: const Icon(Icons.save_outlined),
+            label: const Text('Guardar borrador'),
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: FilledButton.icon(
+            onPressed: saving
+                ? null
+                : () => _saveDraft(goNext: false, closeTareo: true),
+            icon: const Icon(Icons.lock_clock_outlined),
+            label: const Text('Cerrar tareo'),
+          ),
+        ),
+      ]),
       TextButton(
           onPressed: () => setState(() => secondStep = false),
           child: const Text('Volver a trabajadores')),

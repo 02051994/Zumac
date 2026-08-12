@@ -457,7 +457,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   bool get _canSelectRows =>
-      canDelete || (_approvalsEnabled && (canReview || canApprove));
+      canDelete ||
+      (_approvalsEnabled && (canReview || canApprove)) ||
+      _isTareoTable ||
+      _isPayrollPeriodTable;
 
   bool _isDeletedRecord(Map<String, dynamic> row) {
     // Regla de producción para tablas operativas:
@@ -3839,6 +3842,276 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return t == 'GH-REGISTRO_PERSONAL_PLANILLA';
   }
 
+  bool get _isTareoTable => _isNamedTable(
+      tableName ?? widget.format['tabla_destino']?.toString(),
+      'GT-TAREO_PERSONAL');
+
+  bool get _isPayrollPeriodTable => _isNamedTable(
+      tableName ?? widget.format['tabla_destino']?.toString(),
+      'PLANILLA_PERIODOS_APPGT');
+
+  Future<void> _authorizeSelectedOvertime() async {
+    if (!_isTareoTable || _selectedDeleteRows.isEmpty) return;
+    final eligible = _selectedDeleteRows.values.where((row) {
+      final required = _boolValue(_value(row, [
+        'REQUIERE_HORAS_EXTRA',
+        'requiere_horas_extra',
+      ]));
+      final state = (_value(row, ['ESTADO_HORAS_EXTRA']) ?? '')
+          .toString()
+          .trim()
+          .toUpperCase();
+      return required && state == 'SOLICITADO';
+    }).toList();
+    if (eligible.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content:
+            Text('Seleccione tareos con horas extra en estado SOLICITADO.'),
+      ));
+      return;
+    }
+    final reasonCtrl = TextEditingController();
+    try {
+      final decision = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Autorizar horas extra'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Se procesarán ${eligible.length} tareo(s). La autorización '
+                'quedará registrada con usuario, fecha y hora.',
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: reasonCtrl,
+                maxLines: 3,
+                decoration: const InputDecoration(
+                  labelText: 'Observación de autorización (opcional)',
+                  border: OutlineInputBorder(),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Rechazar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Autorizar'),
+            ),
+          ],
+        ),
+      );
+      if (decision == null) return;
+      for (final row in eligible) {
+        final id = (_value(row, ['id_local', 'id']) ?? '').toString().trim();
+        if (id.isEmpty) continue;
+        await supabase.rpc(
+          'appgt_autorizar_horas_extra_tareo_v1',
+          params: {
+            'p_id_local': id,
+            'p_autorizar': decision,
+            'p_motivo': reasonCtrl.text.trim(),
+          },
+        );
+      }
+      _selectedDeleteRowKeys.clear();
+      _selectedDeleteRows.clear();
+      _notifyDeleteSelectionChanged();
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(decision
+            ? 'Horas extra autorizadas y auditadas.'
+            : 'Horas extra rechazadas y auditadas.'),
+      ));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo procesar las horas extra: $error')),
+      );
+    } finally {
+      reasonCtrl.dispose();
+    }
+  }
+
+  Future<void> _runPayrollLifecycle() async {
+    if (!_isPayrollPeriodTable || _selectedDeleteRows.length != 1) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Seleccione un solo periodo de planilla.'),
+        ));
+      }
+      return;
+    }
+    final row = _selectedDeleteRows.values.single;
+    final id = (_value(row, ['id']) ?? '').toString().trim();
+    final state = (_value(row, ['estado', 'ESTADO']) ?? 'BORRADOR')
+        .toString()
+        .trim()
+        .toUpperCase();
+    if (id.isEmpty) return;
+
+    final actions = <String>[];
+    if (state == 'BORRADOR') actions.add('CALCULAR');
+    if (state == 'CALCULADA') actions.addAll(['CALCULAR', 'REVISAR']);
+    if (state == 'REVISADA') actions.add('APROBAR');
+    if (state == 'APROBADA') actions.add('CERRAR');
+    if (state == 'CERRADA') actions.add('REABRIR');
+    if (actions.isEmpty) return;
+
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text('Planilla $state'),
+        children: actions
+            .map((value) => SimpleDialogOption(
+                  onPressed: () => Navigator.pop(dialogContext, value),
+                  child: ListTile(
+                    leading: Icon(switch (value) {
+                      'CALCULAR' => Icons.calculate_outlined,
+                      'REVISAR' => Icons.fact_check_outlined,
+                      'APROBAR' => Icons.verified_outlined,
+                      'CERRAR' => Icons.lock_outline,
+                      _ => Icons.lock_open_outlined,
+                    }),
+                    title: Text(value),
+                  ),
+                ))
+            .toList(),
+      ),
+    );
+    if (action == null || !mounted) return;
+
+    String reason = '';
+    if (action == 'REABRIR') {
+      final reasonCtrl = TextEditingController();
+      try {
+        final accepted = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('Reabrir planilla cerrada'),
+            content: TextField(
+              controller: reasonCtrl,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                labelText: 'Motivo obligatorio',
+                border: OutlineInputBorder(),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  if (reasonCtrl.text.trim().isEmpty) return;
+                  Navigator.pop(dialogContext, true);
+                },
+                child: const Text('Reabrir'),
+              ),
+            ],
+          ),
+        );
+        if (accepted != true) return;
+        reason = reasonCtrl.text.trim();
+      } finally {
+        reasonCtrl.dispose();
+      }
+    } else if (action == 'CERRAR') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Cerrar planilla'),
+          content: const Text(
+            'Después del cierre se bloquearán asistencia, tareos, permisos y '
+            'filas calculadas del periodo. ¿Desea continuar?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
+    try {
+      await supabase.rpc(
+        'appgt_cambiar_estado_planilla_periodo_v1',
+        params: {
+          'p_periodo_id': id,
+          'p_accion': action,
+          'p_motivo': reason,
+        },
+      );
+      _selectedDeleteRowKeys.clear();
+      _selectedDeleteRows.clear();
+      _notifyDeleteSelectionChanged();
+      await _load();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Acción $action completada y auditada.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo ejecutar $action: $error')),
+      );
+    }
+  }
+
+  Widget _humanWorkflowToolbarButton({
+    required VoidCallback? onPressed,
+    required IconData icon,
+    required String tooltip,
+  }) {
+    return SizedBox(
+      width: 44,
+      height: 44,
+      child: Tooltip(
+        message: tooltip,
+        child: OutlinedButton(
+          onPressed: onPressed,
+          style: OutlinedButton.styleFrom(
+            foregroundColor: const Color(0xFF147A6E),
+            backgroundColor:
+                onPressed == null ? Colors.white : const Color(0xFFF2FAF8),
+            side: BorderSide(
+              color: onPressed == null
+                  ? Colors.grey.shade300
+                  : const Color(0xFF147A6E),
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            padding: EdgeInsets.zero,
+          ),
+          child: Icon(icon),
+        ),
+      ),
+    );
+  }
+
   Widget _approvalToolbarButton({
     required String state,
     required IconData icon,
@@ -3892,6 +4165,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         }
         if (value == 'approve') {
           await _setSelectedApprovalState('APROBADO');
+        }
+        if (value == 'authorize_overtime') {
+          await _authorizeSelectedOvertime();
+        }
+        if (value == 'payroll_lifecycle') {
+          await _runPayrollLifecycle();
         }
       },
       itemBuilder: (_) => [
@@ -3960,9 +4239,31 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               title: Text('Marcar APROBADO'),
             ),
           ),
+        if (_isTareoTable && canApprove)
+          PopupMenuItem(
+            value: 'authorize_overtime',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.more_time_outlined),
+              title: Text('Autorizar horas extra'),
+            ),
+          ),
+        if (_isPayrollPeriodTable)
+          PopupMenuItem(
+            value: 'payroll_lifecycle',
+            enabled: _selectedDeleteRows.length == 1,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.account_tree_outlined),
+              title: Text('Ciclo de planilla'),
+            ),
+          ),
         if (!canImport &&
             !canExport &&
-            !(_approvalsEnabled && (canReview || canApprove)))
+            !(_approvalsEnabled && (canReview || canApprove)) &&
+            !_isTareoTable &&
+            !_isPayrollPeriodTable)
           const PopupMenuItem(
             enabled: false,
             child: Text('Sin herramientas habilitadas'),
@@ -8141,6 +8442,32 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     state: 'APROBADO',
                     icon: Icons.verified_outlined,
                     tooltip: 'Marcar seleccionados como APROBADO',
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (_isTareoTable && canApprove) ...[
+                  ValueListenableBuilder<int>(
+                    valueListenable: _deleteSelectionVersion,
+                    builder: (context, _, __) => _humanWorkflowToolbarButton(
+                      onPressed: _selectedDeleteRows.isEmpty
+                          ? null
+                          : _authorizeSelectedOvertime,
+                      icon: Icons.more_time_outlined,
+                      tooltip: 'Autorizar horas extra seleccionadas',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (_isPayrollPeriodTable) ...[
+                  ValueListenableBuilder<int>(
+                    valueListenable: _deleteSelectionVersion,
+                    builder: (context, _, __) => _humanWorkflowToolbarButton(
+                      onPressed: _selectedDeleteRows.length == 1
+                          ? _runPayrollLifecycle
+                          : null,
+                      icon: Icons.account_tree_outlined,
+                      tooltip: 'Calcular, revisar, aprobar, cerrar o reabrir',
+                    ),
                   ),
                   const SizedBox(width: 10),
                 ],
