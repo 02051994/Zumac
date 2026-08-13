@@ -432,6 +432,8 @@ class _ModulesPageState extends State<ModulesPage> {
   bool desktopSidebarOpen = true;
   final ValueNotifier<bool> _desktopSidebarOpenNotifier =
       ValueNotifier<bool>(true);
+  final MetricsToolbarController _metricsToolbarController =
+      MetricsToolbarController();
   String profileName = '';
   Map<String, dynamic>? desktopSelectedModule;
   Map<String, dynamic>? desktopSelectedFormat;
@@ -502,6 +504,7 @@ class _ModulesPageState extends State<ModulesPage> {
     _consultantFocusNode.dispose();
     consultant.clearConversation(_consultantConversationId);
     _desktopSidebarOpenNotifier.dispose();
+    _metricsToolbarController.dispose();
     super.dispose();
   }
 
@@ -3956,6 +3959,7 @@ class _ModulesPageState extends State<ModulesPage> {
           key: const ValueKey('workspace-metrics'),
           embedded: true,
           initialSourceTable: _metricsInitialSourceTable,
+          toolbarController: _metricsToolbarController,
         );
       case _toolAlerts:
       case _toolActions:
@@ -4203,6 +4207,82 @@ class _ModulesPageState extends State<ModulesPage> {
     );
   }
 
+  Future<void> _openMetricsDashboardPicker() async {
+    if (_activeWorkspaceTool != _toolMetrics ||
+        !_metricsToolbarController.ready) {
+      return;
+    }
+    await showDialog<void>(
+      context: context,
+      builder: (_) => MetricsDashboardPickerDialog(
+        controller: _metricsToolbarController,
+      ),
+    );
+  }
+
+  List<Widget> _metricsToolbarActions() {
+    if (_activeWorkspaceTool != _toolMetrics) return const [];
+    final controller = _metricsToolbarController;
+    return [
+      IconButton(
+        key: const ValueKey('metrics-dashboard-list-button'),
+        onPressed: controller.ready && !controller.busy
+            ? _openMetricsDashboardPicker
+            : null,
+        icon: const Icon(Icons.space_dashboard_outlined),
+        tooltip: 'Dashboards',
+      ),
+      if (controller.canManage)
+        IconButton(
+          key: const ValueKey('metrics-new-dashboard-button'),
+          onPressed: controller.busy
+              ? null
+              : () => unawaited(controller.createDashboard()),
+          icon: const Icon(Icons.add_box_outlined),
+          tooltip: 'Nuevo dashboard',
+        ),
+      if (controller.canManage && controller.ready)
+        IconButton(
+          onPressed: controller.busy
+              ? null
+              : () => unawaited(controller.createWidget()),
+          icon: const Icon(Icons.add_chart_outlined),
+          tooltip: 'Agregar gráfico',
+        ),
+      if (controller.canManage && controller.ready)
+        IconButton(
+          onPressed: controller.busy
+              ? null
+              : () => unawaited(controller.openFilters()),
+          icon: const Icon(Icons.filter_alt_outlined),
+          tooltip: 'Filtros del dashboard',
+        ),
+      if (controller.canManage && controller.ready)
+        PopupMenuButton<String>(
+          tooltip: 'Administrar dashboard',
+          onSelected: (value) {
+            if (value == 'edit') unawaited(controller.editDashboard());
+            if (value == 'relations') {
+              unawaited(controller.manageRelations());
+            }
+            if (value == 'delete') unawaited(controller.deleteDashboard());
+          },
+          itemBuilder: (_) => const [
+            PopupMenuItem(value: 'edit', child: Text('Editar dashboard')),
+            PopupMenuItem(
+              value: 'relations',
+              child: Text('Relacionar tablas'),
+            ),
+            PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'delete',
+              child: Text('Eliminar dashboard'),
+            ),
+          ],
+        ),
+    ];
+  }
+
   Widget _desktopContentActions() {
     return ConstrainedBox(
       constraints: const BoxConstraints(minHeight: 54, maxHeight: 54),
@@ -4212,6 +4292,7 @@ class _ModulesPageState extends State<ModulesPage> {
           mainAxisSize: MainAxisSize.min,
           mainAxisAlignment: MainAxisAlignment.end,
           children: [
+            ..._metricsToolbarActions(),
             if (_usesImmersiveWorkspace)
               IconButton(
                 onPressed: _openHomeFromBreadcrumb,
@@ -4278,28 +4359,73 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _desktopTopBar({required bool isHome}) {
-    return Container(
-      height: 54,
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFD9E5EA))),
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: isHome
-                ? const SizedBox.shrink()
-                : Padding(
-                    padding: const EdgeInsets.only(left: 14),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: _workspaceTitle(compact: true),
+    return AnimatedBuilder(
+      animation: _metricsToolbarController,
+      builder: (context, _) => Container(
+        height: 54,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: Color(0xFFD9E5EA))),
+        ),
+        child: LayoutBuilder(
+          builder: (context, constraints) => Stack(
+            alignment: Alignment.center,
+            children: [
+              if (!isHome)
+                Positioned(
+                  left: 14,
+                  top: 0,
+                  bottom: 0,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: _workspaceTitle(compact: true),
+                  ),
+                ),
+              if (_activeWorkspaceTool == _toolMetrics &&
+                  _metricsToolbarController.dashboardTitle.isNotEmpty)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          maxWidth: metricsToolbarTitleMaxWidth(
+                            constraints.maxWidth,
+                          ),
+                        ),
+                        child: Text(
+                          _metricsToolbarController.dashboardTitle,
+                          key: const ValueKey('metrics-dashboard-title'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color:
+                                _metricsToolbarController.dashboardTitleColor,
+                            fontFamily:
+                                _metricsToolbarController.dashboardTitleFont,
+                            fontSize: metricsToolbarTitleFontSize(
+                              constraints.maxWidth,
+                            ),
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
                     ),
                   ),
+                ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _desktopContentActions(),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+              ),
+            ],
           ),
-          _desktopContentActions(),
-          const SizedBox(width: 8),
-        ],
+        ),
       ),
     );
   }
@@ -4321,54 +4447,143 @@ class _ModulesPageState extends State<ModulesPage> {
 
     final appBar = AppBar(
       titleSpacing: 0,
-      title: Text(
-        isHome ? 'ZUMAC' : _mobileAppBarTitle(),
-        style: const TextStyle(fontWeight: FontWeight.w800),
+      title: AnimatedBuilder(
+        animation: _metricsToolbarController,
+        builder: (context, _) => Text(
+          _activeWorkspaceTool == _toolMetrics &&
+                  _metricsToolbarController.dashboardTitle.isNotEmpty
+              ? _metricsToolbarController.dashboardTitle
+              : (isHome ? 'ZUMAC' : _mobileAppBarTitle()),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            color: _activeWorkspaceTool == _toolMetrics
+                ? _metricsToolbarController.dashboardTitleColor
+                : null,
+            fontFamily: _activeWorkspaceTool == _toolMetrics
+                ? _metricsToolbarController.dashboardTitleFont
+                : null,
+            fontSize: _activeWorkspaceTool == _toolMetrics ? 15 : null,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
       ),
       actions: [
-        if (_usesImmersiveWorkspace)
+        if (_activeWorkspaceTool == _toolMetrics)
+          AnimatedBuilder(
+            animation: _metricsToolbarController,
+            builder: (context, _) => IconButton(
+              onPressed: _metricsToolbarController.ready &&
+                      !_metricsToolbarController.busy
+                  ? _openMetricsDashboardPicker
+                  : null,
+              icon: const Icon(Icons.space_dashboard_outlined),
+              tooltip: 'Dashboards',
+            ),
+          ),
+        if (_activeWorkspaceTool == _toolMetrics)
+          AnimatedBuilder(
+            animation: _metricsToolbarController,
+            builder: (context, _) => _metricsToolbarController.canManage
+                ? IconButton(
+                    onPressed: _metricsToolbarController.busy
+                        ? null
+                        : () => unawaited(
+                              _metricsToolbarController.createDashboard(),
+                            ),
+                    icon: const Icon(Icons.add_box_outlined),
+                    tooltip: 'Nuevo dashboard',
+                  )
+                : const SizedBox.shrink(),
+          ),
+        if (_activeWorkspaceTool == _toolMetrics)
+          PopupMenuButton<String>(
+            tooltip: 'Más acciones',
+            onSelected: (value) {
+              if (value == 'home') _openHomeFromBreadcrumb();
+              if (value == 'refresh' && !busy) unawaited(download());
+              if (value == 'sync' && !busy) unawaited(syncPending());
+              if (value == 'help' && !busy) {
+                unawaited(_openOnboarding(replay: true));
+              }
+            },
+            itemBuilder: (_) => const [
+              PopupMenuItem(
+                value: 'home',
+                child: ListTile(
+                  leading: Icon(Icons.home_outlined),
+                  title: Text('Inicio'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'refresh',
+                child: ListTile(
+                  leading: Icon(Icons.refresh),
+                  title: Text('Actualizar datos'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'sync',
+                child: ListTile(
+                  leading: Icon(Icons.sync),
+                  title: Text('Sincronizar'),
+                ),
+              ),
+              PopupMenuItem(
+                value: 'help',
+                child: ListTile(
+                  leading: Icon(Icons.help_outline),
+                  title: Text('Guía de uso'),
+                ),
+              ),
+            ],
+          ),
+        if (_usesImmersiveWorkspace && _activeWorkspaceTool != _toolMetrics)
           IconButton(
             onPressed: _openHomeFromBreadcrumb,
             icon: const Icon(Icons.home_outlined),
             tooltip: 'Inicio',
           ),
-        IconButton(
-            onPressed: busy ? null : download,
-            icon: const Icon(Icons.refresh),
-            tooltip: 'Actualizar datos'),
-        Stack(
-          alignment: Alignment.topRight,
-          children: [
-            IconButton(
-                onPressed: busy ? null : syncPending,
-                icon: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  child: busy
-                      ? const SizedBox(
-                          key: ValueKey('syncing'),
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : Icon(
-                          online ? Icons.sync : Icons.sync_problem_outlined,
-                          key: ValueKey(online ? 'online' : 'offline'),
-                        ),
-                ),
-                tooltip: 'Sincronizar'),
-            if (pending > 0)
-              CircleAvatar(
-                  radius: 10,
-                  child:
-                      Text('$pending', style: const TextStyle(fontSize: 11))),
-          ],
-        ),
-        const SizedBox(width: 12),
-        IconButton(
-          onPressed: busy ? null : () => _openOnboarding(replay: true),
-          icon: const Icon(Icons.help_outline),
-          tooltip: 'Guía de uso',
-        ),
+        if (_activeWorkspaceTool != _toolMetrics)
+          IconButton(
+              onPressed: busy ? null : download,
+              icon: const Icon(Icons.refresh),
+              tooltip: 'Actualizar datos'),
+        if (_activeWorkspaceTool != _toolMetrics)
+          Stack(
+            alignment: Alignment.topRight,
+            children: [
+              IconButton(
+                  onPressed: busy ? null : syncPending,
+                  icon: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: busy
+                        ? const SizedBox(
+                            key: ValueKey('syncing'),
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : Icon(
+                            online ? Icons.sync : Icons.sync_problem_outlined,
+                            key: ValueKey(online ? 'online' : 'offline'),
+                          ),
+                  ),
+                  tooltip: 'Sincronizar'),
+              if (pending > 0)
+                CircleAvatar(
+                    radius: 10,
+                    child:
+                        Text('$pending', style: const TextStyle(fontSize: 11))),
+            ],
+          ),
+        if (_activeWorkspaceTool != _toolMetrics) const SizedBox(width: 12),
+        if (_activeWorkspaceTool != _toolMetrics)
+          IconButton(
+            onPressed: busy ? null : () => _openOnboarding(replay: true),
+            icon: const Icon(Icons.help_outline),
+            tooltip: 'Guía de uso',
+          ),
       ],
     );
 

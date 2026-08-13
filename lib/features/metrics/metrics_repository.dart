@@ -109,11 +109,33 @@ class MetricsRepository {
 
   Future<Map<String, dynamic>> saveWidget(
     Map<String, dynamic> payload,
-  ) async =>
-      _map(await _client.rpc(
-        'appgt_guardar_widget_metrics_v1',
-        params: {'p_payload': payload},
-      ));
+  ) async {
+    final dashboardId = _text(payload['dashboard_id']);
+    if (dashboardId.isEmpty) {
+      throw StateError('El gráfico no tiene dashboard.');
+    }
+    final before = await listWidgets(dashboardId);
+    final response = _map(await _client.rpc(
+      'appgt_guardar_widget_metrics_v1',
+      params: {'p_payload': payload},
+    ));
+    final savedId = _text(response['id']);
+    if (savedId.isEmpty || response['guardado'] != true) {
+      throw StateError('Supabase no confirmó el gráfico guardado.');
+    }
+    final after = await listWidgets(dashboardId);
+    final saved = metricsVerifiedWidgetSave(
+      before: before,
+      after: after,
+      expected: <String, dynamic>{...payload, 'id': savedId},
+      savedId: savedId,
+    );
+    return <String, dynamic>{
+      ...response,
+      'widget': saved,
+      'widgets': after,
+    };
+  }
 
   Future<Map<String, dynamic>> saveWidgetGeometry({
     required String widgetId,
