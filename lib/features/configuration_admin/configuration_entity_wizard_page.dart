@@ -2,10 +2,11 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/services/app_experience_service.dart';
 import '../../core/widgets/configuration_icon_catalog.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'configuration_admin_repository.dart';
 import 'configuration_entity_spec.dart';
 

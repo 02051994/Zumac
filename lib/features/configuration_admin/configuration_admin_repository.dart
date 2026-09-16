@@ -30,6 +30,8 @@ class ConfigurationAdminRepository {
       ...builder,
       ...product,
       'puede_gestionar_empresa': builder['puede_gestionar'] == true,
+      'es_admin_empresa': builder['puede_publicar'] == true ||
+          builder['rol']?.toString().toUpperCase() == 'ADMIN',
       'puede_gestionar': builder['puede_gestionar'] == true &&
           product['zumac_creator_habilitado'] == true,
     };

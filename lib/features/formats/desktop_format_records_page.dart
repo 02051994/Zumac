@@ -8,7 +8,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:excel/excel.dart' as xlsx;
 import 'package:flutter/foundation.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:flutter/services.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:pdf/pdf.dart';
@@ -18,6 +18,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../config/supabase_config.dart';
 import '../../core/platform/file_download.dart';
+import '../../core/platform/network_bytes.dart';
 import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
@@ -26,9 +27,12 @@ import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/responsive_layout.dart';
 import '../../core/widgets/configuration_icon_catalog.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
+import 'payroll_slip_pdf.dart';
+import 'record_import_utils.dart';
 import 'widgets/mobile_records_list.dart';
 
 class _TableCellFormat {
@@ -49,6 +53,8 @@ class _DesktopRecordsResult {
   const _DesktopRecordsResult(
       {required this.columns, required this.rows, this.totalRows});
 }
+
+enum _ImportMessageKind { success, warning, error, info }
 
 class DesktopFormatRecordsPage extends StatefulWidget {
   final Map<String, dynamic> module;
@@ -117,6 +123,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool canDelete = false;
   bool canReview = false;
   bool canApprove = false;
+  bool _importingFile = false;
   final Set<String> _selectedDeleteRowKeys = <String>{};
   final Map<String, Map<String, dynamic>> _selectedDeleteRows =
       <String, Map<String, dynamic>>{};
@@ -543,7 +550,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           final context = await ConfigurationAdminRepository()
               .loadContext()
               .timeout(const Duration(seconds: 5));
-          isCompanyAdmin = context['puede_gestionar_empresa'] == true;
+          isCompanyAdmin = context['es_admin_empresa'] == true;
           _adminTransferPermissionCache[adminKey] = isCompanyAdmin;
         } catch (_) {
           isCompanyAdmin = false;
@@ -2960,7 +2967,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool _fieldVisibleInWindowsTable(Map<String, dynamic> field) {
     final campo = field['campo']?.toString().trim() ?? '';
     final tipoUi = field['tipo_ui']?.toString().trim().toLowerCase() ?? '';
-    if (campo.isEmpty) return false;
+    if (campo.isEmpty || RecordImportUtils.isAutomaticField(field)) {
+      return false;
+    }
     final visibleTabla = _editBool(field['visible_tabla'] ?? field['visible'],
         defaultValue: true);
     if (!visibleTabla) return false;
@@ -3002,6 +3011,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final fallbackColumns =
         displayColumns.isNotEmpty ? displayColumns : _columnsFromRows(records);
     return _visibleWindowsColumns(fallbackColumns)
+        .where((column) => !RecordImportUtils.isTechnicalIdentifierName(column))
         .map(_tableHeaderLabel)
         .toList();
   }
@@ -3332,13 +3342,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     if (_isDateImportType(tipo)) {
-      final parsed = DateTime.tryParse(value);
-      if (parsed == null &&
-          !RegExp(r'^\d{1,2}/\d{1,2}/\d{4}$').hasMatch(value)) {
+      final normalized = RecordImportUtils.normalizeDate(
+        value,
+        dateOnly: tipo == 'date',
+      );
+      if (normalized == null) {
         throw Exception(
             'Fila $rowNumber: el campo "$label" debe ser fecha. Usa formato YYYY-MM-DD o DD/MM/YYYY. Valor recibido: "$value".');
       }
-      return value;
+      return normalized;
     }
 
     return value;
@@ -3354,6 +3366,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     final notNull = RegExp(r'null value in column "([^"]+)"').firstMatch(msg);
     if (notNull != null) {
+      final column = notNull.group(1) ?? '';
+      if (RecordImportUtils.isTechnicalIdentifierName(column)) {
+        return 'No se pudo crear automáticamente el identificador técnico "$column". Revise que la columna tenga un generador o valor predeterminado en la base de datos.';
+      }
       return 'El campo "${notNull.group(1)}" está marcado como obligatorio y llegó vacío. Revise su configuración antes de importar.';
     }
 
@@ -3366,6 +3382,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     if (msg.contains('duplicate key value violates unique constraint')) {
       return 'El archivo contiene registros que ya existen o se intentaron importar dos veces. Revise los datos duplicados antes de continuar.';
+    }
+
+    if (msg.contains('statement timeout') || msg.contains('code: 57014')) {
+      return 'La importación tardó más de lo permitido y no se completó. Inténtelo nuevamente; si el problema continúa, comuníquelo al administrador.';
     }
 
     return msg.replaceFirst('Exception: ', '');
@@ -3457,15 +3477,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _excelCellToText(dynamic cellValue) {
-    if (cellValue == null) return '';
-    try {
-      final dynamic d = cellValue;
-      final inner = d.value;
-      if (inner != null) return inner.toString();
-    } catch (_) {
-      // Algunas versiones del paquete excel exponen el valor solo por toString().
-    }
-    return cellValue.toString();
+    return RecordImportUtils.excelCellToText(cellValue as xlsx.CellValue?);
   }
 
   List<List<String>> _parseXlsx(Uint8List bytes) {
@@ -3485,24 +3497,166 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return rows;
   }
 
-  Future<bool> _confirmImportFile() async {
+  Future<void> _showImportMessage({
+    required String title,
+    required String message,
+    required _ImportMessageKind kind,
+  }) async {
+    if (!mounted) return;
+    final (color, icon) = switch (kind) {
+      _ImportMessageKind.success => (
+          const Color(0xFF14866D),
+          Icons.check_circle_rounded
+        ),
+      _ImportMessageKind.warning => (
+          const Color(0xFFE09A23),
+          Icons.warning_amber_rounded
+        ),
+      _ImportMessageKind.error => (
+          const Color(0xFFC34A4A),
+          Icons.error_outline_rounded
+        ),
+      _ImportMessageKind.info => (
+          const Color(0xFF17677F),
+          Icons.info_outline_rounded
+        ),
+    };
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: Dialog(
+          insetPadding:
+              const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 470),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(30, 30, 30, 24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 70,
+                    height: 70,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(icon, color: color, size: 38),
+                  ),
+                  const SizedBox(height: 20),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Color(0xFF243B53),
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    child: SingleChildScrollView(
+                      child: Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFF526576),
+                          fontSize: 15,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 46,
+                    child: ElevatedButton(
+                      onPressed: () => Navigator.of(dialogContext).pop(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: color,
+                        foregroundColor: Colors.white,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: const Text(
+                        'Aceptar',
+                        style: TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirmImportFile({
+    required String fileName,
+    required int rowCount,
+    required int ignoredColumnCount,
+  }) async {
     final result = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        return AlertDialog(
-          title: const Text('Confirmar importación'),
-          content: const Text('Estas seguro de importar datos?'),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogContext).pop(false),
-              child: const Text('Cancelar'),
+        final ignoredNote = ignoredColumnCount == 0
+            ? ''
+            : '\n\n$ignoredColumnCount columna(s) no configurada(s) se ignorarán.';
+        return PopScope(
+          canPop: false,
+          child: AlertDialog(
+            shape:
+                RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            icon: Container(
+              width: 62,
+              height: 62,
+              decoration: const BoxDecoration(
+                color: Color(0xFFE8F4F6),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.upload_file_rounded,
+                  color: Color(0xFF17677F), size: 34),
             ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(dialogContext).pop(true),
-              child: const Text('Aceptar'),
+            title: const Text(
+              'Confirmar importación',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontWeight: FontWeight.w800),
             ),
-          ],
+            content: Text(
+              'Se importarán $rowCount fila(s) de "$fileName". '
+              'Los campos opcionales vacíos se omitirán y los identificadores '
+              'técnicos se crearán automáticamente.$ignoredNote',
+              textAlign: TextAlign.center,
+            ),
+            actionsAlignment: MainAxisAlignment.center,
+            actions: [
+              OutlinedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('Cancelar'),
+              ),
+              ElevatedButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF17677F),
+                  foregroundColor: Colors.white,
+                ),
+                child: const Text('Aceptar'),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -3519,8 +3673,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (!kIsWeb) {
       final connectivity = await Connectivity().checkConnectivity();
       if (!SyncService.connectivityIndicatesNetwork(connectivity)) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Conéctate a una red de internet.')),
+        await _showImportMessage(
+          title: 'Sin conexión',
+          message: 'Conéctate a una red de internet para importar el archivo.',
+          kind: _ImportMessageKind.warning,
         );
         return;
       }
@@ -3534,8 +3690,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       );
       if (picked == null || picked.files.isEmpty) return;
       if (!mounted) return;
-      final confirmed = await _confirmImportFile();
-      if (!confirmed) return;
 
       final file = picked.files.first;
       final bytes = file.bytes ?? await File(file.path!).readAsBytes();
@@ -3558,9 +3712,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
 
       if (grid.length < 2) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('El archivo no tiene filas para importar.')),
+        await _showImportMessage(
+          title: 'Archivo sin datos',
+          message: 'El archivo no tiene filas con datos para importar.',
+          kind: _ImportMessageKind.warning,
         );
         return;
       }
@@ -3573,14 +3728,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final columnByKey = <String, String>{
         // La plantilla descarga encabezados con el nombre real de campo.
         // Se acepta también etiqueta antigua para compatibilidad, pero se guarda por campo real.
-        for (final c in validColumns) _headerKey(c): c,
+        for (final c in validColumns)
+          if (!RecordImportUtils.isTechnicalIdentifierName(c)) _headerKey(c): c,
         for (final f in importFields)
           if ((f['campo']?.toString().trim() ?? '').isNotEmpty)
-            _headerKey(f['campo'].toString()): f['campo'].toString(),
+            if (!RecordImportUtils.isAutomaticField(f))
+              _headerKey(f['campo'].toString()): f['campo'].toString(),
         for (final f in importFields)
           if ((f['etiqueta']?.toString().trim() ?? '').isNotEmpty &&
               (f['campo']?.toString().trim() ?? '').isNotEmpty)
-            _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
+            if (!RecordImportUtils.isAutomaticField(f))
+              _headerKey(f['etiqueta'].toString()): f['campo'].toString(),
       };
       final detected = _detectImportHeaderRow(grid, columnByKey);
       if (detected == null) {
@@ -3596,24 +3754,34 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (h.trim().isEmpty) continue;
         // Si la fila contiene restos de HTML/XML, los ignoramos.
         if ({'HTML', 'HEAD', 'BODY', 'TABLE', 'TR', 'TH', 'TD', 'LT', 'GT'}
-            .contains(_headerKey(h))) continue;
-        if (headers[i] == null) unknownHeaders.add(h);
+            .contains(_headerKey(h))) {
+          continue;
+        }
+        if (headers[i] == null) {
+          unknownHeaders.add(h);
+        }
       }
       if (unknownHeaders.isNotEmpty) {
-        throw Exception(
-            'Columnas no reconocidas en la plantilla: ${unknownHeaders.take(5).join(', ')}');
+        debugPrint(
+            'Columnas ignoradas durante la importación: ${unknownHeaders.join(', ')}');
       }
 
       final hiddenGeneratedFields = await _importHiddenGeneratedFields();
       final rows = <Map<String, dynamic>>[];
-      for (final line in grid.skip(detected.index + 1)) {
+      for (var lineIndex = detected.index + 1;
+          lineIndex < grid.length;
+          lineIndex++) {
+        final line = grid[lineIndex];
         final payload = <String, dynamic>{};
-        final rowNumber = rows.length + detected.index + 2;
+        final rowNumber = lineIndex + 1;
         for (var i = 0; i < headers.length && i < line.length; i++) {
           final h = headers[i];
           if (h == null || h.trim().isEmpty) continue;
           final raw = _cleanImportText(line[i]).trim();
           final field = fieldByCampo[h];
+          if (RecordImportUtils.isAutomaticField(field, fallbackName: h)) {
+            continue;
+          }
           final formatted = _formatImportValue(
               rawValue: raw, campo: h, field: field, rowNumber: rowNumber);
           if (formatted != null) payload[h] = formatted;
@@ -3623,7 +3791,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         for (final f in importFields) {
           final campo = f['campo']?.toString().trim() ?? '';
           if (campo.isEmpty) continue;
-          if (_isRequiredField(f) && !payload.containsKey(campo)) {
+          if (_isRequiredField(f) &&
+              !RecordImportUtils.isAutomaticField(f) &&
+              !payload.containsKey(campo)) {
             final label = _fieldLabel(f, campo);
             throw Exception(
                 'Fila $rowNumber: llene el campo obligatorio "$label".');
@@ -3650,12 +3820,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
 
       if (rows.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text('No se encontraron datos válidos para importar.')),
+        await _showImportMessage(
+          title: 'Sin filas válidas',
+          message:
+              'No se encontraron datos configurados para importar en este archivo.',
+          kind: _ImportMessageKind.warning,
         );
         return;
       }
+
+      final confirmed = await _confirmImportFile(
+        fileName: file.name,
+        rowCount: rows.length,
+        ignoredColumnCount: unknownHeaders.length,
+      );
+      if (!confirmed) return;
+      if (mounted) setState(() => _importingFile = true);
 
       final importResult = await supabase.rpc(
         'fn_importar_registros_sin_duplicados',
@@ -3691,29 +3871,40 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
       await _load();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text(
-                'Importación completada: $insertadas subidas, $omitidas omitidas de $recibidas filas.')),
+      setState(() => _importingFile = false);
+      await _showImportMessage(
+        title: 'Importación completada',
+        message:
+            '$insertadas fila(s) importada(s) y $omitidas omitida(s) de $recibidas recibida(s).'
+            '${unknownHeaders.isEmpty ? '' : '\n\nLas ${unknownHeaders.length} columna(s) no configurada(s) se ignoraron.'}',
+        kind: _ImportMessageKind.success,
       );
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('No se pudo importar: ${_friendlyImportError(e)}')),
+      if (_importingFile) setState(() => _importingFile = false);
+      await _showImportMessage(
+        title: 'No se pudo importar',
+        message: _friendlyImportError(e),
+        kind: _ImportMessageKind.error,
       );
     }
   }
 
   Widget _importButton() {
-    final enabled = canImport && !loading && error == null && tableName != null;
+    final enabled = canImport &&
+        !loading &&
+        !_importingFile &&
+        error == null &&
+        tableName != null;
     if (!enabled) {
       return _unavailableTransferButton(
         icon: Icons.upload_file,
         tooltip: 'Importar',
         message: !canImport
             ? 'No tienes permiso para importar en este formato.'
-            : 'La importación estará disponible cuando termine de cargar la tabla.',
+            : _importingFile
+                ? 'La importación está en proceso.'
+                : 'La importación estará disponible cuando termine de cargar la tabla.',
       );
     }
     return SizedBox(
@@ -3850,6 +4041,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       tableName ?? widget.format['tabla_destino']?.toString(),
       'PLANILLA_PERIODOS_APPGT');
 
+  bool get _isPayrollSlipTable => _isNamedTable(
+      tableName ?? widget.format['tabla_destino']?.toString(),
+      'PLANILLA_BOLETAS_APPGT');
   Future<void> _authorizeSelectedOvertime() async {
     if (!_isTareoTable || _selectedDeleteRows.isEmpty) return;
     final eligible = _selectedDeleteRows.values.where((row) {
@@ -3960,11 +4154,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         .toString()
         .trim()
         .toUpperCase();
+    final payrollEngine =
+        (_value(row, ['motor_calculo', 'MOTOR_CALCULO']) ?? '')
+            .toString()
+            .trim()
+            .toUpperCase();
     if (id.isEmpty) return;
 
     final actions = <String>[];
-    if (state == 'BORRADOR') actions.add('CALCULAR');
-    if (state == 'CALCULADA') actions.addAll(['CALCULAR', 'REVISAR']);
+    if (state == 'BORRADOR') actions.add('VALIDAR');
+    if (state == 'CALCULADA') {
+      actions.add('VALIDAR');
+      if (payrollEngine != 'REQUIERE_RECALCULO') actions.add('REVISAR');
+    }
     if (state == 'REVISADA') actions.add('APROBAR');
     if (state == 'APROBADA') actions.add('CERRAR');
     if (state == 'CERRADA') actions.add('REABRIR');
@@ -3980,12 +4182,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   child: ListTile(
                     leading: Icon(switch (value) {
                       'CALCULAR' => Icons.calculate_outlined,
+                      'VALIDAR' => Icons.fact_check_outlined,
                       'REVISAR' => Icons.fact_check_outlined,
                       'APROBAR' => Icons.verified_outlined,
                       'CERRAR' => Icons.lock_outline,
                       _ => Icons.lock_open_outlined,
                     }),
-                    title: Text(value),
+                    title: Text(value == 'VALIDAR'
+                        ? state == 'BORRADOR'
+                            ? 'Validar y calcular'
+                            : 'Validar y recalcular'
+                        : value),
                   ),
                 ))
             .toList(),
@@ -4055,6 +4262,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (confirmed != true) return;
     }
 
+    if (action != 'REABRIR') {
+      final isValid = await _validatePayrollPeriodBeforeAction(id);
+      if (!isValid || !mounted) return;
+    }
+
     try {
       await supabase.rpc(
         'appgt_cambiar_estado_planilla_periodo_v1',
@@ -4077,6 +4289,82 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo ejecutar $action: $error')),
       );
+    }
+  }
+
+  Future<bool> _validatePayrollPeriodBeforeAction(String periodId) async {
+    try {
+      final response = await supabase.rpc(
+        'appgt_generar_validaciones_planilla_v2',
+        params: {'p_periodo': periodId},
+      );
+      final errorCount = response is num
+          ? response.toInt()
+          : int.tryParse(response?.toString() ?? '') ?? 0;
+      if (errorCount == 0) return true;
+
+      final responseRows = await supabase
+          .from('PLANILLA_VALIDACIONES_APPGT')
+          .select('nivel,codigo,dni,mensaje')
+          .eq('periodo_id', periodId)
+          .eq('resuelto', false)
+          .order('id');
+      final validations = (responseRows as List)
+          .whereType<Map>()
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList(growable: false);
+      if (!mounted) return false;
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text(
+            'Planilla bloqueada: $errorCount '
+            '${errorCount == 1 ? 'validacion' : 'validaciones'}',
+          ),
+          content: SizedBox(
+            width: 680,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 460),
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: validations.length,
+                separatorBuilder: (_, __) => const Divider(height: 18),
+                itemBuilder: (context, index) {
+                  final row = validations[index];
+                  final dni = (row['dni'] ?? '').toString().trim();
+                  final code = (row['codigo'] ?? '').toString().trim();
+                  final message = (row['mensaje'] ?? '').toString().trim();
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Icon(
+                      Icons.error_outline,
+                      color: Colors.redAccent,
+                    ),
+                    title: Text(message),
+                    subtitle: Text([
+                      if (dni.isNotEmpty) 'DNI $dni',
+                      if (code.isNotEmpty) code,
+                    ].join(' - ')),
+                  );
+                },
+              ),
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Entendido'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    } catch (error) {
+      if (!mounted) return false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo validar la planilla: $error')),
+      );
+      return false;
     }
   }
 
@@ -4149,6 +4437,151 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
+  String _payrollSlipFileName(Map<String, dynamic> row) {
+    final dni = (_value(row, ['dni', 'DNI']) ?? '').toString().trim();
+    final start = (_value(row, ['fecha_inicio']) ?? '').toString().trim();
+    final safeDni = dni.replaceAll(RegExp(r'[^0-9A-Za-z_-]'), '_');
+    final safeStart = start.replaceAll(RegExp(r'[^0-9A-Za-z_-]'), '_');
+    return 'boleta_${safeDni.isEmpty ? 'trabajador' : safeDni}_${safeStart.isEmpty ? 'periodo' : safeStart}.pdf';
+  }
+
+  bool _hasPayrollSlipContext(dynamic value) {
+    if (value is Map) return value.isNotEmpty;
+    if (value is Iterable) return value.isNotEmpty;
+    final text = value?.toString().trim().toLowerCase() ?? '';
+    return text.isNotEmpty && text != '{}' && text != '[]' && text != 'null';
+  }
+
+  Future<dynamic> _loadPayrollSlipContextV2(String slipId) async {
+    try {
+      return await supabase.rpc(
+        'appgt_obtener_contexto_boleta_v2',
+        params: {'p_boleta_id': slipId},
+      );
+    } catch (_) {
+      // Instalaciones que aún no aplicaron la migración V2 siguen pudiendo
+      // emitir una boleta a partir del snapshot histórico.
+      return null;
+    }
+  }
+
+  Future<Map<String, dynamic>?> _loadPayrollSettlementFallback(
+    Map<String, dynamic> slip,
+  ) async {
+    final settlementId =
+        (_value(slip, ['liquidacion_id']) ?? '').toString().trim();
+    if (settlementId.isEmpty) return null;
+    try {
+      final rawSettlement = await supabase
+          .from('PLANILLA_LIQUIDACION_TRABAJADOR_APPGT')
+          .select()
+          .eq('id', settlementId)
+          .maybeSingle();
+      return rawSettlement == null
+          ? null
+          : Map<String, dynamic>.from(rawSettlement);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _registerPayrollSlipPdfV2({
+    required String slipId,
+    required String pdfUrl,
+  }) async {
+    try {
+      await supabase.rpc('appgt_registrar_pdf_boleta_v2', params: {
+        'p_boleta_id': slipId,
+        'p_pdf_url': pdfUrl,
+        'p_pdf_version': PayrollSlipPdf.currentVersion,
+      });
+    } catch (_) {
+      // El RPC v1 no conoce la versión, por lo cual su PDF no se reutiliza
+      // como V2 en una próxima apertura: se regenerará de forma segura.
+      await supabase.rpc('appgt_registrar_pdf_boleta_v1', params: {
+        'p_boleta_id': slipId,
+        'p_pdf_url': pdfUrl,
+      });
+    }
+  }
+
+  Future<void> _openOrGeneratePayrollSlip(Map<String, dynamic> slip) async {
+    final slipId = (_value(slip, ['id']) ?? '').toString().trim();
+    if (slipId.isEmpty) return;
+    Uint8List? bytes;
+    try {
+      final stored = (_value(slip, ['pdf_url']) ?? '').toString().trim();
+      final storedVersion =
+          PayrollSlipPdf.versionOf(_value(slip, ['pdf_version']));
+      if (stored.isNotEmpty && storedVersion >= PayrollSlipPdf.currentVersion) {
+        final parsed = EvidenceStorage.extractBucketAndPath(stored);
+        if (parsed != null) {
+          try {
+            bytes = await supabase.storage
+                .from(parsed.bucket)
+                .download(parsed.path);
+          } catch (_) {
+            // Un enlace V2 vencido o borrado se vuelve a generar abajo.
+            bytes = null;
+          }
+        }
+      }
+      if (bytes == null) {
+        final rpcContext = await _loadPayrollSlipContextV2(slipId);
+        final fallbackSettlement = _hasPayrollSlipContext(rpcContext)
+            ? null
+            : await _loadPayrollSettlementFallback(slip);
+        final context = PayrollSlipPdf.contextFromPayload(
+          rpcContext,
+          fallbackSlip: slip,
+          fallbackSnapshot: _value(slip, ['liquidacion_snapshot']),
+          fallbackSettlement: fallbackSettlement,
+        );
+        if (!context.hasLiquidationData) {
+          throw StateError(
+            'No se encontró el contexto ni la liquidación de esta boleta.',
+          );
+        }
+        bytes = await PayrollSlipPdf.build(context);
+        final empresaId =
+            (_value(slip, ['empresa_id']) ?? '').toString().trim();
+        final periodoId =
+            (_value(slip, ['periodo_id']) ?? '').toString().trim();
+        final dni = (_value(slip, ['dni']) ?? '').toString().trim();
+        if (empresaId.isEmpty || periodoId.isEmpty || dni.isEmpty) {
+          throw StateError('Faltan datos de empresa, periodo o DNI.');
+        }
+        final path =
+            '$empresaId/$periodoId/${dni.replaceAll(RegExp(r'[^0-9A-Za-z_-]'), '_')}_v${PayrollSlipPdf.currentVersion}.pdf';
+        await supabase.storage.from('planilla-boletas').uploadBinary(
+              path,
+              bytes,
+              fileOptions: const FileOptions(
+                  contentType: 'application/pdf', upsert: true),
+            );
+        await _registerPayrollSlipPdfV2(
+          slipId: slipId,
+          pdfUrl: EvidenceStorage.toStorageUri(path,
+              bucketName: 'planilla-boletas'),
+        );
+        await _load();
+      }
+      final file = await _writeExportFile(_payrollSlipFileName(slip), bytes);
+      if (!kIsWeb) await OpenFilex.open(file);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+            content: Text(
+                kIsWeb ? 'Boleta PDF preparada.' : 'Boleta abierta: $file')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo preparar la boleta: $error')),
+      );
+    }
+  }
+
   Widget _mobileToolsMenu() {
     return PopupMenuButton<String>(
       enabled: !loading && error == null,
@@ -4171,6 +4604,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         }
         if (value == 'payroll_lifecycle') {
           await _runPayrollLifecycle();
+        }
+        if (value == 'payroll_slip' && _selectedDeleteRows.length == 1) {
+          await _openOrGeneratePayrollSlip(
+            _selectedDeleteRows.values.single,
+          );
         }
       },
       itemBuilder: (_) => [
@@ -4257,6 +4695,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               dense: true,
               leading: Icon(Icons.account_tree_outlined),
               title: Text('Ciclo de planilla'),
+            ),
+          ),
+        if (_isPayrollSlipTable)
+          PopupMenuItem(
+            value: 'payroll_slip',
+            enabled: _selectedDeleteRows.length == 1,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.picture_as_pdf_outlined),
+              title: Text('Generar o ver boleta PDF'),
             ),
           ),
         if (!canImport &&
@@ -4349,7 +4797,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   String _photocheckFieldKey(String label) {
     final n = _norm(label);
     if (n == 'LOGO') return 'LOGO';
-    if (n == 'FOTO' || n == 'PHOTO' || n == 'PHOTO_URL') return 'FOTO';
+    if (n == 'FOTO' ||
+        n == 'FOTO1' ||
+        n == 'PHOTO' ||
+        n == 'PHOTO1' ||
+        n == 'PHOTO_URL') return 'FOTO';
     if (n == 'QR' || n == 'CODIGO_QR') return 'QR';
     if (n == 'DNI' || n == 'DOCUMENTO') return 'DNI';
     if (n == 'APELLIDOSYNOMBRES' ||
@@ -4380,7 +4832,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       case 'AREA':
         return _rowText(worker, ['AREA', 'Área', 'ÁREA']);
       case 'FOTO':
-        return _rowText(worker, ['FOTO', 'Foto', 'PHOTO_URL', 'photo_url']);
+        return _rowText(worker, [
+          'FOTO1',
+          'Foto1',
+          'FOTO 1',
+          'FOTO_1',
+          'FOTO',
+          'Foto',
+          'PHOTO_URL',
+          'photo_url'
+        ]);
       default:
         return _rowText(worker, [fieldLabel, key]);
     }
@@ -4464,23 +4925,51 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   Future<Uint8List?> _downloadBytesForPdf(String source,
       {String? defaultBucket}) async {
-    final url =
-        await _resolveSupabaseMediaUrl(source, defaultBucket: defaultBucket);
-    if (url == null || !url.toLowerCase().startsWith('http')) return null;
-    try {
-      final client = HttpClient();
-      final req = await client.getUrl(Uri.parse(url));
-      final resp = await req.close();
-      if (resp.statusCode < 200 || resp.statusCode >= 300) {
-        client.close(force: true);
+    final clean = source.trim();
+    if (clean.isEmpty || clean.toUpperCase() == 'NULL') return null;
+    if (clean.startsWith('data:image/') && clean.contains(',')) {
+      try {
+        return base64Decode(clean.substring(clean.indexOf(',') + 1));
+      } catch (_) {
         return null;
       }
-      final bytes = await consolidateHttpClientResponseBytes(resp);
-      client.close(force: true);
-      return bytes;
-    } catch (_) {
-      return null;
     }
+    if (!kIsWeb) {
+      try {
+        final file = File(clean);
+        if (await file.exists()) return file.readAsBytes();
+      } catch (_) {}
+    }
+
+    final resolved =
+        await _resolveSupabaseMediaUrl(clean, defaultBucket: defaultBucket);
+    final resolvedBytes = await fetchUrlBytes(resolved);
+    if (resolvedBytes != null) return resolvedBytes;
+
+    final isExplicitSource = clean.toLowerCase().startsWith('http') ||
+        clean.startsWith('storage://') ||
+        clean.contains('storage/v1/');
+    if (!isExplicitSource) {
+      final normalizedPath = clean.replaceAll('\\', '/').replaceFirst(
+            RegExp(r'^/+'),
+            '',
+          );
+      final buckets = <String>{
+        if (defaultBucket != null) defaultBucket,
+        'appgt-evidencias',
+        'migracion-appsheets',
+      };
+      for (final bucket in buckets) {
+        try {
+          final url = await supabase.storage
+              .from(bucket)
+              .createSignedUrl(normalizedPath, 60 * 60);
+          final bytes = await fetchUrlBytes(url);
+          if (bytes != null) return bytes;
+        } catch (_) {}
+      }
+    }
+    return null;
   }
 
   Future<pw.Widget> _photocheckCard(
@@ -4501,14 +4990,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         : null;
     final fotoBytes = showFoto ? await _downloadBytesForPdf(fotoUrl) : null;
 
-    final textFields = <String>[];
+    final textFields = <MapEntry<String, String>>[];
     for (final f in fields) {
       final key = _photocheckFieldKey(f);
       if (key == 'LOGO' || key == 'FOTO' || key == 'QR') continue;
       final value = _workerValueByDesignField(worker, f);
       if (value.trim().isEmpty) continue;
-      final label = key == 'APELLIDOS Y NOMBRES' ? '' : '${f.trim()}: ';
-      textFields.add('$label$value');
+      final label = key == 'APELLIDOS Y NOMBRES' || key == 'PUESTO'
+          ? ''
+          : '${f.trim()}: ';
+      textFields.add(MapEntry(key, '$label$value'));
     }
 
     return pw.Container(
@@ -4565,9 +5056,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 alignment: pw.Alignment.center,
                 decoration: pw.BoxDecoration(
                     border: pw.Border.all(color: PdfColors.black, width: 0.7)),
-                child: fotoBytes != null
-                    ? pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover)
-                    : pw.SizedBox(),
+                child:
+                    pw.Image(pw.MemoryImage(fotoBytes), fit: pw.BoxFit.cover),
               ),
             ),
           pw.SizedBox(height: 5),
@@ -4577,16 +5067,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               child: pw.Column(
                 mainAxisAlignment: pw.MainAxisAlignment.center,
                 crossAxisAlignment: pw.CrossAxisAlignment.center,
-                children: textFields.map((line) {
-                  final isName = !line.contains(':');
+                children: textFields.map((entry) {
+                  final isName = entry.key == 'APELLIDOS Y NOMBRES';
                   return pw.Padding(
                     padding: const pw.EdgeInsets.only(bottom: 2.2),
                     child: pw.Text(
-                      line,
+                      entry.value,
                       textAlign: pw.TextAlign.center,
                       maxLines: isName ? 3 : 2,
                       style: pw.TextStyle(
-                          fontSize: isName ? 8.2 : 6.8,
+                          fontSize: isName ? 10.5 : 6.8,
                           fontWeight: isName
                               ? pw.FontWeight.bold
                               : pw.FontWeight.normal),
@@ -4648,10 +5138,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           ),
         );
         if (ok != true) return;
-      }
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Generando Photocheck...')));
       }
       final designs = await _fetchPhotocheckDesigns();
       final cards = <pw.Widget>[];
@@ -5510,6 +5996,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   DataCell _buildCell(String column, Map<String, dynamic> row) {
     final value = row[column];
     final text = _displayCellValue(value);
+    if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
+      return DataCell(IconButton(
+        tooltip: text.isEmpty ? 'Generar boleta PDF' : 'Ver boleta PDF',
+        icon: Icon(text.isEmpty
+            ? Icons.picture_as_pdf_outlined
+            : Icons.picture_as_pdf),
+        color: const Color(0xFFC62828),
+        onPressed: () => _openOrGeneratePayrollSlip(row),
+      ));
+    }
     if (text.isEmpty) return const DataCell(Text(''));
     if (_isMediaColumn(column) && _looksLikeUrl(text)) {
       return DataCell(_mediaCell(column, text));
@@ -5536,7 +6032,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'HASH_FILA_SIN_IDS',
       'HASH_FILA_SIN_ID',
     };
-    return hidden.contains(n);
+    if (hidden.contains(n)) return true;
+    const technical = {
+      'EMPRESA_ID',
+      'USER_ID',
+      'CREATED_BY',
+      'UPDATED_BY',
+      'CREATED_AT',
+      'UPDATED_AT',
+      'DELETED_AT',
+      'ESTADO_SYNC',
+      'VERSION',
+      'ACTIVO',
+      'ELIMINADO',
+      'ID_FILA_SERIAL',
+    };
+    return technical.contains(n) || n.startsWith('ID_') || n.endsWith('_ID');
   }
 
   Map<String, dynamic>? _fieldDefForCurrentTableColumn(String column) {
@@ -5637,6 +6148,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   double _tableColumnWidth(String column) {
     final custom = _columnWidths[column];
     if (custom != null) return custom;
+    if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') return 92;
+
     final clean = column.trim();
     if (clean.length > 28) return 230;
     if (_norm(clean).contains('OBSERV') || _norm(clean).contains('DESCRIP'))
@@ -7402,7 +7915,22 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final text = _displayCellValue(value);
       Widget child;
       final fmt = _tableCellFormat(column, r);
-      if (text.isEmpty) {
+      if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
+        child = Tooltip(
+          message: text.isEmpty
+              ? 'Generar boleta PDF'
+              : 'Ver o descargar boleta PDF',
+          child: IconButton(
+            icon: Icon(
+              text.isEmpty
+                  ? Icons.picture_as_pdf_outlined
+                  : Icons.picture_as_pdf,
+              color: const Color(0xFFC62828),
+            ),
+            onPressed: () => _openOrGeneratePayrollSlip(r),
+          ),
+        );
+      } else if (text.isEmpty) {
         child = const SizedBox.shrink();
       } else if (_isMediaColumn(column) && _looksLikeUrl(text)) {
         child = Align(
@@ -8471,6 +8999,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   ),
                   const SizedBox(width: 10),
                 ],
+                if (_isPayrollSlipTable) ...[
+                  ValueListenableBuilder<int>(
+                    valueListenable: _deleteSelectionVersion,
+                    builder: (context, _, __) => _humanWorkflowToolbarButton(
+                      onPressed: _selectedDeleteRows.length == 1
+                          ? () => _openOrGeneratePayrollSlip(
+                                _selectedDeleteRows.values.single,
+                              )
+                          : null,
+                      icon: Icons.picture_as_pdf_outlined,
+                      tooltip: 'Generar o ver boleta PDF',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
                 // Mantener visibles Importar y Exportar en la barra.
                 // La habilitación real sigue controlada dentro de cada botón
                 // por canImport/canExport, loading, offline, error y registros.
@@ -8582,6 +9125,25 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final value = _valueByColumn(row, column);
       final text = _displayCellValue(value);
       final format = _tableCellFormat(column, row);
+      if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: Tooltip(
+            message: text.isEmpty
+                ? 'Generar boleta PDF'
+                : 'Ver o descargar boleta PDF',
+            child: IconButton(
+              icon: Icon(
+                text.isEmpty
+                    ? Icons.picture_as_pdf_outlined
+                    : Icons.picture_as_pdf,
+                color: const Color(0xFFC62828),
+              ),
+              onPressed: () => _openOrGeneratePayrollSlip(row),
+            ),
+          ),
+        );
+      }
       if (_isMediaColumn(column) && _looksLikeUrl(text)) {
         return Align(
           alignment: Alignment.centerLeft,

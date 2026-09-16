@@ -1,7 +1,7 @@
 name: appgt_offline_subtables
 description: APPGT offline-first con formatos padre y tablas internas.
 publish_to: 'none'
-version: 0.0.14+14
+version: 0.0.15+15
 
 environment:
   sdk: ^3.6.0
@@ -32,6 +32,7 @@ dependencies:
   # Dictado de preguntas cortas en Consultor. El reconocimiento se ejecuta
   # mediante el servicio de voz disponible en cada sistema operativo.
   speech_to_text: ^7.4.0
+  desktop_drop: ^0.7.1
 
 dev_dependencies:
   flutter_test:

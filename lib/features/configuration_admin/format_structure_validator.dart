@@ -20,6 +20,17 @@ const supportedMatrixClasses = <String>{
   'FORMULA',
 };
 
+const formulaResultDataTypes = <String>{
+  'text',
+  'number',
+  'integer',
+  'date',
+  'time',
+  'datetime',
+  'boolean',
+  'json',
+};
+
 final RegExp _technicalCode = RegExp(r'^[A-Za-z0-9][A-Za-z0-9_-]{1,62}$');
 
 List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
@@ -129,6 +140,15 @@ List<String> validateFormatStructurePayload(Map<String, dynamic> payload) {
       if ((uiType == 'formula' || uiType == 'lookup') &&
           text(field, 'formula_funcion').isEmpty) {
         errors.add('$fieldPrefix: el campo calculado necesita una fórmula.');
+      }
+      if (uiType == 'formula' || uiType == 'lookup') {
+        final resultType = text(field, 'tipo').toLowerCase();
+        if (resultType.isNotEmpty &&
+            !formulaResultDataTypes.contains(resultType)) {
+          errors.add(
+            '$fieldPrefix: seleccione un tipo de resultado válido para la fórmula.',
+          );
+        }
       }
 
       final rawMatrices = field['matrices'];

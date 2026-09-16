@@ -87,8 +87,13 @@ class FormulaEngine {
       final value = _evalFunction(call.name, call.args);
       final replacement = value is num
           ? value.toString()
-          : (double.tryParse(value?.toString().trim().replaceAll(',', '.') ?? '')?.toString() ?? '0');
-      current = current.substring(0, call.start) + replacement + current.substring(call.end);
+          : (double.tryParse(
+                      value?.toString().trim().replaceAll(',', '.') ?? '')
+                  ?.toString() ??
+              '0');
+      current = current.substring(0, call.start) +
+          replacement +
+          current.substring(call.end);
     }
   }
 
@@ -124,7 +129,10 @@ class FormulaEngine {
         i++;
         continue;
       }
-      if (c == '}' && i + 1 < expr.length && expr[i + 1] == '}' && braceLevel > 0) {
+      if (c == '}' &&
+          i + 1 < expr.length &&
+          expr[i + 1] == '}' &&
+          braceLevel > 0) {
         braceLevel--;
         i++;
         continue;
@@ -133,7 +141,8 @@ class FormulaEngine {
       if (c != '(') continue;
 
       var j = i - 1;
-      while (j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) {
+      while (
+          j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) {
         j--;
       }
       final name = expr.substring(j + 1, i).trim();
@@ -141,7 +150,8 @@ class FormulaEngine {
       final close = _findClosingParen(expr, i);
       if (close == -1) continue;
       final rawArgs = expr.substring(i + 1, close);
-      return _FunctionCall(name: name, args: _splitArgs(rawArgs), start: j + 1, end: close + 1);
+      return _FunctionCall(
+          name: name, args: _splitArgs(rawArgs), start: j + 1, end: close + 1);
     }
     return null;
   }
@@ -184,7 +194,10 @@ class FormulaEngine {
         i++;
         continue;
       }
-      if (c == '}' && i + 1 < expr.length && expr[i + 1] == '}' && braceLevel > 0) {
+      if (c == '}' &&
+          i + 1 < expr.length &&
+          expr[i + 1] == '}' &&
+          braceLevel > 0) {
         braceLevel--;
         i++;
         continue;
@@ -198,7 +211,8 @@ class FormulaEngine {
         while (j >= 0 && expr[j].trim().isEmpty) {
           j--;
         }
-        while (j >= 0 && RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) {
+        while (j >= 0 &&
+            RegExp(r'[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]').hasMatch(expr[j])) {
           j--;
         }
         final name = expr.substring(j + 1, i).trim();
@@ -216,14 +230,17 @@ class FormulaEngine {
         // Considerar '-' operador solo si no es signo inicial de número.
         final prev = i > 0 ? expr[i - 1] : '';
         final next = i + 1 < expr.length ? expr[i + 1] : '';
-        if (i > 0 && next.isNotEmpty && (RegExp(r'\d|\s|\[').hasMatch(prev) || prev == ')')) return true;
+        if (i > 0 &&
+            next.isNotEmpty &&
+            (RegExp(r'\d|\s|\[').hasMatch(prev) || prev == ')')) return true;
       }
     }
     return false;
   }
 
   _FunctionCall? _readDirectFunction(String expr) {
-    final match = RegExp(r'^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]+)\s*\(').firstMatch(expr);
+    final match =
+        RegExp(r'^([A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_.]+)\s*\(').firstMatch(expr);
     if (match == null) return null;
     final open = expr.indexOf('(', match.end - 1);
     final close = _findClosingParen(expr, open);
@@ -269,7 +286,10 @@ class FormulaEngine {
         i++;
         continue;
       }
-      if (c == '}' && i + 1 < expr.length && expr[i + 1] == '}' && braceLevel > 0) {
+      if (c == '}' &&
+          i + 1 < expr.length &&
+          expr[i + 1] == '}' &&
+          braceLevel > 0) {
         braceLevel--;
         i++;
         continue;
@@ -315,7 +335,10 @@ class FormulaEngine {
           buffer.write(raw[i]);
           continue;
         }
-        if (c == '}' && i + 1 < raw.length && raw[i + 1] == '}' && braceLevel > 0) {
+        if (c == '}' &&
+            i + 1 < raw.length &&
+            raw[i + 1] == '}' &&
+            braceLevel > 0) {
           braceLevel--;
           buffer.write(c);
           i++;
@@ -352,7 +375,9 @@ class FormulaEngine {
           final firstDate = _tryParseFormulaDate(rawValues[0]);
           final secondDate = _tryParseFormulaDate(rawValues[1]);
           if (firstDate != null && secondDate != null) {
-            return _dateOnly(firstDate).difference(_dateOnly(secondDate)).inDays;
+            return _dateOnly(firstDate)
+                .difference(_dateOnly(secondDate))
+                .inDays;
           }
         }
         final values = rawValues.map(_toDouble).toList();
@@ -377,7 +402,8 @@ class FormulaEngine {
         final baseDate = _tryParseFormulaDate(_evalExpression(args[0]));
         if (baseDate == null) return '';
         final days = _toDouble(_evalExpression(args[1])).round();
-        return _formatFormulaDate(_dateOnly(baseDate).add(Duration(days: days)));
+        return _formatFormulaDate(
+            _dateOnly(baseDate).add(Duration(days: days)));
       case 'HORA_ACTUAL':
       case 'AHORA_HORA':
         return _formatFormulaTime(DateTime.now());
@@ -395,22 +421,31 @@ class FormulaEngine {
       case 'DIVISION':
         final values = _values(args).map(_toDouble).toList();
         if (values.length < 2) return '';
-        return values.skip(1).fold<double>(values.first, (a, b) => b == 0 ? double.nan : a / b);
+        return values
+            .skip(1)
+            .fold<double>(values.first, (a, b) => b == 0 ? double.nan : a / b);
       case 'PROMEDIO':
         final nums = _values(args).map(_toDouble).toList();
         if (nums.isEmpty) return 0;
         return nums.reduce((a, b) => a + b) / nums.length;
       case 'RAIZ':
-        final value = _toDouble(_evalExpression(args.isEmpty ? '0' : args.first));
+        final value =
+            _toDouble(_evalExpression(args.isEmpty ? '0' : args.first));
         return value < 0 ? double.nan : math.sqrt(value);
       case 'MAXIMO':
         final nums = _values(args).map(_toDouble).toList();
-        return nums.isEmpty ? 0 : nums.reduce((a, b) => math.max(a, b).toDouble());
+        return nums.isEmpty
+            ? 0
+            : nums.reduce((a, b) => math.max(a, b).toDouble());
       case 'MINIMO':
         final nums = _values(args).map(_toDouble).toList();
-        return nums.isEmpty ? 0 : nums.reduce((a, b) => math.min(a, b).toDouble());
+        return nums.isEmpty
+            ? 0
+            : nums.reduce((a, b) => math.min(a, b).toDouble());
       case 'CONTAR':
-        return _values(args).where((v) => v != null && v.toString().trim().isNotEmpty).length;
+        return _values(args)
+            .where((v) => v != null && v.toString().trim().isNotEmpty)
+            .length;
       case 'CONTARSI':
         if (args.length < 2) return 0;
         final values = _values([args[0]]);
@@ -418,21 +453,27 @@ class FormulaEngine {
       case 'SUMARSI':
         if (args.length < 2) return 0;
         final criteriaValues = _values([args[0]]);
-        final sumValues = args.length >= 3 ? _values([args[2]]) : criteriaValues;
+        final sumValues =
+            args.length >= 3 ? _values([args[2]]) : criteriaValues;
         var total = 0.0;
         for (var i = 0; i < criteriaValues.length; i++) {
-          if (_matchesCriteria(criteriaValues[i], args[1])) total += _toDouble(i < sumValues.length ? sumValues[i] : null);
+          if (_matchesCriteria(criteriaValues[i], args[1]))
+            total += _toDouble(i < sumValues.length ? sumValues[i] : null);
         }
         return total;
       case 'PROMEDIOSI':
         if (args.length < 2) return 0;
         final criteriaValues = _values([args[0]]);
-        final avgValues = args.length >= 3 ? _values([args[2]]) : criteriaValues;
+        final avgValues =
+            args.length >= 3 ? _values([args[2]]) : criteriaValues;
         final selected = <double>[];
         for (var i = 0; i < criteriaValues.length; i++) {
-          if (_matchesCriteria(criteriaValues[i], args[1])) selected.add(_toDouble(i < avgValues.length ? avgValues[i] : null));
+          if (_matchesCriteria(criteriaValues[i], args[1]))
+            selected.add(_toDouble(i < avgValues.length ? avgValues[i] : null));
         }
-        return selected.isEmpty ? 0 : selected.reduce((a, b) => a + b) / selected.length;
+        return selected.isEmpty
+            ? 0
+            : selected.reduce((a, b) => a + b) / selected.length;
       case 'MEDIANA':
         return _median(_values(args).map(_toDouble).toList());
       case 'MODA':
@@ -444,7 +485,9 @@ class FormulaEngine {
       case 'IF':
       case 'SI':
         if (args.length < 3) return '';
-        return _evalCondition(args[0]) ? _evalExpression(args[1]) : _evalExpression(args[2]);
+        return _evalCondition(args[0])
+            ? _evalExpression(args[1])
+            : _evalExpression(args[2]);
       case 'IFERROR':
       case 'SIERROR':
         if (args.isEmpty) return '';
@@ -463,11 +506,15 @@ class FormulaEngine {
       case 'ES_VACIO':
       case 'ESVACIO':
       case 'VACIO':
-        return args.isEmpty ? true : _asText(_evalExpression(args.first)).trim().isEmpty;
+        return args.isEmpty
+            ? true
+            : _asText(_evalExpression(args.first)).trim().isEmpty;
       case 'NO_ES_VACIO':
       case 'NOESVACIO':
       case 'NOVACIO':
-        return args.isEmpty ? false : _asText(_evalExpression(args.first)).trim().isNotEmpty;
+        return args.isEmpty
+            ? false
+            : _asText(_evalExpression(args.first)).trim().isNotEmpty;
       case 'AND':
       case 'Y':
         return args.every(_evalCondition);
@@ -481,23 +528,32 @@ class FormulaEngine {
       case 'CONCATENAR':
         return args.map((a) => _asText(_evalExpression(a))).join();
       case 'CONCATENAR_ESPACIO':
-        return args.map((a) => _asText(_evalExpression(a))).where((v) => v.trim().isNotEmpty).join(' ');
+        return args
+            .map((a) => _asText(_evalExpression(a)))
+            .where((v) => v.trim().isNotEmpty)
+            .join(' ');
       case 'CONCATENAR_SEP':
         if (args.isEmpty) return '';
         final sep = _asText(_evalExpression(args.first));
-        return args.skip(1).map((a) => _asText(_evalExpression(a))).where((v) => v.trim().isNotEmpty).join(sep);
+        return args
+            .skip(1)
+            .map((a) => _asText(_evalExpression(a)))
+            .where((v) => v.trim().isNotEmpty)
+            .join(sep);
       case 'LEFT':
       case 'IZQUIERDA':
         if (args.isEmpty) return '';
         final text = _asText(_evalExpression(args[0]));
-        final count = args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 1;
+        final count =
+            args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 1;
         final safe = math.max(0, math.min(count, text.length)).toInt();
         return text.substring(0, safe);
       case 'RIGHT':
       case 'DERECHA':
         if (args.isEmpty) return '';
         final text = _asText(_evalExpression(args[0]));
-        final count = args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 1;
+        final count =
+            args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 1;
         final safe = math.max(0, math.min(count, text.length)).toInt();
         return text.substring(text.length - safe);
       case 'MID':
@@ -507,7 +563,9 @@ class FormulaEngine {
         final text = _asText(_evalExpression(args[0]));
         final startOneBased = _toDouble(_evalExpression(args[1])).round();
         final start = math.max(0, startOneBased - 1).toInt();
-        final len = args.length > 2 ? _toDouble(_evalExpression(args[2])).round() : text.length;
+        final len = args.length > 2
+            ? _toDouble(_evalExpression(args[2])).round()
+            : text.length;
         if (start >= text.length || len <= 0) return '';
         final end = math.min(text.length, start + len).toInt();
         return text.substring(start, end);
@@ -518,31 +576,47 @@ class FormulaEngine {
       case 'UPPER':
       case 'MAYUSC':
       case 'MAYUSCULAS':
-        return args.isEmpty ? '' : _asText(_evalExpression(args[0])).toUpperCase();
+        return args.isEmpty
+            ? ''
+            : _asText(_evalExpression(args[0])).toUpperCase();
       case 'LOWER':
       case 'MINUSC':
       case 'MINUSCULAS':
-        return args.isEmpty ? '' : _asText(_evalExpression(args[0])).toLowerCase();
+        return args.isEmpty
+            ? ''
+            : _asText(_evalExpression(args[0])).toLowerCase();
       case 'TRIM':
       case 'ESPACIOS':
       case 'LIMPIAR':
-        return args.isEmpty ? '' : _asText(_evalExpression(args[0])).trim().replaceAll(RegExp(r'\s+'), ' ');
+        return args.isEmpty
+            ? ''
+            : _asText(_evalExpression(args[0]))
+                .trim()
+                .replaceAll(RegExp(r'\s+'), ' ');
       case 'REPLACE':
       case 'REEMPLAZAR':
         if (args.length < 3) return '';
-        return _asText(_evalExpression(args[0])).replaceAll(_asText(_evalExpression(args[1])), _asText(_evalExpression(args[2])));
+        return _asText(_evalExpression(args[0])).replaceAll(
+            _asText(_evalExpression(args[1])),
+            _asText(_evalExpression(args[2])));
       case 'CONTAINS':
       case 'CONTIENE':
         if (args.length < 2) return false;
-        return _asText(_evalExpression(args[0])).toUpperCase().contains(_asText(_evalExpression(args[1])).toUpperCase());
+        return _asText(_evalExpression(args[0]))
+            .toUpperCase()
+            .contains(_asText(_evalExpression(args[1])).toUpperCase());
       case 'STARTSWITH':
       case 'EMPIEZA_CON':
         if (args.length < 2) return false;
-        return _asText(_evalExpression(args[0])).toUpperCase().startsWith(_asText(_evalExpression(args[1])).toUpperCase());
+        return _asText(_evalExpression(args[0]))
+            .toUpperCase()
+            .startsWith(_asText(_evalExpression(args[1])).toUpperCase());
       case 'ENDSWITH':
       case 'TERMINA_CON':
         if (args.length < 2) return false;
-        return _asText(_evalExpression(args[0])).toUpperCase().endsWith(_asText(_evalExpression(args[1])).toUpperCase());
+        return _asText(_evalExpression(args[0]))
+            .toUpperCase()
+            .endsWith(_asText(_evalExpression(args[1])).toUpperCase());
       case 'ABS':
       case 'ABSOLUTO':
         return args.isEmpty ? 0 : _toDouble(_evalExpression(args[0])).abs();
@@ -552,12 +626,17 @@ class FormulaEngine {
       case 'POWER':
       case 'POTENCIA':
         if (args.length < 2) return 0;
-        return math.pow(_toDouble(_evalExpression(args[0])), _toDouble(_evalExpression(args[1]))).toDouble();
+        return math
+            .pow(_toDouble(_evalExpression(args[0])),
+                _toDouble(_evalExpression(args[1])))
+            .toDouble();
       case 'MOD':
       case 'RESIDUO':
         if (args.length < 2) return 0;
         final divisor = _toDouble(_evalExpression(args[1]));
-        return divisor == 0 ? double.nan : _toDouble(_evalExpression(args[0])) % divisor;
+        return divisor == 0
+            ? double.nan
+            : _toDouble(_evalExpression(args[0])) % divisor;
       case 'LOOKUP':
       case 'BUSCAR':
         return _lookup(args);
@@ -583,7 +662,8 @@ class FormulaEngine {
       case 'REDONDEAR':
         if (args.isEmpty) return 0;
         final value = _toDouble(_evalExpression(args[0]));
-        final decimals = args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 0;
+        final decimals =
+            args.length > 1 ? _toDouble(_evalExpression(args[1])).round() : 0;
         return double.parse(value.toStringAsFixed(decimals));
       default:
         return 0;
@@ -777,8 +857,10 @@ class FormulaEngine {
     // La referencia completa se protege antes de evaluar la matemática.
     // Soporta nombres con paréntesis: [CANT(JABAS)]
     // Soporta UUID con guiones: [d514ff1c-be45-48cb-84b2-e2155cd754dc]
-    var out = expr.replaceAllMapped(RegExp(r'\[([^\]]+)\]'), (m) => numberForRef(m.group(0)!));
-    out = out.replaceAllMapped(RegExp(r'\{\{([^}]+)\}\}'), (m) => numberForRef(m.group(0)!));
+    var out = expr.replaceAllMapped(
+        RegExp(r'\[([^\]]+)\]'), (m) => numberForRef(m.group(0)!));
+    out = out.replaceAllMapped(
+        RegExp(r'\{\{([^}]+)\}\}'), (m) => numberForRef(m.group(0)!));
     return out;
   }
 
@@ -793,25 +875,37 @@ class FormulaEngine {
       final rightNum = double.tryParse(right.toString().replaceAll(',', '.'));
       if (leftNum != null && rightNum != null) {
         switch (op) {
-          case '>': return leftNum > rightNum;
-          case '<': return leftNum < rightNum;
-          case '>=': return leftNum >= rightNum;
-          case '<=': return leftNum <= rightNum;
+          case '>':
+            return leftNum > rightNum;
+          case '<':
+            return leftNum < rightNum;
+          case '>=':
+            return leftNum >= rightNum;
+          case '<=':
+            return leftNum <= rightNum;
           case '==':
-          case '=': return leftNum == rightNum;
-          case '!=': return leftNum != rightNum;
+          case '=':
+            return leftNum == rightNum;
+          case '!=':
+            return leftNum != rightNum;
         }
       } else {
         final a = left.toString().trim();
         final b = right.toString().trim();
         switch (op) {
           case '==':
-          case '=': return _normalize(a) == _normalize(b);
-          case '!=': return _normalize(a) != _normalize(b);
-          case '>': return a.compareTo(b) > 0;
-          case '<': return a.compareTo(b) < 0;
-          case '>=': return a.compareTo(b) >= 0;
-          case '<=': return a.compareTo(b) <= 0;
+          case '=':
+            return _normalize(a) == _normalize(b);
+          case '!=':
+            return _normalize(a) != _normalize(b);
+          case '>':
+            return a.compareTo(b) > 0;
+          case '<':
+            return a.compareTo(b) < 0;
+          case '>=':
+            return a.compareTo(b) >= 0;
+          case '<=':
+            return a.compareTo(b) <= 0;
         }
       }
     }
@@ -854,7 +948,10 @@ class FormulaEngine {
         i++;
         continue;
       }
-      if (c == '}' && i + 1 < text.length && text[i + 1] == '}' && braceLevel > 0) {
+      if (c == '}' &&
+          i + 1 < text.length &&
+          text[i + 1] == '}' &&
+          braceLevel > 0) {
         braceLevel--;
         i++;
         continue;
@@ -867,7 +964,11 @@ class FormulaEngine {
         if (op == '=') {
           final prev = i > 0 ? text[i - 1] : '';
           final next = i + 1 < text.length ? text[i + 1] : '';
-          if (prev == '>' || prev == '<' || prev == '!' || prev == '=' || next == '=') continue;
+          if (prev == '>' ||
+              prev == '<' ||
+              prev == '!' ||
+              prev == '=' ||
+              next == '=') continue;
         }
         return i;
       }
@@ -888,19 +989,27 @@ class FormulaEngine {
     final rightNum = double.tryParse(rightText.replaceAll(',', '.'));
     if (leftNum != null && rightNum != null) {
       switch (op) {
-        case '>': return leftNum > rightNum;
-        case '<': return leftNum < rightNum;
-        case '>=': return leftNum >= rightNum;
-        case '<=': return leftNum <= rightNum;
+        case '>':
+          return leftNum > rightNum;
+        case '<':
+          return leftNum < rightNum;
+        case '>=':
+          return leftNum >= rightNum;
+        case '<=':
+          return leftNum <= rightNum;
         case '==':
-        case '=': return leftNum == rightNum;
-        case '!=': return leftNum != rightNum;
+        case '=':
+          return leftNum == rightNum;
+        case '!=':
+          return leftNum != rightNum;
       }
     }
     switch (op) {
       case '==':
-      case '=': return _normalize(value.toString()) == _normalize(rightText);
-      case '!=': return _normalize(value.toString()) != _normalize(rightText);
+      case '=':
+        return _normalize(value.toString()) == _normalize(rightText);
+      case '!=':
+        return _normalize(value.toString()) != _normalize(rightText);
     }
     return false;
   }
@@ -911,9 +1020,12 @@ class FormulaEngine {
     final searchColumn = _cleanToken(args[1]);
     final searchValue = _evalExpression(args[2]).toString().trim();
     final returnColumn = _cleanToken(args[3]);
-    final rows = matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
+    final rows =
+        matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
     for (final row in rows) {
-      final candidate = _valueByColumnName(row, searchColumn)?.toString().trim() ?? '';
+      if (_isSoftDeletedRow(row)) continue;
+      final candidate =
+          _valueByColumnName(row, searchColumn)?.toString().trim() ?? '';
       if (candidate == searchValue) {
         return _valueByColumnName(row, returnColumn)?.toString().trim() ?? '';
       }
@@ -926,17 +1038,18 @@ class FormulaEngine {
     final sourceTable = _cleanToken(args[0]);
     final returnColumn = _cleanToken(args[1]);
     final filterColumn = args.length >= 4 ? _cleanToken(args[2]) : '';
-    final filterValue = args.length >= 4
-        ? _evalExpression(args[3]).toString().trim()
-        : '';
+    final filterValue =
+        args.length >= 4 ? _evalExpression(args[3]).toString().trim() : '';
     final values = <String>[];
     for (final row in matrixRowsByTable[sourceTable] ?? const []) {
+      if (_isSoftDeletedRow(row)) continue;
       if (filterColumn.isNotEmpty) {
         final candidate =
             _valueByColumnName(row, filterColumn)?.toString().trim() ?? '';
         if (candidate != filterValue) continue;
       }
-      final value = _valueByColumnName(row, returnColumn)?.toString().trim() ?? '';
+      final value =
+          _valueByColumnName(row, returnColumn)?.toString().trim() ?? '';
       if (value.isNotEmpty && !values.contains(value)) values.add(value);
     }
     return values.join(', ');
@@ -950,16 +1063,33 @@ class FormulaEngine {
     return null;
   }
 
+  bool _isSoftDeletedRow(Map<String, dynamic> row) {
+    final deleted = _valueByColumnName(row, 'eliminado');
+    if (deleted is bool && deleted) return true;
+    if (deleted is num && deleted != 0) return true;
+    if (deleted != null &&
+        const {'true', '1', 'si', 'sí', 'yes'}
+            .contains(_normalize(deleted.toString()))) {
+      return true;
+    }
+    final deletedAt = _valueByColumnName(row, 'deleted_at');
+    return deletedAt != null && deletedAt.toString().trim().isNotEmpty;
+  }
+
   dynamic _datePart(List<String> args, String part) {
     if (args.isEmpty) return '';
     final raw = _evalExpression(args.first).toString().trim();
     final date = DateTime.tryParse(raw);
     if (date == null) return '';
     switch (part) {
-      case 'SEMANA': return _isoWeek(date);
-      case 'ANIO': return date.year;
-      case 'MES': return date.month;
-      case 'DIA': return date.day;
+      case 'SEMANA':
+        return _isoWeek(date);
+      case 'ANIO':
+        return date.year;
+      case 'MES':
+        return date.month;
+      case 'DIA':
+        return date.day;
     }
     return '';
   }
@@ -967,7 +1097,12 @@ class FormulaEngine {
   int _isoWeek(DateTime date) {
     final thursday = date.add(Duration(days: 3 - ((date.weekday + 6) % 7)));
     final firstThursday = DateTime(thursday.year, 1, 4);
-    return 1 + thursday.difference(firstThursday.add(Duration(days: 3 - ((firstThursday.weekday + 6) % 7)))).inDays ~/ 7;
+    return 1 +
+        thursday
+                .difference(firstThursday
+                    .add(Duration(days: 3 - ((firstThursday.weekday + 6) % 7))))
+                .inDays ~/
+            7;
   }
 
   double _conditionalStatistic(List<String> args, {required bool median}) {
@@ -976,13 +1111,15 @@ class FormulaEngine {
     final statValues = args.length >= 3 ? _values([args[2]]) : criteriaValues;
     final selected = <double>[];
     for (var i = 0; i < criteriaValues.length; i++) {
-      if (_matchesCriteria(criteriaValues[i], args[1])) selected.add(_toDouble(i < statValues.length ? statValues[i] : null));
+      if (_matchesCriteria(criteriaValues[i], args[1]))
+        selected.add(_toDouble(i < statValues.length ? statValues[i] : null));
     }
     return median ? _median(selected) : _mode(selected);
   }
 
   double _median(List<double> values) {
-    final nums = values.where((v) => !v.isNaN && !v.isInfinite).toList()..sort();
+    final nums = values.where((v) => !v.isNaN && !v.isInfinite).toList()
+      ..sort();
     if (nums.isEmpty) return 0;
     final mid = nums.length ~/ 2;
     return nums.length.isOdd ? nums[mid] : (nums[mid - 1] + nums[mid]) / 2;
@@ -1027,7 +1164,8 @@ class FormulaEngine {
     var changed = true;
     while (changed && out.length >= 2) {
       changed = false;
-      if ((out.startsWith("'") && out.endsWith("'")) || (out.startsWith('"') && out.endsWith('"'))) {
+      if ((out.startsWith("'") && out.endsWith("'")) ||
+          (out.startsWith('"') && out.endsWith('"'))) {
         out = out.substring(1, out.length - 1);
         changed = true;
       }
@@ -1036,7 +1174,9 @@ class FormulaEngine {
   }
 
   bool _isQuoted(String value) =>
-      value.length >= 2 && ((value.startsWith("'") && value.endsWith("'")) || (value.startsWith('"') && value.endsWith('"')));
+      value.length >= 2 &&
+      ((value.startsWith("'") && value.endsWith("'")) ||
+          (value.startsWith('"') && value.endsWith('"')));
 
   bool _isFieldRef(String value) {
     final v = value.trim();
@@ -1047,7 +1187,8 @@ class FormulaEngine {
         RegExp(r'^\{\{[^{}]+\}\}$').hasMatch(v);
   }
 
-  bool _isDateLiteral(String value) => RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(value);
+  bool _isDateLiteral(String value) =>
+      RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(value);
 
   int? _timeMinutesFromArg(String arg) {
     final evaluated = _evalExpression(arg);
@@ -1058,14 +1199,17 @@ class FormulaEngine {
     if (value == null) return null;
     var text = value.toString().trim();
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
-    if ((text.startsWith('[') && text.endsWith(']')) || (text.startsWith('{{') && text.endsWith('}}'))) {
+    if ((text.startsWith('[') && text.endsWith(']')) ||
+        (text.startsWith('{{') && text.endsWith('}}'))) {
       text = _stripFieldDelimiters(text);
     }
-    final match = RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?$').firstMatch(text.trim());
+    final match =
+        RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?$').firstMatch(text.trim());
     if (match == null) return null;
     final h = int.tryParse(match.group(1)!);
     final m = int.tryParse(match.group(2)!);
-    if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59) return null;
+    if (h == null || m == null || h < 0 || h > 23 || m < 0 || m > 59)
+      return null;
     return h * 60 + m;
   }
 
@@ -1085,9 +1229,11 @@ class FormulaEngine {
     if (text.isEmpty || text.toUpperCase() == 'NULL') return null;
     final iso = RegExp(r'^(\d{4})-(\d{1,2})-(\d{1,2})').firstMatch(text);
     if (iso != null) {
-      return DateTime.tryParse('${iso.group(1)!}-${iso.group(2)!.padLeft(2, '0')}-${iso.group(3)!.padLeft(2, '0')}');
+      return DateTime.tryParse(
+          '${iso.group(1)!}-${iso.group(2)!.padLeft(2, '0')}-${iso.group(3)!.padLeft(2, '0')}');
     }
-    final slash = RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(text);
+    final slash =
+        RegExp(r'^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$').firstMatch(text);
     if (slash != null) {
       final d = int.tryParse(slash.group(1)!);
       final m = int.tryParse(slash.group(2)!);
@@ -1099,7 +1245,8 @@ class FormulaEngine {
     return DateTime.tryParse(text);
   }
 
-  DateTime _dateOnly(DateTime date) => DateTime(date.year, date.month, date.day);
+  DateTime _dateOnly(DateTime date) =>
+      DateTime(date.year, date.month, date.day);
 
   String _formatFormulaDate(DateTime date) {
     final y = date.year.toString().padLeft(4, '0');
@@ -1121,12 +1268,15 @@ class FormulaEngine {
     return '${_formatFormulaDate(date)} $h:$m:$s';
   }
 
-  bool _isPlainIdentifier(String value) => RegExp(r'^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_. -]+$').hasMatch(value.trim());
+  bool _isPlainIdentifier(String value) =>
+      RegExp(r'^[A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9_. -]+$').hasMatch(value.trim());
 
   String _stripFieldDelimiters(String value) {
     var out = value.trim();
-    if (out.startsWith('[') && out.endsWith(']')) out = out.substring(1, out.length - 1);
-    if (out.startsWith('{{') && out.endsWith('}}')) out = out.substring(2, out.length - 2);
+    if (out.startsWith('[') && out.endsWith(']'))
+      out = out.substring(1, out.length - 1);
+    if (out.startsWith('{{') && out.endsWith('}}'))
+      out = out.substring(2, out.length - 2);
     return out.trim();
   }
 
@@ -1138,7 +1288,15 @@ class FormulaEngine {
 
   String _normalize(String value) {
     var s = value.trim().toUpperCase();
-    const acentos = {'Á': 'A', 'É': 'E', 'Í': 'I', 'Ó': 'O', 'Ú': 'U', 'Ü': 'U', 'Ñ': 'N'};
+    const acentos = {
+      'Á': 'A',
+      'É': 'E',
+      'Í': 'I',
+      'Ó': 'O',
+      'Ú': 'U',
+      'Ü': 'U',
+      'Ñ': 'N'
+    };
     acentos.forEach((k, v) => s = s.replaceAll(k, v));
     s = s.replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
     s = s.replaceAll(RegExp(r'_+'), '_');
@@ -1149,7 +1307,10 @@ class FormulaEngine {
     if (value.isNaN || value.isInfinite) return '';
     return value.truncateToDouble() == value
         ? value.toStringAsFixed(0)
-        : value.toStringAsFixed(6).replaceFirst(RegExp(r'0+$'), '').replaceFirst(RegExp(r'\.$'), '');
+        : value
+            .toStringAsFixed(6)
+            .replaceFirst(RegExp(r'0+$'), '')
+            .replaceFirst(RegExp(r'\.$'), '');
   }
 }
 
@@ -1159,7 +1320,11 @@ class _FunctionCall {
   final int start;
   final int end;
 
-  _FunctionCall({required this.name, required this.args, required this.start, required this.end});
+  _FunctionCall(
+      {required this.name,
+      required this.args,
+      required this.start,
+      required this.end});
 }
 
 class _ExpressionParser {

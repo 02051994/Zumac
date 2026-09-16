@@ -58,6 +58,27 @@ class SyncService {
         msg.contains('rls')) {
       return 'No autorizado. La sesión online venció o el usuario no tiene permiso para enviar este registro.';
     }
+    if (msg.contains('administrator permission required') ||
+        msg.contains('code: 42501')) {
+      return 'Esta acción requiere una cuenta administradora de la empresa activa.';
+    }
+    if (msg.contains('authentication required') ||
+        msg.contains('active company') ||
+        msg.contains('empresa actual')) {
+      return 'El usuario no tiene una empresa activa asociada. Un administrador debe completar su membresía.';
+    }
+    if (msg.contains('could not find the') && msg.contains('column') ||
+        msg.contains('pgrst204') ||
+        msg.contains('schema cache')) {
+      final match = RegExp(
+        r'''could not find the ['"]([^'"]+)['"] column''',
+        caseSensitive: false,
+      ).firstMatch(raw);
+      final field = match?.group(1)?.trim();
+      return field == null || field.isEmpty
+          ? 'La configuración del formulario no coincide con las columnas de la tabla. Actualice o publique nuevamente la configuración.'
+          : 'La tabla no tiene el campo «$field» que el formulario intenta guardar. Actualice o publique nuevamente la configuración.';
+    }
     if (msg.contains('storage') ||
         msg.contains('bucket') ||
         msg.contains('upload')) {
@@ -70,8 +91,9 @@ class SyncService {
       return 'Falta completar un campo obligatorio para poder enviar el registro.';
     }
     if (msg.contains('invalid input syntax') ||
-        msg.contains('type') ||
-        msg.contains('cast')) {
+        msg.contains('data type') ||
+        msg.contains('cannot cast') ||
+        msg.contains('cast error')) {
       return 'Un campo tiene un tipo de dato incorrecto. Revisa números, fechas y textos antes de sincronizar.';
     }
     return raw.replaceFirst('Exception: ', '').trim().isEmpty
@@ -318,9 +340,13 @@ class SyncService {
         if (!forceAll && !_tableChanged(changedTables, table)) continue;
         final column = spec['column']!;
         final key = spec['key']!;
-        final rows = await _supabase.from(table).select(column).order(column);
+        // Se necesita la fila completa para excluir borrados lógicos antes de
+        // construir la caché de catálogos (un select de una sola columna no
+        // permite saber si eliminado=true).
+        final rows = await _supabase.from(table).select().order(column);
         final seen = <String>{};
         for (final row in List<Map<String, dynamic>>.from(rows)) {
+          if (_isDeletedRow(row)) continue;
           final value = _valueByColumn(row, [column])?.toString().trim() ?? '';
           if (value.isEmpty || seen.contains(value)) continue;
           seen.add(value);
@@ -526,6 +552,7 @@ class SyncService {
       final seen = <String>{};
       for (final row
           in sourceRows[sourceTable] ?? const <Map<String, dynamic>>[]) {
+        if (_isDeletedRow(row)) continue;
         final value =
             _valueByColumn(row, [sourceColumn])?.toString().trim() ?? '';
         if (value.isEmpty || seen.contains(value)) continue;
@@ -573,6 +600,7 @@ class SyncService {
     for (final entry in sourceRows.entries) {
       var index = 0;
       for (final row in entry.value) {
+        if (_isDeletedRow(row)) continue;
         final id = _valueByColumn(row, ['id', 'ID', 'codigo', 'CODIGO'])
             ?.toString()
             .trim();
@@ -2820,14 +2848,16 @@ class SyncService {
         .trim();
   }
 
-  bool _isBase64Image(dynamic value) {
+  bool _isBase64Evidence(dynamic value) {
     return value is String &&
         (value.startsWith('data:image/png;base64,') ||
             value.startsWith('data:image/jpeg;base64,') ||
-            value.startsWith('data:image/jpg;base64,'));
+            value.startsWith('data:image/jpg;base64,') ||
+            value.startsWith('data:application/pdf;base64,'));
   }
 
   String _contentType(String value) {
+    if (value.startsWith('data:application/pdf')) return 'application/pdf';
     if (value.startsWith('data:image/jpeg') ||
         value.startsWith('data:image/jpg')) {
       return 'image/jpeg';
@@ -2836,6 +2866,7 @@ class SyncService {
   }
 
   String _extension(String value) {
+    if (value.startsWith('data:application/pdf')) return 'pdf';
     if (value.startsWith('data:image/jpeg') ||
         value.startsWith('data:image/jpg')) {
       return 'jpg';
@@ -2843,7 +2874,7 @@ class SyncService {
     return 'png';
   }
 
-  Uint8List _decodeBase64Image(String value) {
+  Uint8List _decodeBase64Evidence(String value) {
     final commaIndex = value.indexOf(',');
     final raw = commaIndex >= 0 ? value.substring(commaIndex + 1) : value;
     return base64Decode(raw);
@@ -2868,17 +2899,34 @@ class SyncService {
 
     final uploads = <Future<void>>[];
     for (final entry in payload.entries) {
-      if (!_isBase64Image(entry.value)) continue;
+      if (!_isBase64Evidence(entry.value)) continue;
       final field = _sanitizePathPart(entry.key);
       final rawValue = entry.value as String;
-      final bytes = _decodeBase64Image(rawValue);
+      final bytes = _decodeBase64Evidence(rawValue);
       final ext = _extension(rawValue);
-      final folder = field.toUpperCase().contains('FOTO') ? 'fotos' : 'firmas';
-      final path =
-          '$folder/$modulo/$formato/$subtabla/$table/$idLocal/$field.$ext';
+      final isPermissionPdf =
+          _norm(rawTable) == _norm('GH_PERMISOS_LICENCIAS_APPGT') &&
+              _norm(entry.key) == 'DOCUMENTO_SUSTENTO' &&
+              ext == 'pdf';
+      final storageBucket = isPermissionPdf
+          ? EvidenceStorage.permissionDocumentsBucket
+          : EvidenceStorage.bucket;
+      final empresaId = (payload['empresa_id'] ?? queueRow['empresa_id'])
+              ?.toString()
+              .trim() ??
+          '';
+      final dni = _sanitizePathPart(
+        (_valueByColumn(payload, ['dni', 'DNI']) ?? 'sin_dni').toString(),
+      );
+      final folder = isPermissionPdf
+          ? '${_sanitizePathPart(empresaId)}/$dni/$idLocal'
+          : (field.toUpperCase().contains('FOTO') ? 'fotos' : 'firmas');
+      final path = isPermissionPdf
+          ? '$folder/$field.$ext'
+          : '$folder/$modulo/$formato/$subtabla/$table/$idLocal/$field.$ext';
 
       uploads.add(() async {
-        await _supabase.storage.from(EvidenceStorage.bucket).uploadBinary(
+        await _supabase.storage.from(storageBucket).uploadBinary(
               path,
               bytes,
               fileOptions: FileOptions(
@@ -2888,22 +2936,23 @@ class SyncService {
             );
         // Bucket privado: en BD se guarda la ruta, no una URL firmada larga.
         // La URL corta se genera solo al visualizar la evidencia.
-        cleaned[entry.key] = EvidenceStorage.toStorageUri(path);
+        cleaned[entry.key] =
+            EvidenceStorage.toStorageUri(path, bucketName: storageBucket);
         try {
-          final empresaId = queueRow['empresa_id']?.toString().trim() ?? '';
+          final manifestEmpresaId = empresaId;
           final userId = _supabase.auth.currentUser?.id ?? '';
           final storedId = queueRow['id_local']?.toString().trim() ?? '';
-          if (empresaId.isNotEmpty &&
+          if (manifestEmpresaId.isNotEmpty &&
               userId.isNotEmpty &&
               storedId.isNotEmpty) {
             await _supabase.from('ARCHIVOS_EVIDENCIA_APPGT').upsert(
               {
-                'empresa_id': empresaId,
+                'empresa_id': manifestEmpresaId,
                 'user_id': userId,
                 'tabla_destino': rawTable,
                 'registro_id_local': storedId,
                 'campo': entry.key,
-                'bucket': EvidenceStorage.bucket,
+                'bucket': storageBucket,
                 'object_path': path,
                 'mime_type': _contentType(rawValue),
                 'tamano_bytes': bytes.length,
@@ -3100,6 +3149,30 @@ class SyncService {
     return '$safePrefix$suffix';
   }
 
+  static final Map<String, bool> _remoteColumnSupport = <String, bool>{};
+
+  Future<bool> _remoteTableHasColumn(String table, String column) async {
+    final cacheKey = _norm(table) + '.' + _norm(column);
+    final cached = _remoteColumnSupport[cacheKey];
+    if (cached != null) return cached;
+    try {
+      // Incluso sin filas, PostgREST valida el nombre de columna contra el
+      // esquema. Así no se envían campos técnicos a tablas antiguas.
+      await _supabase.from(table).select(column).limit(1);
+      return _remoteColumnSupport[cacheKey] = true;
+    } catch (error) {
+      final detail = error.toString().toLowerCase();
+      final mentionsColumn = detail.contains(column.toLowerCase());
+      final missingColumn = detail.contains('pgrst204') ||
+          (mentionsColumn &&
+              (detail.contains('could not find') ||
+                  detail.contains('does not exist')));
+      // Una falla de red/RLS no debe descartar una columna válida. Solo se
+      // retira cuando Supabase confirma que no existe en la tabla.
+      return _remoteColumnSupport[cacheKey] = !missingColumn;
+    }
+  }
+
   Future<Map<String, dynamic>> _filterPayloadToKnownFields(
       String table, Map<String, dynamic> payload) async {
     final fieldRows = await _local.where(
@@ -3112,7 +3185,6 @@ class SyncService {
       'ESTADO_SYNC',
       'ACTIVO',
       'ELIMINADO',
-      'ESTADO_REGISTRO',
       'ID_REGISTRO',
       'HASH_FILA_SIN_IDS',
       'ID_FILA_SERIAL',
@@ -3121,6 +3193,14 @@ class SyncService {
     for (final f in fieldRows) {
       final campo = f['campo']?.toString().trim() ?? '';
       if (campo.isNotEmpty) allowed.add(_norm(campo));
+    }
+    if (payload.keys.any((key) => _norm(key.toString()) == 'EMPRESA_ID') &&
+        await _remoteTableHasColumn(table, 'empresa_id')) {
+      allowed.add('EMPRESA_ID');
+    }
+    if (payload.keys.any((key) => _norm(key.toString()) == 'USER_ID') &&
+        await _remoteTableHasColumn(table, 'user_id')) {
+      allowed.add('USER_ID');
     }
     if (fieldRows.isEmpty) return payload;
     final canonicalByNorm = <String, String>{};
@@ -3147,6 +3227,26 @@ class SyncService {
         'APELLIDOS_NOMBRES': 'APELLIDOS Y NOMBRES',
         'OBSERVACIONES': 'OBSERVACIONES',
         'ESTADO_REGISTRO': 'estado_registro',
+      });
+      allowed.addAll(canonicalByNorm.keys);
+    }
+    if (_norm(table) == _norm('GT-MATRIZ_MOVILIDADES')) {
+      canonicalByNorm.addAll({
+        'ID_LOCAL': 'id_local',
+        'PLACA': 'placa',
+        'CONDUCTOR': 'conductor',
+        'DNI_CONDUCTOR': 'dni_conductor',
+        'LICENCIA_CONDUCIR': 'licencia_conducir',
+        'LICENCIA_VIGENCIA': 'licencia_vigencia',
+        'SOAT_VIGENCIA': 'soat_vigencia',
+        'REVISION_TECNICA_VIGENCIA': 'revision_tecnica_vigencia',
+      });
+      allowed.addAll(canonicalByNorm.keys);
+    }
+    if (table == 'GT-ASISTENCIA_PERSONAL') {
+      canonicalByNorm.addAll({
+        'MOVILIDAD_ALERTA_ACEPTADA': 'MOVILIDAD_ALERTA_ACEPTADA',
+        'MOVILIDAD_ALERTA_DETALLE': 'MOVILIDAD_ALERTA_DETALLE',
       });
       allowed.addAll(canonicalByNorm.keys);
     }
@@ -3192,6 +3292,64 @@ class SyncService {
     }
 
     return output;
+  }
+
+  /// Guarda inmediatamente en Supabase para la versión web.
+  /// Escritorio y móvil conservan el flujo offline y la cola local.
+  Future<Map<String, dynamic>> saveRecordOnline({
+    required String table,
+    required Map<String, dynamic> payload,
+    required String moduleId,
+    required String formatId,
+    String? formatTableId,
+  }) async {
+    if (!await hasInternet()) {
+      throw Exception(
+        'No hay conexion a internet. En web y escritorio se necesita conexion '
+        'para guardar el registro.',
+      );
+    }
+    await _ensureOnlineAuthSession();
+    final userId = _supabase.auth.currentUser?.id;
+    if (userId == null || userId.isEmpty) {
+      throw Exception(
+          'La sesion ha vencido. Ingrese nuevamente para continuar.');
+    }
+    final empresaId = await LocalSession().cachedEmpresaId();
+    if (empresaId.isEmpty) {
+      throw Exception(
+          'No se encontro la empresa activa para guardar el registro.');
+    }
+
+    final output = Map<String, dynamic>.from(payload);
+    final rawIdLocal = output['id_local']?.toString().trim() ?? '';
+    final idLocal = _isPureUuid(rawIdLocal) ? rawIdLocal : _uuid.v4();
+    output['id_local'] = idLocal;
+    output.putIfAbsent('empresa_id', () => empresaId);
+
+    final withHiddenIds =
+        await _ensureHiddenIdsForSync(table: table, payload: output);
+    final cleaned = _cleanPayloadForInsert(withHiddenIds);
+    final known = await _filterPayloadToKnownFields(table, cleaned);
+    final queueRow = <String, dynamic>{
+      'id_local': idLocal,
+      'empresa_id': empresaId,
+      'user_id': userId,
+      'modulo_id': moduleId,
+      'formato_id': formatId,
+      'formato_tabla_id': formatTableId,
+      'tabla_destino': table,
+    };
+    final finalPayload =
+        await _uploadEvidenceFiles(payload: known, queueRow: queueRow);
+    try {
+      await _supabase.from(table).upsert(finalPayload, onConflict: 'id_local');
+      await _local.upsertMatrixRowPayload(table, finalPayload);
+      await _markEvidenceLinked([idLocal], empresaId);
+      return finalPayload;
+    } catch (error) {
+      throw Exception(friendlyError(error));
+    }
   }
 
   Future<int> syncPending() async {

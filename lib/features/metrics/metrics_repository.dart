@@ -15,8 +15,16 @@ class MetricsRepository {
 
   final SupabaseClient _client;
 
-  Future<Map<String, dynamic>> loadContext() async =>
-      _map(await _client.rpc('appgt_metrics_contexto_v1'));
+  Future<Map<String, dynamic>> loadContext() async {
+    final values = await Future.wait<dynamic>([
+      _client.rpc('appgt_metrics_contexto_v1'),
+      _client.rpc('appgt_rol_empresa_actual'),
+    ]);
+    return <String, dynamic>{
+      ..._map(values[0]),
+      'rol': _text(values[1]).toUpperCase(),
+    };
+  }
 
   Future<List<Map<String, dynamic>>> listDashboards() async {
     try {
@@ -93,6 +101,9 @@ class MetricsRepository {
       }
       rethrow;
     }
+    if (response['solicitado'] == true) {
+      return listDashboards();
+    }
     if (response['guardado'] != true) {
       throw StateError('PostgreSQL no confirmó el nuevo orden de dashboards.');
     }
@@ -119,6 +130,7 @@ class MetricsRepository {
       'appgt_guardar_widget_metrics_v1',
       params: {'p_payload': payload},
     ));
+    if (response['solicitado'] == true) return response;
     final savedId = _text(response['id']);
     if (savedId.isEmpty || response['guardado'] != true) {
       throw StateError('Supabase no confirmó el gráfico guardado.');
@@ -177,11 +189,11 @@ class MetricsRepository {
     return values;
   }
 
-  Future<void> deleteItem(String type, String id) async {
-    await _client.rpc(
+  Future<Map<String, dynamic>> deleteItem(String type, String id) async {
+    return _map(await _client.rpc(
       'appgt_eliminar_metrics_v1',
       params: {'p_tipo': type, 'p_id': id},
-    );
+    ));
   }
 
   /// Lee únicamente las columnas necesarias y aplica filtros antes de agregar.

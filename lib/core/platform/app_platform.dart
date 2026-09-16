@@ -8,9 +8,19 @@ bool get isDesktopRuntime {
       defaultTargetPlatform == TargetPlatform.macOS;
 }
 
+/// La web guarda directamente en Supabase. Escritorio y móvil mantienen su
+/// cola local para poder seguir trabajando ante cortes de red.
+bool get isOnlineFirstRuntime => kIsWeb;
+
+bool get isMobileCaptureRuntime {
+  if (kIsWeb) return false;
+  return defaultTargetPlatform == TargetPlatform.android ||
+      defaultTargetPlatform == TargetPlatform.iOS;
+}
+
 bool isWideDesktopLayout(BuildContext context) {
-  // Web y escritorio comparten la misma experiencia cuando hay espacio.
   // En pantallas angostas se conserva la navegación táctil/responsive.
-  return (isDesktopRuntime || kIsWeb) &&
+  // Solo la web usa guardado online-first; escritorio conserva su cola local.
+  return (kIsWeb || isDesktopRuntime) &&
       MediaQuery.sizeOf(context).width >= 900;
 }

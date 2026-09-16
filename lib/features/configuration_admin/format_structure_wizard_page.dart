@@ -3,10 +3,11 @@ import 'dart:convert';
 
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/services/app_experience_service.dart';
 import '../../core/widgets/configuration_icon_catalog.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'configuration_admin_repository.dart';
 import 'format_structure_validator.dart';
 
@@ -157,6 +158,24 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
       default:
         return 'text';
     }
+  }
+
+  // Una fórmula describe cómo se obtiene el valor, no el tipo físico que se
+  // almacenará. Mantener esta lista separada evita que BUSCAR() se publique
+  // siempre como numeric y permite resultados de texto, fecha, hora, etc.
+  static const Map<String, String> _formulaResultTypes = <String, String>{
+    'text': 'Texto',
+    'number': 'Número decimal',
+    'integer': 'Número entero',
+    'date': 'Fecha',
+    'time': 'Hora',
+    'datetime': 'Fecha y hora',
+    'boolean': 'Sí / No',
+    'json': 'JSON',
+  };
+
+  static String _formulaResultType(String value) {
+    return _formulaResultTypes.containsKey(value) ? value : 'text';
   }
 
   late final ConfigurationAdminRepository repository;
@@ -2533,7 +2552,9 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
     if (uiType == 'textarea') uiType = 'multiline';
     if (uiType == 'boolean' || uiType == 'boolean_int') uiType = 'checkbox';
     if (uiType == 'qr') uiType = 'qr_scan';
-    var dataType = _dataTypeForUi(uiType);
+    var dataType = (uiType == 'formula' || uiType == 'lookup')
+        ? _formulaResultType(initial['tipo']?.toString() ?? 'text')
+        : _dataTypeForUi(uiType);
     var formulaKind = initial['formula_tipo']?.toString();
     formulaKind ??= _formulaTemplates.entries
         .where((entry) => entry.value == formula.text.trim())
@@ -2608,8 +2629,18 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
                         )
                         .toList(),
                     onChanged: (value) => setDialogState(() {
+                      final previousUiType = uiType;
                       uiType = value ?? 'text';
-                      dataType = _dataTypeForUi(uiType);
+                      if (uiType == 'formula' || uiType == 'lookup') {
+                        // Al convertir un campo existente a fórmula, conservar
+                        // su tipo lógico (por ejemplo number) como resultado.
+                        dataType = _formulaResultType(dataType);
+                      } else if (previousUiType == 'formula' ||
+                          previousUiType == 'lookup') {
+                        dataType = _dataTypeForUi(uiType);
+                      } else {
+                        dataType = _dataTypeForUi(uiType);
+                      }
                       if (uiType == 'photo') photos = true;
                       if (uiType == 'signature') signature = true;
                       if (uiType == 'qr_scan') qr = true;
@@ -2630,6 +2661,30 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  if (uiType == 'formula' || uiType == 'lookup') ...[
+                    DropdownButtonFormField<String>(
+                      initialValue: _formulaResultType(dataType),
+                      isExpanded: true,
+                      decoration: const InputDecoration(
+                        labelText: 'Tipo del resultado *',
+                        helperText:
+                            'La fórmula puede devolver texto, números, fechas, horas u otros tipos.',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _formulaResultTypes.entries
+                          .map(
+                            (entry) => DropdownMenuItem(
+                              value: entry.key,
+                              child: Text(entry.value),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) => setDialogState(
+                        () => dataType = _formulaResultType(value ?? 'text'),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
                   _dialogField(
                     order,
                     'Orden *',
@@ -3081,7 +3136,11 @@ class _FormatStructureWizardPageState extends State<FormatStructureWizardPage> {
                 final visibleName = label.text.trim();
                 final existingCode = code.text.trim();
                 final existingPhysical = physical.text.trim();
-                dataType = _dataTypeForUi(uiType);
+                if (uiType != 'formula' && uiType != 'lookup') {
+                  dataType = _dataTypeForUi(uiType);
+                } else {
+                  dataType = _formulaResultType(dataType);
+                }
                 if (formulaKind == 'LISTA') {
                   final source = formulaSourceTable.text.trim();
                   final valueField = formulaValueField.text.trim();

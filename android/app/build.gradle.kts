@@ -40,7 +40,12 @@ android {
     applicationVariants.all {
         outputs.all {
             val outputImpl = this as com.android.build.gradle.internal.api.BaseVariantOutputImpl
-            outputImpl.outputFileName = "Operaciones_gt_android.apk"
+            val abi = outputImpl.getFilter(com.android.build.OutputFile.ABI)
+            outputImpl.outputFileName = if (abi.isNullOrBlank()) {
+                "Operaciones_gt_android.apk"
+            } else {
+                "Operaciones_gt_android-$abi.apk"
+            }
         }
     }
 

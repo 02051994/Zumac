@@ -5,9 +5,11 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:image_picker/image_picker.dart';
@@ -20,10 +22,15 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
 import '../../core/widgets/responsive_layout.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../../core/services/dynamic_rules_repository.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/formula_engine.dart';
+import '../../core/services/soft_delete.dart';
 import '../../core/platform/file_download.dart';
+import '../../core/platform/app_platform.dart';
+import '../../core/platform/network_bytes.dart';
+import '../../core/services/sync_service.dart';
 import '../modules/modules_page.dart';
 
 class FormRunnerPage extends StatefulWidget {
@@ -65,6 +72,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   final multiSelectValues = <String, Set<String>>{};
   final signatureValues = <String, Uint8List?>{};
   final photoValues = <String, Uint8List?>{};
+  final Map<String, String> documentFileNames = <String, String>{};
   final ImagePicker _imagePicker = ImagePicker();
   Timer? _formulaRecalcDebounce;
   bool capturingPhoto = false;
@@ -213,6 +221,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
+  Future<List<Map<String, dynamic>>> _loadRemoteMatrixSource(
+    String table,
+  ) async {
+    const pageSize = 1000;
+    var from = 0;
+    final rows = <Map<String, dynamic>>[];
+    while (true) {
+      final page = await Supabase.instance.client
+          .from(table)
+          .select()
+          .range(from, from + pageSize - 1)
+          .timeout(const Duration(seconds: 15));
+      final mapped = List<Map<String, dynamic>>.from(page);
+      rows.addAll(mapped.where((row) => !isSoftDeletedAppgtRow(row)));
+      if (mapped.length < pageSize) break;
+      from += pageSize;
+    }
+    return rows;
+  }
+
   Future<void> _loadMatrixRows(
       {bool updateState = true, Set<String>? onlyTables}) async {
     final wantedRaw = (onlyTables ?? const <String>{})
@@ -224,10 +252,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         .where((e) => e.isNotEmpty)
         .toSet();
 
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    var localWantedRaw = wantedRaw;
+
+    // Web y escritorio trabajan online-first: una respuesta remota vacía también
+    // es autoritativa. La caché solo se usa si esa tabla no pudo consultarse.
+    if (isOnlineFirstRuntime && wantedRaw.isNotEmpty) {
+      final failed = <String>{};
+      for (final table in wantedRaw) {
+        try {
+          grouped[table] = await _loadRemoteMatrixSource(table);
+        } catch (_) {
+          failed.add(table);
+        }
+      }
+      localWantedRaw = failed;
+    }
+
     // Si no se especifican tablas, conserva el comportamiento anterior.
     // Si se especifican, evita decodificar todo local_matrix_rows; esto era una
     // causa directa del congelamiento al abrir formularios Android.
-    final grouped = <String, List<Map<String, dynamic>>>{};
     if (wantedNorm.isEmpty) {
       var cached = _cachedMatrixRowsByTable;
       if (cached == null) {
@@ -240,6 +284,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           if (table.isEmpty) continue;
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
+            if (_isSoftDeletedMatrixRow(decoded)) continue;
             cached
                 .putIfAbsent(table, () => <Map<String, dynamic>>[])
                 .add(decoded);
@@ -250,10 +295,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         _cachedMatrixRowsByTable = cached;
       }
       grouped.addAll(cached);
-    } else {
+    } else if (localWantedRaw.isNotEmpty) {
       var decodedCount = 0;
       final foundNorm = <String>{};
-      for (final rawTable in wantedRaw) {
+      for (final rawTable in localWantedRaw) {
         final rows = await local
             .where('local_matrix_rows', 'source_table = ?', [rawTable]);
         for (final row in rows) {
@@ -261,6 +306,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           final raw = row['payload_json']?.toString() ?? '{}';
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
+            if (_isSoftDeletedMatrixRow(decoded)) continue;
             grouped
                 .putIfAbsent(table, () => <Map<String, dynamic>>[])
                 .add(decoded);
@@ -273,7 +319,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
 
       // Respaldo por nombres normalizados solo para tablas que no matchearon exacto.
-      final missingNorm = wantedNorm.difference(foundNorm);
+      final localWantedNorm =
+          localWantedRaw.map(_normalizarNombreCampo).toSet();
+      final missingNorm = localWantedNorm.difference(foundNorm);
       if (missingNorm.isNotEmpty) {
         final rows = await local.getAll('local_matrix_rows');
         for (final row in rows) {
@@ -282,6 +330,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           final raw = row['payload_json']?.toString() ?? '{}';
           try {
             final decoded = jsonDecode(raw) as Map<String, dynamic>;
+            if (_isSoftDeletedMatrixRow(decoded)) continue;
             grouped
                 .putIfAbsent(table, () => <Map<String, dynamic>>[])
                 .add(decoded);
@@ -295,8 +344,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (!mounted) return;
     final merged = <String, List<Map<String, dynamic>>>{
       if (wantedNorm.isNotEmpty) ...matrixRowsByTable,
-      ...grouped,
     };
+    if (wantedNorm.isNotEmpty) {
+      merged.removeWhere(
+        (table, _) => wantedNorm.contains(_normalizarNombreCampo(table)),
+      );
+    }
+    merged.addAll(grouped);
     if (updateState) {
       setState(() => matrixRowsByTable = merged);
     } else {
@@ -538,18 +592,26 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   List<String> _optionsForCatalog(String catalogKey) {
-    final direct = catalogValues[catalogKey];
-    if (direct != null && direct.isNotEmpty) return direct;
-
     final parts = catalogKey.split('.');
-    if (parts.length < 2) return const <String>[];
+    if (parts.length < 2) {
+      return catalogValues[catalogKey] ?? const <String>[];
+    }
     final table = parts.first.trim();
     final column = parts.sublist(1).join('.').trim();
-    final rows = matrixRowsByTable[table] ?? const <Map<String, dynamic>>[];
+    final wantedTable = _normalizarNombreCampo(table);
+    MapEntry<String, List<Map<String, dynamic>>>? source;
+    for (final entry in matrixRowsByTable.entries) {
+      if (_normalizarNombreCampo(entry.key) == wantedTable) {
+        source = entry;
+        break;
+      }
+    }
+    final rows = source?.value ?? const <Map<String, dynamic>>[];
     final seen = <String>{};
     final out = <String>[];
     final wanted = _normalizarNombreCampo(column);
     for (final row in rows) {
+      if (_isSoftDeletedMatrixRow(row)) continue;
       dynamic value = row[column];
       if (value == null) {
         for (final entry in row.entries) {
@@ -566,7 +628,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       out.add(text);
     }
     out.sort();
-    return out;
+    if (source != null && (isOnlineFirstRuntime || out.isNotEmpty)) return out;
+    return catalogValues[catalogKey] ?? out;
   }
 
   void _recalculateDerivedFields() {
@@ -716,7 +779,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       return matrixRowsByTable.keys
           .every((cached) => _normalizarNombreCampo(cached) != wanted);
     }).toSet();
-    if (_fieldsNeedMatrixRows(rows) &&
+    if (isOnlineFirstRuntime && neededMatrixTables.isNotEmpty) {
+      await _loadMatrixRows(
+        updateState: false,
+        onlyTables: neededMatrixTables,
+      );
+    } else if (_fieldsNeedMatrixRows(rows) &&
         (matrixRowsByTable.isEmpty || missingMatrixTables.isNotEmpty)) {
       await _loadMatrixRows(
         updateState: false,
@@ -734,6 +802,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     multiSelectValues.clear();
     signatureValues.clear();
     photoValues.clear();
+    documentFileNames.clear();
 
     final initial = widget.initialPayload ?? <String, dynamic>{};
     for (final f in rows) {
@@ -928,6 +997,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     multiSelectValues.clear();
     signatureValues.clear();
     photoValues.clear();
+    documentFileNames.clear();
     _applyMasterDefaultsToDetail();
   }
 
@@ -974,6 +1044,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       case 'url':
       case 'percent':
         return value;
+      case 'currency':
+      case 'money':
       case 'number':
       case 'numeric':
       case 'double':
@@ -992,10 +1064,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         return 'signature';
       case 'date':
       case 'datetime':
+      case 'timestamp':
+      case 'json':
+      case 'jsonb':
       case 'dropdown':
       case 'multiselect':
       case 'time':
       case 'photo':
+      case 'document':
+      case 'documento':
+      case 'file':
+      case 'pdf':
       case 'calculated':
       case 'readonly':
       case 'formula':
@@ -2416,6 +2495,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
+  bool _isSoftDeletedMatrixRow(Map<String, dynamic> row) {
+    return isSoftDeletedAppgtRow(row);
+  }
+
   String _runLookupFormula(String formula) {
     final match = RegExp(r'^\s*LOOKU[PR]\s*\((.*)\)\s*$', caseSensitive: false)
         .firstMatch(formula);
@@ -2433,9 +2516,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         : _valueTextByFieldId(idMatch.group(1)!.trim());
     if (searchValue.trim().isEmpty) return '';
 
-    final rows =
+    List<Map<String, dynamic>> rows =
         matrixRowsByTable[sourceTable] ?? const <Map<String, dynamic>>[];
+    if (rows.isEmpty) {
+      final wanted = _normalizarNombreCampo(sourceTable);
+      for (final entry in matrixRowsByTable.entries) {
+        if (_normalizarNombreCampo(entry.key) == wanted) {
+          rows = entry.value;
+          break;
+        }
+      }
+    }
     for (final row in rows) {
+      if (_isSoftDeletedMatrixRow(row)) continue;
       final candidate =
           _valueByColumnName(row, searchColumn)?.toString().trim() ?? '';
       if (candidate == searchValue.trim()) {
@@ -3211,6 +3304,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final seen = <String>{};
     final options = <String>[];
     for (final row in rows) {
+      if (_isSoftDeletedMatrixRow(row)) continue;
       if (actualFilterField.isNotEmpty) {
         final candidate =
             _valueByColumnName(row, actualFilterField)?.toString().trim() ?? '';
@@ -3292,8 +3386,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   dynamic _valueForField(Map<String, dynamic> field, String idLocal) {
     final campo = field['campo']?.toString() ?? '';
+    final declaredTipo = field['tipo']?.toString().trim().toLowerCase() ?? '';
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
+    final isFormulaControl = uiType == 'formula' || uiType == 'lookup';
 
     if (tipo == 'hidden_id' || uiType == 'hidden_id') {
       final existing = controllers[campo]?.text.trim() ?? '';
@@ -3305,10 +3401,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final existing = controllers[campo]?.text.trim() ?? '';
       return existing.isNotEmpty ? existing : null;
     }
-    if (tipo == 'boolean_int' ||
-        uiType == 'boolean_int' ||
-        uiType == 'checkbox' ||
-        uiType == 'switch') return dropdownValues[campo] ?? 0;
+    if (!isFormulaControl &&
+        (tipo == 'boolean_int' ||
+            uiType == 'boolean_int' ||
+            uiType == 'checkbox' ||
+            uiType == 'switch')) return dropdownValues[campo] ?? 0;
     if (tipo == 'signature' || uiType == 'signature') {
       final bytes = signatureValues[campo];
       return bytes == null ? null : _signatureDataUrl(bytes);
@@ -3328,6 +3425,21 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     final raw = controllers[campo]?.text.trim() ?? '';
     if (raw.isEmpty) return null;
+
+    if (tipo == 'boolean_int') {
+      final boolValue = _asBool(raw);
+      return isFormulaControl &&
+              (declaredTipo == 'bool' || declaredTipo == 'boolean')
+          ? boolValue
+          : (boolValue ? 1 : 0);
+    }
+    if (tipo == 'json' || tipo == 'jsonb') {
+      try {
+        return jsonDecode(raw);
+      } catch (_) {
+        return raw;
+      }
+    }
 
     if (tipo == 'date') return raw;
     if (tipo == 'time') {
@@ -3519,6 +3631,178 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       (tableDestino ?? '').trim().toUpperCase() ==
       'GH_PERMISOS_LICENCIAS_APPGT';
 
+  bool _isPermissionDocumentField(Map<String, dynamic> field) {
+    return _isPermissionLeaveForm &&
+        _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
+            'DOCUMENTO_SUSTENTO';
+  }
+
+  String _permissionTypeValue() {
+    for (final entry in controllers.entries) {
+      if (_normalizarNombreCampo(entry.key) == 'TIPO_PERMISO') {
+        return entry.value.text.trim();
+      }
+    }
+    return '';
+  }
+
+  bool get _selectedAbsenceRequiresDocument {
+    if (!_isPermissionLeaveForm) return false;
+    final selected = _permissionTypeValue();
+    if (selected.isEmpty) return false;
+    for (final tableEntry in matrixRowsByTable.entries) {
+      if (_normalizarNombreCampo(tableEntry.key) !=
+          'MATRIZ_TIPOS_AUSENCIA_APPGT') {
+        continue;
+      }
+      for (final row in tableEntry.value) {
+        if (_isSoftDeletedMatrixRow(row)) continue;
+        final name = _valueByColumnName(row, 'nombre')?.toString().trim() ?? '';
+        final active = _valueByColumnName(row, 'activo');
+        if (name.toUpperCase() == selected.toUpperCase() &&
+            _asBool(active, defaultValue: true)) {
+          return _asBool(_valueByColumnName(row, 'documento_requerido'));
+        }
+      }
+    }
+    return false;
+  }
+
+  Future<void> _setPdfDocument(
+    String campo,
+    String fileName,
+    Uint8List bytes,
+  ) async {
+    if (!fileName.toLowerCase().endsWith('.pdf') ||
+        bytes.length < 5 ||
+        String.fromCharCodes(bytes.take(5)) != '%PDF-') {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Seleccione un archivo PDF valido.')),
+      );
+      return;
+    }
+    if (bytes.length > 15 * 1024 * 1024) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('El PDF no debe superar los 15 MB.')),
+      );
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      controllers.putIfAbsent(campo, () => TextEditingController()).text =
+          'data:application/pdf;base64,${base64Encode(bytes)}';
+      documentFileNames[campo] = fileName;
+    });
+  }
+
+  Future<void> _pickPdfDocument(String campo) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['pdf'],
+      allowMultiple: false,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    Uint8List? bytes = file.bytes;
+    if (bytes == null && file.path != null && !kIsWeb) {
+      bytes = await File(file.path!).readAsBytes();
+    }
+    if (bytes == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text('No se pudo leer el archivo seleccionado.')),
+      );
+      return;
+    }
+    await _setPdfDocument(campo, file.name, bytes);
+  }
+
+  Widget _permissionDocumentWidget(Map<String, dynamic> field) {
+    final campo = field['campo']?.toString() ?? '';
+    final etiqueta = field['etiqueta']?.toString() ?? 'Documento de sustento';
+    final required = _selectedAbsenceRequiresDocument;
+    final raw = controllers[campo]?.text.trim() ?? '';
+    final selectedName = documentFileNames[campo];
+    final hasDocument = raw.isNotEmpty;
+    final content = InputDecorator(
+      decoration: InputDecoration(
+        labelText: required ? '$etiqueta *' : etiqueta,
+        border: const OutlineInputBorder(),
+        helperText: required
+            ? 'Obligatorio para este tipo de ausencia. Solo PDF, maximo 15 MB.'
+            : 'Solo PDF, maximo 15 MB. Tambien puede arrastrarlo aqui.',
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: hasDocument
+                  ? const Color(0xFFE8F5F2)
+                  : const Color(0xFFF4F8F9),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: hasDocument
+                    ? const Color(0xFF17806D)
+                    : const Color(0xFFB8CDD2),
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  hasDocument
+                      ? Icons.picture_as_pdf_rounded
+                      : Icons.upload_file_rounded,
+                  color: hasDocument
+                      ? const Color(0xFF17806D)
+                      : const Color(0xFF0D5F78),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    hasDocument
+                        ? (selectedName ?? 'PDF guardado anteriormente')
+                        : 'Haga clic para seleccionar o arrastre el PDF',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                if (hasDocument)
+                  IconButton(
+                    tooltip: 'Quitar documento',
+                    onPressed: () => setState(() {
+                      controllers[campo]?.clear();
+                      documentFileNames.remove(campo);
+                    }),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => _pickPdfDocument(campo),
+            icon: const Icon(Icons.attach_file_rounded),
+            label: Text(hasDocument ? 'Cambiar PDF' : 'Seleccionar PDF'),
+          ),
+        ],
+      ),
+    );
+
+    if (!(kIsWeb || isDesktopRuntime)) return content;
+    return DropTarget(
+      onDragDone: (details) async {
+        if (details.files.isEmpty) return;
+        final file = details.files.first;
+        await _setPdfDocument(campo, file.name, await file.readAsBytes());
+      },
+      child: content,
+    );
+  }
+
   bool get _permissionIsApproved {
     if (!_isPermissionLeaveForm) return false;
     for (final entry in controllers.entries) {
@@ -3545,6 +3829,47 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return '';
   }
 
+  Future<Uint8List?> _photocheckPhotoBytes(String source) async {
+    final clean = source.trim();
+    if (clean.isEmpty || clean.toUpperCase() == 'NULL') return null;
+    if (clean.startsWith('data:image/') && clean.contains(',')) {
+      try {
+        return base64Decode(clean.substring(clean.indexOf(',') + 1));
+      } catch (_) {
+        return null;
+      }
+    }
+    if (!kIsWeb) {
+      try {
+        final file = File(clean);
+        if (await file.exists()) return file.readAsBytes();
+      } catch (_) {}
+    }
+
+    try {
+      final resolved = await EvidenceStorage.signedUrlForValue(clean);
+      final bytes = await fetchUrlBytes(resolved);
+      if (bytes != null) return bytes;
+    } catch (_) {}
+
+    final isExplicitSource = clean.toLowerCase().startsWith('http') ||
+        clean.startsWith('storage://') ||
+        clean.contains('storage/v1/');
+    if (!isExplicitSource) {
+      final path = clean.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '');
+      for (final bucket in ['appgt-evidencias', 'migracion-appsheets']) {
+        try {
+          final url = await Supabase.instance.client.storage
+              .from(bucket)
+              .createSignedUrl(path, EvidenceStorage.signedUrlTtlSeconds);
+          final bytes = await fetchUrlBytes(url);
+          if (bytes != null) return bytes;
+        } catch (_) {}
+      }
+    }
+    return null;
+  }
+
   Future<void> _generateLocalPhotocheckFromPayload(
       Map<String, dynamic> payload) async {
     final dni = _payloadText(payload, ['DNI', 'DOCUMENTO']);
@@ -3552,13 +3877,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE', 'NOMBRES']);
     final puesto = _payloadText(payload, ['PUESTO', 'CARGO']);
     final area = _payloadText(payload, ['AREA', 'ÁREA']);
-    final fotoData = _payloadText(payload, ['FOTO']);
-    Uint8List? fotoBytes;
-    if (fotoData.startsWith('data:image/') && fotoData.contains(',')) {
-      try {
-        fotoBytes = base64Decode(fotoData.substring(fotoData.indexOf(',') + 1));
-      } catch (_) {}
-    }
+    final fotoData = _payloadText(
+        payload, ['FOTO1', 'FOTO 1', 'FOTO_1', 'FOTO', 'PHOTO_URL']);
+    final fotoBytes = await _photocheckPhotoBytes(fotoData);
     final pdf = pw.Document();
     pdf.addPage(pw.Page(
       pageFormat: PdfPageFormat.a4,
@@ -3589,9 +3910,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                               style: const pw.TextStyle(fontSize: 8)))),
               pw.Text(nombre.isEmpty ? 'SIN NOMBRE' : nombre,
                   textAlign: pw.TextAlign.center,
-                  maxLines: 2,
+                  maxLines: 3,
                   style: pw.TextStyle(
-                      fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                      fontSize: 12, fontWeight: pw.FontWeight.bold)),
               pw.Text('DNI: $dni', style: const pw.TextStyle(fontSize: 8)),
               if (puesto.isNotEmpty)
                 pw.Text(puesto,
@@ -3613,14 +3934,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         ),
       ),
     ));
+    final stamp =
+        DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\\.]'), '-');
+    final fileName = 'photocheck_${dni.isEmpty ? stamp : dni}_$stamp.pdf';
+    final bytes = await pdf.save();
+    if (kIsWeb) {
+      await downloadFileBytes(fileName: fileName, bytes: bytes);
+      return;
+    }
     final dir = Directory(
         '${Platform.environment['USERPROFILE'] ?? Directory.current.path}\\Downloads');
     if (!await dir.exists()) await dir.create(recursive: true);
-    final stamp =
-        DateTime.now().toIso8601String().replaceAll(RegExp(r'[:\\.]'), '-');
-    final file =
-        File('${dir.path}\\photocheck_${dni.isEmpty ? stamp : dni}_$stamp.pdf');
-    await file.writeAsBytes(await pdf.save(), flush: true);
+    final file = File('${dir.path}\\$fileName');
+    await file.writeAsBytes(bytes, flush: true);
     await OpenFilex.open(file.path);
   }
 
@@ -3982,6 +4308,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       return;
     }
 
+    // El usuario puede pulsar Guardar antes de que venza el debounce de 180 ms.
+    // Recalcular aquí garantiza que fórmulas requeridas y payload usen el valor
+    // actual, también cuando BUSCAR devuelve texto.
+    _formulaRecalcDebounce?.cancel();
+    _recalculateDerivedFields();
+    _recalculateMatrixDrivenFields();
+
     if (_isPersonalPlanillaForm && !generarPhotocheck) {
       final ok = await showDialog<bool>(
         context: context,
@@ -4002,7 +4335,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     for (final f in fields) {
-      final requerido = _asBool(f['requerido']);
+      final requerido = _asBool(f['requerido']) ||
+          (_isPermissionDocumentField(f) && _selectedAbsenceRequiresDocument);
       final tipo = _normalizeTipo(f['tipo']?.toString());
       final uiType = _uiType(f);
       final campo = f['campo']?.toString() ?? '';
@@ -4052,10 +4386,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         return;
       }
     }
-
-    // Guardado local rápido: no recalcular todo el formulario aquí.
-    // Las fórmulas ya se calculan por debounce al escribir/cambiar controles.
-    _formulaRecalcDebounce?.cancel();
 
     for (final f in fields) {
       final campo = f['campo']?.toString() ?? '';
@@ -4131,31 +4461,57 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       payload[_gpsPayloadKey(['ESTADO_APROBACION', 'ESTADO APROBACION'],
           'ESTADO_APROBACION')] ??= 'PENDIENTE';
     }
-    payload['estado_registro'] = _estadoRegistroForPayload(payload);
+    for (final field in fields) {
+      final campo = field['campo']?.toString().trim() ?? '';
+      if (_normalizarNombreCampo(campo) == 'ESTADO_REGISTRO') {
+        payload[campo] = _estadoRegistroForPayload(payload);
+        break;
+      }
+    }
 
-    if (widget.editIdLocal != null && widget.editIdLocal!.isNotEmpty) {
+    if (!isOnlineFirstRuntime &&
+        widget.editIdLocal != null &&
+        widget.editIdLocal!.isNotEmpty) {
       await local.deleteRecord(widget.editIdLocal!);
     }
 
     setState(() => savingLocal = true);
     try {
-      await local.insertPending({
-        'id_local': idLocal,
-        'user_id': userId,
-        'modulo_id': widget.moduleId,
-        'formato_id': widget.format['id'],
-        'formato_tabla_id': selectedInternalTableId,
-        'tabla_destino': table,
-        'payload_json': jsonEncode(payload),
-        'estado': 'pendiente',
-        'intentos': 0,
-        'created_at': DateTime.now().toIso8601String(),
-      });
+      if (isOnlineFirstRuntime) {
+        final saved = await SyncService().saveRecordOnline(
+          table: table,
+          payload: payload,
+          moduleId: widget.moduleId,
+          formatId: widget.format['id']?.toString() ?? '',
+          formatTableId: selectedInternalTableId,
+        );
+        payload
+          ..clear()
+          ..addAll(saved);
+      } else {
+        await local.insertPending({
+          'id_local': idLocal,
+          'user_id': userId,
+          'modulo_id': widget.moduleId,
+          'formato_id': widget.format['id'],
+          'formato_tabla_id': selectedInternalTableId,
+          'tabla_destino': table,
+          'payload_json': jsonEncode(payload),
+          'estado': 'pendiente',
+          'intentos': 0,
+          'created_at': DateTime.now().toIso8601String(),
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => savingLocal = false);
       ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo guardar localmente: $e')));
+        SnackBar(
+          content: Text(isOnlineFirstRuntime
+              ? SyncService().friendlyError(e)
+              : 'No se pudo guardar localmente: ${SyncService().friendlyError(e)}'),
+        ),
+      );
       return;
     }
 
@@ -4220,8 +4576,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Registro guardado localmente.')),
+    await ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(isOnlineFirstRuntime
+            ? 'Registro guardado correctamente.'
+            : 'Registro guardado en el celular. Queda pendiente de envio.'),
+      ),
     );
 
     Navigator.of(context).pushAndRemoveUntil(
@@ -5012,6 +5372,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         tipo == 'hidden' ||
         _isRestrictedField(field)) return const SizedBox.shrink();
 
+    if (_isPermissionDocumentField(field) || uiType == 'pdf') {
+      return _permissionDocumentWidget(field);
+    }
+
     if (_isScannerUi(uiType)) return _scannerFieldWidget(field);
 
     if (uiType == 'formula' && _isListFormulaField(field)) {
@@ -5638,7 +6002,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 ? (_permissionIsApproved
                     ? 'Guardar y generar la constancia aprobada'
                     : 'Guardar solicitud para revisión y aprobación')
-                : 'Guardar localmente',
+                : (isOnlineFirstRuntime
+                    ? 'Guardar en el sistema'
+                    : 'Guardar en el celular'),
             icon: Icon(
               _isPermissionLeaveForm
                   ? (_permissionIsApproved

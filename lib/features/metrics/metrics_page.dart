@@ -4,10 +4,11 @@ import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/zumac_feature_header.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'metrics_layout.dart';
 import 'metrics_repository.dart';
 
@@ -289,6 +290,7 @@ class _MetricsPageState extends State<MetricsPage> {
   int _datasetLoadRevision = 0;
   String? _resizingWidgetId;
   String? _movingWidgetId;
+  bool _approvalNoticeShown = false;
   double? _desktopCanvasReferenceWidth;
   final Map<String, Size> _liveWidgetSizes = {};
   final Map<String, Offset> _liveWidgetPositions = {};
@@ -297,6 +299,8 @@ class _MetricsPageState extends State<MetricsPage> {
   String? _error;
 
   bool get _canManage => _context['puede_gestionar'] == true;
+  bool get _requiresAdminApproval =>
+      _context['rol']?.toString().toUpperCase() == 'GESTOR';
   bool get _enabled => _context['metrics_habilitado'] == true;
   List<Map<String, dynamic>> get _sources => _maps(_context['fuentes']);
 
@@ -443,6 +447,20 @@ class _MetricsPageState extends State<MetricsPage> {
     }
   }
 
+  Future<void> _approvalNotice({bool once = false}) async {
+    if (!_requiresAdminApproval || !mounted) return;
+    if (once && _approvalNoticeShown) return;
+    _approvalNoticeShown = true;
+    await ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Cambio enviado como Solicitado. Un administrador de esta empresa '
+          'debe aprobarlo antes de que se publique.',
+        ),
+      ),
+    );
+  }
+
   Future<void> _selectDashboard(String id) async {
     final requestRevision = ++_dashboardLoadRevision;
     ++_datasetLoadRevision;
@@ -580,6 +598,11 @@ class _MetricsPageState extends State<MetricsPage> {
     );
     if (payload == null) return;
     final result = await _repository.saveDashboard(payload);
+    if (result['solicitado'] == true) {
+      await _approvalNotice();
+      await _load();
+      return;
+    }
     await _load(selectDashboard: '${result['id']}');
   }
 
@@ -590,7 +613,9 @@ class _MetricsPageState extends State<MetricsPage> {
         'Se ocultará este dashboard y todos sus gráficos.')) {
       return;
     }
-    await _repository.deleteItem('DASHBOARD', '${dashboard['id']}');
+    final result =
+        await _repository.deleteItem('DASHBOARD', '${dashboard['id']}');
+    if (result['solicitado'] == true) await _approvalNotice();
     await _load();
   }
 
@@ -606,7 +631,8 @@ class _MetricsPageState extends State<MetricsPage> {
   }
 
   Future<void> _saveWidgetFromPanel(Map<String, dynamic> payload) async {
-    await _repository.saveWidget(payload);
+    final result = await _repository.saveWidget(payload);
+    if (result['solicitado'] == true) await _approvalNotice();
     if (!mounted) return;
     setState(() {
       _editingWidget = null;
@@ -639,7 +665,7 @@ class _MetricsPageState extends State<MetricsPage> {
     if (dashboard == null) return;
     final filters = _maps(dashboard['filtros_globales']);
     filters.add(filter);
-    await _repository.saveDashboard({
+    final result = await _repository.saveDashboard({
       'id': dashboard['id'],
       'nombre': dashboard['nombre'],
       'descripcion': dashboard['descripcion'],
@@ -648,6 +674,7 @@ class _MetricsPageState extends State<MetricsPage> {
       'filtros_globales': filters,
       'configuracion': _map(dashboard['configuracion']),
     });
+    if (result['solicitado'] == true) await _approvalNotice();
     if (!mounted) return;
     setState(() {
       _addingDashboardFilter = false;
@@ -664,7 +691,7 @@ class _MetricsPageState extends State<MetricsPage> {
     final index = filters.indexWhere((item) => item['id']?.toString() == id);
     if (index < 0) return;
     filters[index] = filter;
-    await _repository.saveDashboard({
+    final result = await _repository.saveDashboard({
       'id': dashboard['id'],
       'nombre': dashboard['nombre'],
       'descripcion': dashboard['descripcion'],
@@ -673,6 +700,7 @@ class _MetricsPageState extends State<MetricsPage> {
       'filtros_globales': filters,
       'configuracion': _map(dashboard['configuracion']),
     });
+    if (result['solicitado'] == true) await _approvalNotice();
     await _load(selectDashboard: _dashboardId);
   }
 
@@ -682,7 +710,7 @@ class _MetricsPageState extends State<MetricsPage> {
     final wantedId = filter['id']?.toString();
     final filters = _maps(dashboard['filtros_globales'])
       ..removeWhere((item) => item['id']?.toString() == wantedId);
-    await _repository.saveDashboard({
+    final result = await _repository.saveDashboard({
       'id': dashboard['id'],
       'nombre': dashboard['nombre'],
       'descripcion': dashboard['descripcion'],
@@ -691,6 +719,7 @@ class _MetricsPageState extends State<MetricsPage> {
       'filtros_globales': filters,
       'configuracion': _map(dashboard['configuracion']),
     });
+    if (result['solicitado'] == true) await _approvalNotice();
     await _load(selectDashboard: _dashboardId);
   }
 
@@ -736,11 +765,16 @@ class _MetricsPageState extends State<MetricsPage> {
       );
       if (!mounted) return;
       setState(() => _dashboards = saved);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Orden guardado y verificado nuevamente en Supabase.'),
-        ),
-      );
+      if (_requiresAdminApproval) {
+        await _approvalNotice();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('Orden guardado y verificado nuevamente en Supabase.'),
+          ),
+        );
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _dashboards = original);
@@ -757,7 +791,8 @@ class _MetricsPageState extends State<MetricsPage> {
         'El gráfico se quitará del dashboard sin borrar sus datos de origen.')) {
       return;
     }
-    await _repository.deleteItem('WIDGET', '${widget['id']}');
+    final result = await _repository.deleteItem('WIDGET', '${widget['id']}');
+    if (result['solicitado'] == true) await _approvalNotice();
     await _selectDashboard(_dashboardId!);
   }
 
@@ -1699,6 +1734,10 @@ class _MetricsPageState extends State<MetricsPage> {
         dashboardId: _dashboardId!,
         geometry: geometry,
       );
+      if (saved['solicitado'] == true) {
+        await _approvalNotice(once: true);
+        return;
+      }
       final savedConfig = _map(saved['configuracion']);
       for (final entry in geometry.entries) {
         final confirmed = (savedConfig[entry.key] as num?)?.round();
@@ -1745,13 +1784,16 @@ class _MetricsPageState extends State<MetricsPage> {
     try {
       for (var index = 0; index < reordered.length; index++) {
         final item = reordered[index];
-        await _repository.saveWidget({
+        final result = await _repository.saveWidget({
           ...item,
           'dashboard_id': _dashboardId,
           'orden': index,
           'configuracion': _map(item['configuracion']),
           'filtros': _maps(item['filtros']),
         });
+        if (result['solicitado'] == true) {
+          await _approvalNotice(once: true);
+        }
       }
       await _selectDashboard(_dashboardId!);
     } catch (error) {
@@ -1767,12 +1809,13 @@ class _MetricsPageState extends State<MetricsPage> {
     Map<String, dynamic> widget,
     Map<String, dynamic> config,
   ) async {
-    await _repository.saveWidget({
+    final result = await _repository.saveWidget({
       ...widget,
       'dashboard_id': _dashboardId,
       'configuracion': config,
       'filtros': _maps(widget['filtros']),
     });
+    if (result['solicitado'] == true) await _approvalNotice();
     await _selectDashboard(_dashboardId!);
   }
 
@@ -6312,7 +6355,7 @@ class _RelationsDialogState extends State<_RelationsDialog> {
     }
     setState(() => _busy = true);
     try {
-      await widget.repository.saveRelation({
+      final result = await widget.repository.saveRelation({
         'dashboard_id': widget.dashboardId,
         'tabla_origen': _originTable,
         'campo_origen': _originField,
@@ -6321,6 +6364,15 @@ class _RelationsDialogState extends State<_RelationsDialog> {
         'nombre':
             '$_originTable.$_originField ↔ $_destinationTable.$_destinationField',
       });
+      if (result['solicitado'] == true && mounted) {
+        await ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Relación enviada como Solicitada para aprobación del Admin.',
+            ),
+          ),
+        );
+      }
       _relations = await widget.repository.listRelations(widget.dashboardId);
       if (mounted) setState(() {});
     } catch (error) {
@@ -6335,7 +6387,17 @@ class _RelationsDialogState extends State<_RelationsDialog> {
   }
 
   Future<void> _delete(Map<String, dynamic> relation) async {
-    await widget.repository.deleteItem('RELACION', '${relation['id']}');
+    final result =
+        await widget.repository.deleteItem('RELACION', '${relation['id']}');
+    if (result['solicitado'] == true && mounted) {
+      await ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'El retiro de la relación quedó Solicitado para aprobación.',
+          ),
+        ),
+      );
+    }
     _relations = await widget.repository.listRelations(widget.dashboardId);
     if (mounted) setState(() {});
   }

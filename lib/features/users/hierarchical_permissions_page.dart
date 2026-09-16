@@ -1,10 +1,11 @@
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/responsive_layout.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'hierarchical_access_resolver.dart';
 
 class HierarchicalPermissionsPage extends StatefulWidget {

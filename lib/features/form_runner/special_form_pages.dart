@@ -1,6 +1,8 @@
 import 'dart:convert';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
+
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -9,6 +11,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/services/local_db.dart';
 import '../../core/services/local_session.dart';
+import '../../core/services/soft_delete.dart';
 import 'form_runner_page.dart';
 
 Future<void> _showAppGtAlert(
@@ -73,93 +76,119 @@ Future<void> _showAppGtAlert(
   );
 }
 
-Future<bool> _showMissingAttendanceAlert(
-    BuildContext context, List<String> missing) async {
+Future<Set<String>?> _showMissingAttendanceAlert(
+    BuildContext context, List<Map<String, String>> missing) async {
   await SystemSound.play(SystemSoundType.alert);
-  if (!context.mounted) return false;
+  if (!context.mounted) return null;
   final theme = Theme.of(context);
-  final result = await showDialog<String>(
+  final removedDnis = <String>{};
+  final result = await showDialog<Set<String>>(
     context: context,
     barrierDismissible: false,
-    builder: (dialogContext) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      title: Row(
-        children: [
-          Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: const Color(0xFFEAF3E6),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: const Color(0xFF9CB693)),
-            ),
-            child:
-                const Icon(Icons.person_off_rounded, color: Color(0xFF31552F)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-              child: Text('Hay personal sin asistencia',
-                  style: theme.textTheme.titleLarge
-                      ?.copyWith(fontWeight: FontWeight.w800))),
-        ],
-      ),
-      content: Text(
-        'Se encontraron ${missing.length} trabajador(es) sin asistencia registrada para la fecha del tareo. Puedes revisar la lista o continuar de todas formas.',
-        style: theme.textTheme.bodyLarge?.copyWith(height: 1.35),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () async {
-            await showDialog<void>(
-              context: dialogContext,
-              barrierDismissible: false,
-              builder: (detailContext) => AlertDialog(
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(18)),
-                title: const Text('Personal sin asistencia'),
-                content: SizedBox(
-                  width: 420,
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxHeight: 360),
-                    child: ListView.separated(
-                      shrinkWrap: true,
-                      itemCount: missing.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1),
-                      itemBuilder: (_, i) => Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Text(missing[i]),
-                      ),
-                    ),
-                  ),
+    builder: (dialogContext) => StatefulBuilder(
+      builder: (context, setDialogState) {
+        final visible = missing
+            .where((worker) => !removedDnis.contains(worker['dni']))
+            .toList();
+        return AlertDialog(
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          title: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEAF3E6),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFF9CB693)),
                 ),
-                actions: [
-                  FilledButton(
-                    style: FilledButton.styleFrom(
-                        backgroundColor: const Color(0xFF31552F),
-                        foregroundColor: Colors.white),
-                    onPressed: () => Navigator.of(detailContext).pop(),
-                    child: const Text('Aceptar'),
-                  ),
-                ],
+                child: const Icon(Icons.person_off_rounded,
+                    color: Color(0xFF31552F)),
               ),
-            );
-          },
-          child: const Text('Ver'),
-        ),
-        FilledButton(
-          style: FilledButton.styleFrom(
-            backgroundColor: const Color(0xFF31552F),
-            foregroundColor: Colors.white,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              const SizedBox(width: 12),
+              Expanded(
+                  child: Text('Hay personal sin asistencia',
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w800))),
+            ],
           ),
-          onPressed: () => Navigator.of(dialogContext).pop('omit'),
-          child: const Text('Omitir'),
-        ),
-      ],
+          content: SizedBox(
+            width: 520,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Estas personas no tienen asistencia registrada para la fecha del tareo. Quita de la lista a quienes no deban incluirse o continúa con las restantes.',
+                  style: theme.textTheme.bodyLarge?.copyWith(height: 1.35),
+                ),
+                const SizedBox(height: 12),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 360),
+                  child: visible.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 18),
+                          child: Center(
+                              child: Text(
+                                  'Quitaste a todo el personal sin asistencia.')),
+                        )
+                      : ListView.separated(
+                          shrinkWrap: true,
+                          itemCount: visible.length,
+                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          itemBuilder: (_, i) {
+                            final worker = visible[i];
+                            return ListTile(
+                              contentPadding: EdgeInsets.zero,
+                              title:
+                                  Text(worker['label'] ?? worker['dni'] ?? ''),
+                              trailing: IconButton(
+                                tooltip: 'Quitar del tareo',
+                                icon: const Icon(Icons.person_remove_alt_1,
+                                    color: Color(0xFF8B2F28)),
+                                onPressed: () => setDialogState(
+                                    () => removedDnis.add(worker['dni'] ?? '')),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+                if (removedDnis.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                      '${removedDnis.length} persona(s) se quitarán del tareo.',
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF8B2F28),
+                          fontWeight: FontWeight.w700)),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(
+                backgroundColor: const Color(0xFF31552F),
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
+              ),
+              onPressed: () => Navigator.of(dialogContext)
+                  .pop(Set<String>.from(removedDnis)),
+              child: Text(removedDnis.isEmpty
+                  ? 'Continuar de todas formas'
+                  : 'Aplicar y continuar'),
+            ),
+          ],
+        );
+      },
     ),
   );
-  return result == 'omit';
+  return result;
 }
 
 DateTime _safeDatePickerInitialDate(
@@ -393,9 +422,11 @@ class _SpecialMatrixHeader {
       try {
         final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}');
         if (decoded is! Map) continue;
+        final payload = Map<String, dynamic>.from(decoded);
+        if (isSoftDeletedAppgtRow(payload)) continue;
         dynamic lookup;
         dynamic ret;
-        for (final e in decoded.entries) {
+        for (final e in payload.entries) {
           final keyNorm = _specialNorm(e.key.toString());
           if (keyNorm == wantedLookup) lookup = e.value;
           if (keyNorm == wantedReturn) ret = e.value;
@@ -572,14 +603,16 @@ class _SpecialMatrixHeader {
           try {
             final payload = jsonDecode(row['payload_json']?.toString() ?? '{}');
             if (payload is! Map) continue;
+            final mapped = Map<String, dynamic>.from(payload);
+            if (isSoftDeletedAppgtRow(mapped)) continue;
             if (sourceField.isEmpty) {
-              for (final v in payload.values) {
+              for (final v in mapped.values) {
                 final value = v?.toString().trim() ?? '';
                 if (value.isNotEmpty) values.add(value);
               }
             } else {
               final target = _specialNorm(sourceField);
-              for (final e in payload.entries) {
+              for (final e in mapped.entries) {
                 if (_specialNorm(e.key.toString()) == target) {
                   final value = e.value?.toString().trim() ?? '';
                   if (value.isNotEmpty) values.add(value);
@@ -931,11 +964,14 @@ class _AsistenciaPersonalSpecialPageState
   late final _SpecialMatrixHeader asistenciaHeader;
   final List<Map<String, dynamic>> scannedRows = [];
   List<Map<String, dynamic>> asistenciaWorkers = [];
+  List<Map<String, dynamic>> mobilityRows = [];
+  Map<String, dynamic>? selectedMobility;
   String tipoMovimiento = 'INGRESO';
   bool saving = false;
-  String? selectedMobilityEntryId;
   String mobilityValidationMessage = '';
   bool validatingMobility = false;
+  bool loadingMobilities = true;
+  String? acceptedMobilityWarningKey;
 
   @override
   void initState() {
@@ -946,6 +982,7 @@ class _AsistenciaPersonalSpecialPageState
     _hydrateFromInitialPayload();
     _loadAsistenciaHeader();
     _loadAsistenciaWorkers();
+    _loadMobilities();
     _loadDailyAttendanceRows();
     // No enfocar automáticamente: evita abrir el teclado al entrar a Asistencia.
   }
@@ -1089,6 +1126,7 @@ class _AsistenciaPersonalSpecialPageState
       tipoMovimiento = upper.contains('SAL') ? 'SALIDA' : 'INGRESO';
     }
     if (mounted) setState(() {});
+    if (!loadingMobilities) await _ensureMobilityReady(prompt: false);
     await _loadDailyAttendanceRows();
   }
 
@@ -1120,6 +1158,7 @@ class _AsistenciaPersonalSpecialPageState
       try {
         final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
             as Map<String, dynamic>;
+        if (isSoftDeletedAppgtRow(payload)) continue;
         final f = (payload['FECHA'] ?? payload['FECHA_INGRESO'] ?? '')
             .toString()
             .trim();
@@ -1139,6 +1178,7 @@ class _AsistenciaPersonalSpecialPageState
   Future<void> _loadAsistenciaWorkers() async {
     final out = <String, Map<String, dynamic>>{};
     void addWorker(Map<String, dynamic> payload) {
+      if (isSoftDeletedAppgtRow(payload)) return;
       final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '')
           .toString()
           .trim();
@@ -1218,6 +1258,7 @@ class _AsistenciaPersonalSpecialPageState
         try {
           final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
               as Map<String, dynamic>;
+          if (isSoftDeletedAppgtRow(payload)) continue;
           final candidates = [
             _rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']),
             _rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']),
@@ -1236,6 +1277,7 @@ class _AsistenciaPersonalSpecialPageState
       try {
         final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
             as Map<String, dynamic>;
+        if (isSoftDeletedAppgtRow(payload)) continue;
         final candidates = [
           _rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']),
           _rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']),
@@ -1289,7 +1331,10 @@ class _AsistenciaPersonalSpecialPageState
       for (final row in rows) {
         try {
           final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}');
-          if (decoded is Map) out.add(Map<String, dynamic>.from(decoded));
+          if (decoded is Map) {
+            final payload = Map<String, dynamic>.from(decoded);
+            if (!isSoftDeletedAppgtRow(payload)) out.add(payload);
+          }
         } catch (_) {}
       }
     }
@@ -1300,7 +1345,10 @@ class _AsistenciaPersonalSpecialPageState
       }
       try {
         final decoded = jsonDecode(row['payload_json']?.toString() ?? '{}');
-        if (decoded is Map) out.add(Map<String, dynamic>.from(decoded));
+        if (decoded is Map) {
+          final payload = Map<String, dynamic>.from(decoded);
+          if (!isSoftDeletedAppgtRow(payload)) out.add(payload);
+        }
       } catch (_) {}
     }
     return out;
@@ -1371,111 +1419,507 @@ class _AsistenciaPersonalSpecialPageState
     return null;
   }
 
-  Future<Map<String, dynamic>?> _formalMobilityEntry(
-      {bool updateState = true}) async {
-    final header = _asistenciaHeaderPayload();
-    final plate = (header['PLACA'] ?? placaCtrl.text).toString().trim();
-    final date = _dateValue(header['FECHA'] ?? fechaCtrl.text);
-    if (plate.isEmpty || date == null) {
-      if (updateState && mounted) {
-        setState(() {
-          selectedMobilityEntryId = null;
-          mobilityValidationMessage = plate.isEmpty
-              ? 'Sin movilidad: la asistencia se registrará como ingreso peatonal.'
-              : 'Seleccione una fecha válida.';
-        });
-      }
-      return null;
-    }
-    if (updateState && mounted) setState(() => validatingMobility = true);
-    Map<String, dynamic>? match;
-    String message =
-        'La placa $plate no tiene un ingreso formal admitido para esta fecha.';
-    try {
-      final entries =
-          await _localPayloadsForTable('GT_INGRESO_MOVILIDADES_APPGT');
-      for (final entry in entries.reversed) {
-        final entryPlate =
-            (_rowValue(entry, ['placa', 'PLACA']) ?? '').toString();
-        final entryDate = _dateValue(_rowValue(entry, ['fecha', 'FECHA']));
-        final state =
-            _norm((_rowValue(entry, ['estado', 'ESTADO']) ?? '').toString());
-        if (_norm(entryPlate) != _norm(plate) ||
-            entryDate == null ||
-            entryDate.year != date.year ||
-            entryDate.month != date.month ||
-            entryDate.day != date.day ||
-            (state != 'ADMITIDA' && state != 'CERRADA')) {
-          continue;
-        }
-        final expirations = <MapEntry<String, DateTime?>>[
-          MapEntry(
-              'licencia', _dateValue(_rowValue(entry, ['licencia_vigencia']))),
-          MapEntry('SOAT', _dateValue(_rowValue(entry, ['soat_vigencia']))),
-          MapEntry('revisión técnica',
-              _dateValue(_rowValue(entry, ['revision_tecnica_vigencia']))),
-        ];
-        final expired = expirations.where(
-          (item) => item.value != null && item.value!.isBefore(date),
-        );
-        if (expired.isNotEmpty) {
-          message =
-              'Movilidad bloqueada: ${expired.map((e) => e.key).join(', ')} vencido.';
-          continue;
-        }
-        match = entry;
-        message = 'Movilidad validada: $plate · '
-            '${(_rowValue(entry, [
-                      'conductor_nombre'
-                    ]) ?? 'conductor registrado')}';
-        break;
-      }
-    } finally {
-      if (updateState && mounted) {
-        setState(() {
-          validatingMobility = false;
-          selectedMobilityEntryId = match == null
-              ? null
-              : (_rowValue(match, ['id', 'id_local']) ?? '').toString();
-          mobilityValidationMessage = message;
-        });
-      }
-    }
-    return match;
+  // La asistencia usa la ficha maestra de movilidad. El antiguo formato de
+  // ingresos por día ya no forma parte de este flujo.
+  String _mobilityPlate(Map<String, dynamic> row) =>
+      (_rowValue(row, ['placa', 'PLACA']) ?? '').toString().trim();
+
+  String _selectedPlate() {
+    final raw = _headerValue(
+      ['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'],
+      fallback: placaCtrl.text.trim(),
+    ).trim();
+    return _norm(raw) == 'SINMOVILIDAD' ? '' : raw;
   }
 
-  Future<void> _openMobilityRegistration() async {
+  void _setHeaderPlate(String plate) {
+    placaCtrl.text = plate;
+    for (final entry in asistenciaHeader.controllers.entries) {
+      final normalized = _specialNorm(entry.key);
+      if (normalized == 'PLACA' ||
+          normalized == 'MOVILIDAD' ||
+          normalized == 'PLACA_MOVILIDAD') {
+        entry.value.text = plate;
+      }
+    }
+  }
+
+  Map<String, dynamic>? _mobilityForPlate(String plate) {
+    final wanted = _norm(plate);
+    if (wanted.isEmpty) return null;
+    for (final row in mobilityRows) {
+      if (_norm(_mobilityPlate(row)) == wanted) return row;
+    }
+    return null;
+  }
+
+  Future<void> _loadMobilities() async {
+    final entries = <Map<String, dynamic>>[];
+    for (final table in {
+      'GT-MATRIZ_MOVILIDADES',
+      'GT_MATRIZ_MOVILIDADES',
+    }) {
+      entries.addAll(await _localPayloadsForTable(table));
+    }
+
+    final byPlate = <String, Map<String, dynamic>>{};
+    for (final entry in entries) {
+      if (_boolValue(_rowValue(entry, ['eliminado', 'ELIMINADO']))) continue;
+      final active = _rowValue(entry, ['activo', 'ACTIVO']);
+      if (active != null && !_boolValue(active)) continue;
+      final plate = _mobilityPlate(entry);
+      if (plate.isEmpty) continue;
+      final key = _norm(plate);
+      byPlate[key] = <String, dynamic>{
+        ...?byPlate[key],
+        ...entry,
+      };
+    }
+    final loaded = byPlate.values.toList()
+      ..sort((a, b) => _mobilityPlate(a)
+          .toLowerCase()
+          .compareTo(_mobilityPlate(b).toLowerCase()));
+    if (!mounted) return;
+    final currentPlate = _selectedPlate();
+    Map<String, dynamic>? currentMobility;
+    for (final row in loaded) {
+      if (_norm(_mobilityPlate(row)) == _norm(currentPlate)) {
+        currentMobility = row;
+        break;
+      }
+    }
+    setState(() {
+      mobilityRows = loaded;
+      loadingMobilities = false;
+      selectedMobility = currentMobility;
+      if (currentPlate.isEmpty) {
+        mobilityValidationMessage =
+            'Sin movilidad: el personal ingresará caminando.';
+      } else if (currentMobility == null) {
+        mobilityValidationMessage =
+            'La placa $currentPlate no está registrada en GT-MATRIZ_MOVILIDADES.';
+      }
+    });
+    if (currentPlate.isNotEmpty && currentMobility != null) {
+      await _ensureMobilityReady(prompt: false);
+    }
+  }
+
+  String _dateDisplay(DateTime date) =>
+      '${date.day.toString().padLeft(2, '0')}/'
+      '${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+  List<String> _mobilityIssues(
+      Map<String, dynamic> mobility, DateTime attendanceDate) {
+    final issues = <String>[];
+    final dni = (_rowValue(mobility,
+                ['dni_conductor', 'conductor_dni', 'DNI_CONDUCTOR']) ??
+            '')
+        .toString()
+        .trim();
+    final driver =
+        (_rowValue(mobility, ['conductor', 'conductor_nombre', 'CONDUCTOR']) ??
+                '')
+            .toString()
+            .trim();
+    final license =
+        (_rowValue(mobility, ['licencia_conducir', 'LICENCIA_CONDUCIR']) ?? '')
+            .toString()
+            .trim();
+    if (dni.isEmpty) issues.add('El DNI del conductor no está registrado.');
+    if (driver.isEmpty) {
+      issues.add('El nombre del conductor no está registrado.');
+    }
+    if (license.isEmpty) {
+      issues.add('La licencia de conducir no está registrada.');
+    }
+
+    void validateExpiration(List<String> fields, String label) {
+      final expiration = _dateValue(_rowValue(mobility, fields));
+      if (expiration == null) {
+        issues.add('La vigencia de $label no está registrada.');
+      } else if (expiration.isBefore(attendanceDate)) {
+        issues.add('$label venció el ${_dateDisplay(expiration)}.');
+      }
+    }
+
+    validateExpiration(
+        ['licencia_vigencia', 'LICENCIA_VIGENCIA'], 'la licencia de conducir');
+    validateExpiration(['soat_vigencia', 'SOAT_VIGENCIA'], 'el SOAT');
+    validateExpiration(
+        ['revision_tecnica_vigencia', 'REVISION_TECNICA_VIGENCIA'],
+        'la revisión técnica');
+    return issues;
+  }
+
+  String _mobilityWarningKey(
+          String plate, DateTime date, List<String> issues) =>
+      '${_norm(plate)}|${_dateIso(date)}|${issues.join('|')}';
+
+  List<String> _currentMobilityIssues() {
+    final mobility = selectedMobility;
+    final date = _dateValue(
+      _headerValue(['FECHA'], fallback: fechaCtrl.text.trim()),
+    );
+    if (mobility == null || date == null) return const [];
+    return _mobilityIssues(mobility, date);
+  }
+
+  bool get _mobilityWarningAccepted {
+    final plate = _selectedPlate();
+    final date = _dateValue(
+      _headerValue(['FECHA'], fallback: fechaCtrl.text.trim()),
+    );
+    final issues = _currentMobilityIssues();
+    if (plate.isEmpty || date == null || issues.isEmpty) return false;
+    return acceptedMobilityWarningKey ==
+        _mobilityWarningKey(plate, date, issues);
+  }
+
+  Future<bool> _ensureMobilityReady({bool prompt = true}) async {
+    final plate = _selectedPlate();
+    if (plate.isEmpty) {
+      if (mounted) {
+        setState(() {
+          selectedMobility = null;
+          acceptedMobilityWarningKey = null;
+          mobilityValidationMessage =
+              'Sin movilidad: el personal ingresará caminando.';
+        });
+      }
+      return true;
+    }
+    final attendanceDate = _dateValue(
+      _headerValue(['FECHA'], fallback: fechaCtrl.text.trim()),
+    );
+    if (attendanceDate == null) {
+      if (mounted) {
+        setState(() => mobilityValidationMessage =
+            'Seleccione una fecha válida antes de marcar asistencia.');
+      }
+      return false;
+    }
+    final mobility = _mobilityForPlate(plate);
+    if (mobility == null) {
+      if (mounted) {
+        setState(() {
+          selectedMobility = null;
+          acceptedMobilityWarningKey = null;
+          mobilityValidationMessage =
+              'La placa $plate no está registrada en GT-MATRIZ_MOVILIDADES.';
+        });
+      }
+      if (prompt && mounted) {
+        await _showAppGtAlert(context, mobilityValidationMessage,
+            playSound: true);
+      }
+      return false;
+    }
+
+    final issues = _mobilityIssues(mobility, attendanceDate);
+    final warningKey = _mobilityWarningKey(plate, attendanceDate, issues);
+    if (issues.isEmpty) {
+      if (mounted) {
+        setState(() {
+          selectedMobility = mobility;
+          acceptedMobilityWarningKey = null;
+          mobilityValidationMessage = 'Movilidad habilitada: $plate · '
+              '${(_rowValue(mobility, [
+                        'conductor',
+                        'conductor_nombre'
+                      ]) ?? 'conductor registrado')}';
+        });
+      }
+      return true;
+    }
+    if (acceptedMobilityWarningKey == warningKey) return true;
+    if (!prompt) {
+      if (mounted) {
+        setState(() {
+          selectedMobility = mobility;
+          mobilityValidationMessage =
+              'La movilidad $plate tiene documentación pendiente o vencida.';
+        });
+      }
+      return false;
+    }
+
+    await SystemSound.play(SystemSoundType.alert);
+    if (!mounted) return false;
+    final proceed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Alerta de movilidad'),
+        content: SizedBox(
+          width: 480,
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text('La placa $plate presenta lo siguiente:'),
+            const SizedBox(height: 12),
+            ...issues.map((issue) => ListTile(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.warning_amber_rounded,
+                      color: Colors.orange),
+                  title: Text(issue),
+                )),
+            const SizedBox(height: 8),
+            const Text('¿Desea continuar de todas formas?'),
+          ]),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar registro'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Continuar'),
+          ),
+        ],
+      ),
+    );
+    if (proceed != true) {
+      _setHeaderPlate('');
+      if (mounted) {
+        setState(() {
+          selectedMobility = null;
+          acceptedMobilityWarningKey = null;
+          mobilityValidationMessage =
+              'Registro cancelado por alerta de movilidad.';
+        });
+        await Navigator.maybePop(context);
+      }
+      return false;
+    }
+    if (mounted) {
+      setState(() {
+        selectedMobility = mobility;
+        acceptedMobilityWarningKey = warningKey;
+        mobilityValidationMessage =
+            'Alerta aceptada para $plate. Puede continuar con la asistencia.';
+      });
+    }
+    return true;
+  }
+
+  Future<void> _selectMobilityPlate(String plate) async {
+    _setHeaderPlate(plate);
+    if (!mounted) return;
+    setState(() {
+      selectedMobility = _mobilityForPlate(plate);
+      acceptedMobilityWarningKey = null;
+    });
+    await _ensureMobilityReady(prompt: plate.isNotEmpty);
+  }
+
+  Future<Map<String, String>?> _showDriverEditor(
+      Map<String, dynamic> mobility) async {
+    final dniCtrl = TextEditingController(
+      text: (_rowValue(mobility,
+                  ['dni_conductor', 'conductor_dni', 'DNI_CONDUCTOR']) ??
+              '')
+          .toString(),
+    );
+    final driverCtrl = TextEditingController(
+      text: (_rowValue(
+                  mobility, ['conductor', 'conductor_nombre', 'CONDUCTOR']) ??
+              '')
+          .toString(),
+    );
+    final licenseCtrl = TextEditingController(
+      text: (_rowValue(mobility, ['licencia_conducir', 'LICENCIA_CONDUCIR']) ??
+              '')
+          .toString(),
+    );
+    var licenseDate =
+        (_rowValue(mobility, ['licencia_vigencia', 'LICENCIA_VIGENCIA']) ?? '')
+            .toString()
+            .trim();
+    String? error;
+    try {
+      return await showDialog<Map<String, String>>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setLocalState) => AlertDialog(
+            title: Text('Actualizar conductor · ${_mobilityPlate(mobility)}'),
+            content: SizedBox(
+              width: 460,
+              child: SingleChildScrollView(
+                child: Column(mainAxisSize: MainAxisSize.min, children: [
+                  TextField(
+                    controller: dniCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.digitsOnly,
+                      LengthLimitingTextInputFormatter(8),
+                    ],
+                    decoration: const InputDecoration(
+                      labelText: 'DNI del conductor *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: driverCtrl,
+                    textCapitalization: TextCapitalization.words,
+                    decoration: const InputDecoration(
+                      labelText: 'Conductor *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: licenseCtrl,
+                    textCapitalization: TextCapitalization.characters,
+                    decoration: const InputDecoration(
+                      labelText: 'Licencia de conducir *',
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: () async {
+                      final today = DateTime.now();
+                      final current = _dateValue(licenseDate) ?? today;
+                      final picked = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: current,
+                        firstDate: DateTime(today.year - 10),
+                        lastDate: DateTime(today.year + 20),
+                      );
+                      if (picked != null) {
+                        setLocalState(() => licenseDate = _dateIso(picked));
+                      }
+                    },
+                    child: InputDecorator(
+                      decoration: const InputDecoration(
+                        labelText: 'Vigencia de licencia *',
+                        border: OutlineInputBorder(),
+                        suffixIcon: Icon(Icons.calendar_today),
+                      ),
+                      child: Text(licenseDate.isEmpty
+                          ? 'Seleccione una fecha'
+                          : licenseDate),
+                    ),
+                  ),
+                  if (error != null) ...[
+                    const SizedBox(height: 10),
+                    Text(error!, style: const TextStyle(color: Colors.red)),
+                  ],
+                ]),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancelar'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final dni = dniCtrl.text.trim();
+                  final driver = driverCtrl.text.trim();
+                  final license = licenseCtrl.text.trim().toUpperCase();
+                  if (dni.length != 8 ||
+                      driver.isEmpty ||
+                      license.isEmpty ||
+                      _dateValue(licenseDate) == null) {
+                    setLocalState(() => error =
+                        'Complete los cuatro campos; el DNI debe tener 8 dígitos.');
+                    return;
+                  }
+                  Navigator.pop(dialogContext, {
+                    'dni_conductor': dni,
+                    'conductor': driver,
+                    'licencia_conducir': license,
+                    'licencia_vigencia': licenseDate,
+                  });
+                },
+                child: const Text('Actualizar'),
+              ),
+            ],
+          ),
+        ),
+      );
+    } finally {
+      dniCtrl.dispose();
+      driverCtrl.dispose();
+      licenseCtrl.dispose();
+    }
+  }
+
+  bool _isUuid(String value) => RegExp(
+        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+      ).hasMatch(value);
+
+  Future<void> _editSelectedDriver() async {
+    final mobility = selectedMobility;
+    if (mobility == null) return;
+    final values = await _showDriverEditor(mobility);
+    if (values == null || !mounted) return;
+    final idLocal =
+        (_rowValue(mobility, ['id_local', 'ID_LOCAL']) ?? '').toString().trim();
+    if (!_isUuid(idLocal)) {
+      await _showAppGtAlert(
+        context,
+        'Esta ficha aún no tiene identificador de sincronización. Actualice los datos con internet y vuelva a intentar.',
+      );
+      return;
+    }
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await LocalSession().cachedUserId();
+    if (!mounted) return;
+    if (userId == null) {
+      await _showAppGtAlert(
+          context, 'No hay un usuario local para actualizar el conductor.');
+      return;
+    }
+    final updated = <String, dynamic>{
+      ...mobility,
+      ...values,
+      'id_local': idLocal,
+    };
     final formats = await local.getAll('local_formats', orderBy: 'orden');
     Map<String, dynamic>? format;
     for (final row in formats) {
-      if ((row['tabla_destino']?.toString() ?? '').trim().toUpperCase() ==
-          'GT_INGRESO_MOVILIDADES_APPGT') {
-        format = Map<String, dynamic>.from(row);
+      if (_norm(row['tabla_destino']?.toString() ?? '') ==
+          _norm('GT-MATRIZ_MOVILIDADES')) {
+        format = row;
         break;
       }
     }
+    await local.insertPending({
+      'id_local': idLocal,
+      'user_id': userId,
+      'modulo_id': format?['modulo_id'] ?? widget.moduleId,
+      'formato_id': format?['id'] ?? widget.format['id'],
+      'formato_tabla_id': null,
+      'tabla_destino': 'GT-MATRIZ_MOVILIDADES',
+      'payload_json': jsonEncode(updated),
+      'estado': 'pendiente',
+      'intentos': 0,
+      'base_updated_at':
+          _rowValue(mobility, ['updated_at', 'UPDATED_AT'])?.toString(),
+      'created_at': DateTime.now().toIso8601String(),
+    });
+    await local.upsertMatrixRowPayload('GT-MATRIZ_MOVILIDADES', updated);
     if (!mounted) return;
-    if (format == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text(
-            'Actualiza datos para cargar el formato Ingreso de Movilidades.'),
-      ));
-      return;
-    }
-    final resolvedFormat = format;
-    final header = _asistenciaHeaderPayload();
-    await Navigator.of(context).push(MaterialPageRoute(
-      builder: (_) => FormRunnerPage(
-        moduleId: resolvedFormat['modulo_id']?.toString() ?? widget.moduleId,
-        format: resolvedFormat,
-        initialPayload: {
-          'fecha': header['FECHA'] ?? fechaCtrl.text,
-          'placa': header['PLACA'] ?? placaCtrl.text,
-          'estado': 'ADMITIDA',
-        },
-      ),
+    setState(() {
+      selectedMobility = updated;
+      mobilityRows = mobilityRows
+          .map((row) =>
+              _norm(_mobilityPlate(row)) == _norm(_mobilityPlate(updated))
+                  ? updated
+                  : row)
+          .toList();
+      acceptedMobilityWarningKey = null;
+    });
+    widget.onLocalChanged?.call();
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      content: Text('Datos del conductor actualizados localmente.'),
     ));
-    await _formalMobilityEntry();
+    await _ensureMobilityReady(prompt: true);
   }
 
   double? _hoursBetween(String ingreso, String salida) {
@@ -1502,6 +1946,7 @@ class _AsistenciaPersonalSpecialPageState
       try {
         final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
             as Map<String, dynamic>;
+        if (isSoftDeletedAppgtRow(payload)) continue;
         final samePersonDay = (payload['FECHA']?.toString() ?? '') == fecha &&
             (payload['DNI']?.toString() ?? '') == dni;
         if (!samePersonDay) continue;
@@ -1663,18 +2108,7 @@ class _AsistenciaPersonalSpecialPageState
         fallback: placaCtrl.text.trim(),
       );
       if (headerPlate.trim().isNotEmpty) {
-        final mobility = await _formalMobilityEntry();
-        if (mobility == null) {
-          if (!mounted) return;
-          await _showAppGtAlert(
-            context,
-            mobilityValidationMessage.isEmpty
-                ? 'Registre y admita la movilidad antes de marcar asistencia.'
-                : mobilityValidationMessage,
-            playSound: true,
-          );
-          return;
-        }
+        if (!await _ensureMobilityReady(prompt: true)) return;
       }
     }
     final now = DateTime.now();
@@ -1714,8 +2148,9 @@ class _AsistenciaPersonalSpecialPageState
             'PLACA': headerPlaca,
             'RECLUTADOR': headerReclutador,
             'MARCADOR_ASISTENCIA': await _activeUserName(),
-            if (selectedMobilityEntryId?.isNotEmpty == true)
-              'INGRESO_MOVILIDAD_ID': selectedMobilityEntryId,
+            'MOVILIDAD_ALERTA_ACEPTADA': _mobilityWarningAccepted,
+            if (_currentMobilityIssues().isNotEmpty)
+              'MOVILIDAD_ALERTA_DETALLE': _currentMobilityIssues().join(' '),
             'VALIDACION_LABORAL': 'VALIDADO',
             'estado_registro': 'COMPLETO',
           }
@@ -1760,7 +2195,8 @@ class _AsistenciaPersonalSpecialPageState
       'FECHA_SALIDA',
       'HORAS_ASISTENCIA',
       'MARCADOR_ASISTENCIA',
-      'INGRESO_MOVILIDAD_ID',
+      'MOVILIDAD_ALERTA_ACEPTADA',
+      'MOVILIDAD_ALERTA_DETALLE',
       'VALIDACION_LABORAL',
       'BLOQUEO_MOTIVO',
       'estado_registro'
@@ -1859,6 +2295,140 @@ class _AsistenciaPersonalSpecialPageState
         n == 'TIPO_MOVIMIENTO_ASISTENCIA';
   }
 
+  bool _isAsistenciaPlateField(Map<String, dynamic> field) {
+    final n = _specialNorm(field['campo']?.toString() ?? '');
+    return n == 'PLACA' || n == 'MOVILIDAD' || n == 'PLACA_MOVILIDAD';
+  }
+
+  bool _isAsistenciaDateField(Map<String, dynamic> field) =>
+      _specialNorm(field['campo']?.toString() ?? '') == 'FECHA';
+
+  String _mobilityValue(List<String> fields,
+      {String fallback = 'No registrado'}) {
+    final mobility = selectedMobility;
+    if (mobility == null) return fallback;
+    final value = (_rowValue(mobility, fields) ?? '').toString().trim();
+    return value.isEmpty ? fallback : value;
+  }
+
+  Widget _mobilitySelector() {
+    final current = _selectedPlate();
+    final plates = mobilityRows.map(_mobilityPlate).toList();
+    if (current.isNotEmpty && !plates.any((p) => _norm(p) == _norm(current))) {
+      plates.add(current);
+    }
+    final selected = current.isEmpty
+        ? ''
+        : plates.firstWhere((plate) => _norm(plate) == _norm(current));
+    final issues = _currentMobilityIssues();
+    final hasMobility = selectedMobility != null && current.isNotEmpty;
+    final statusColor = current.isEmpty
+        ? const Color(0xFF0D5F78)
+        : issues.isEmpty
+            ? Colors.green.shade700
+            : _mobilityWarningAccepted
+                ? Colors.orange.shade800
+                : Colors.red.shade700;
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      DropdownButtonFormField<String>(
+        key: ValueKey('attendance_plate_$selected'),
+        initialValue: selected,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: 'Placa',
+          border: const OutlineInputBorder(),
+          prefixIcon: const Icon(Icons.directions_car_outlined),
+          helperText: loadingMobilities
+              ? 'Cargando movilidades...'
+              : mobilityRows.isEmpty
+                  ? 'No hay placas locales. Actualice los datos con internet.'
+                  : null,
+        ),
+        items: [
+          const DropdownMenuItem<String>(
+            value: '',
+            child: Text('Sin movilidad'),
+          ),
+          ...plates.map((plate) => DropdownMenuItem<String>(
+                value: plate,
+                child: Text(plate),
+              )),
+        ],
+        onChanged: loadingMobilities || validatingMobility
+            ? null
+            : (value) => _selectMobilityPlate(value ?? ''),
+      ),
+      const SizedBox(height: 10),
+      if (hasMobility)
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: const Color(0xFFF8FBFA),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: const Color(0xFFD8E5DD)),
+          ),
+          child:
+              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Row(children: [
+              const Icon(Icons.person_pin_outlined, color: Color(0xFF31552F)),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  _mobilityValue(['conductor', 'conductor_nombre']),
+                  style: const TextStyle(fontWeight: FontWeight.w700),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: _editSelectedDriver,
+                icon: const Icon(Icons.edit_outlined),
+                label: const Text('Editar conductor'),
+              ),
+            ]),
+            const SizedBox(height: 6),
+            Wrap(spacing: 18, runSpacing: 8, children: [
+              Text(
+                  'DNI: ${_mobilityValue(['dni_conductor', 'conductor_dni'])}'),
+              Text('Licencia: ${_mobilityValue(['licencia_conducir'])}'),
+              Text('Vigencia: ${_mobilityValue(['licencia_vigencia'])}'),
+              Text('SOAT: ${_mobilityValue(['soat_vigencia'])}'),
+              Text('Revisión técnica: ${_mobilityValue([
+                    'revision_tecnica_vigencia'
+                  ])}'),
+            ]),
+          ]),
+        ),
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Icon(
+            current.isEmpty
+                ? Icons.directions_walk
+                : issues.isEmpty
+                    ? Icons.verified_outlined
+                    : Icons.warning_amber_rounded,
+            size: 20,
+            color: statusColor,
+          ),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              mobilityValidationMessage.isEmpty
+                  ? 'Seleccione Sin movilidad o una placa registrada.'
+                  : mobilityValidationMessage,
+              style: TextStyle(
+                color: statusColor,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ]),
+      ),
+      const SizedBox(height: 12),
+    ]);
+  }
+
   void _setTipoMovimiento(String value) {
     setState(() {
       tipoMovimiento = value;
@@ -1916,38 +2486,13 @@ class _AsistenciaPersonalSpecialPageState
         _movementButtons(primary),
         const SizedBox(height: 14),
         ...asistenciaHeader.buildFields(context, setState,
-            filter: (field) => !_isAsistenciaMovementField(field)),
-        Row(children: [
-          Expanded(
-            child: Text(
-              mobilityValidationMessage.isEmpty
-                  ? 'Si registra una placa, primero debe existir un ingreso formal admitido.'
-                  : mobilityValidationMessage,
-              style: TextStyle(
-                color: selectedMobilityEntryId == null
-                    ? Colors.orange.shade800
-                    : Colors.green.shade700,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          OutlinedButton.icon(
-            onPressed: validatingMobility ? null : _openMobilityRegistration,
-            icon: const Icon(Icons.airport_shuttle_outlined),
-            label: const Text('Registrar movilidad'),
-          ),
-          IconButton(
-            onPressed: validatingMobility ? null : _formalMobilityEntry,
-            tooltip: 'Validar movilidad',
-            icon: validatingMobility
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.verified_outlined),
-          ),
-        ]),
+            filter: _isAsistenciaDateField),
+        _mobilitySelector(),
+        ...asistenciaHeader.buildFields(context, setState,
+            filter: (field) =>
+                !_isAsistenciaMovementField(field) &&
+                !_isAsistenciaDateField(field) &&
+                !_isAsistenciaPlateField(field)),
         const SizedBox(height: 2),
         _workerSearchBox(),
       ]),
@@ -2296,7 +2841,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return out;
   }
 
-  Future<List<String>> _workersWithoutAttendanceForDay() async {
+  Future<List<Map<String, String>>> _workersWithoutAttendanceForDay() async {
     final fecha = tareoHeader
         .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()).trim();
     if (fecha.isEmpty || selectedWorkers.isEmpty) return const [];
@@ -2308,6 +2853,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       try {
         final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
             as Map<String, dynamic>;
+        if (isSoftDeletedAppgtRow(payload)) continue;
         final rowFecha = (_rowValue(payload, ['FECHA', 'FECHA_INGRESO']) ?? '')
             .toString()
             .trim();
@@ -2317,13 +2863,16 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         if (dni.isNotEmpty) attended.add(dni);
       } catch (_) {}
     }
-    final missing = <String>[];
+    final missing = <Map<String, String>>[];
     for (final w in selectedWorkers) {
       final dniRaw = (w['DNI']?.toString() ?? '').trim();
       final dni = _digits(dniRaw);
       if (dni.isEmpty || attended.contains(dni)) continue;
       final name = (w['APELLIDOS Y NOMBRES']?.toString() ?? '').trim();
-      missing.add(name.isEmpty ? dniRaw : '$dniRaw - $name');
+      missing.add({
+        'dni': dni,
+        'label': name.isEmpty ? dniRaw : '$dniRaw - $name',
+      });
     }
     return missing;
   }
@@ -2346,8 +2895,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final loadedWorkers = <Map<String, dynamic>>[];
     for (final r in planilla) {
       try {
-        loadedWorkers.add(jsonDecode(r['payload_json']?.toString() ?? '{}')
-            as Map<String, dynamic>);
+        final payload = jsonDecode(r['payload_json']?.toString() ?? '{}')
+            as Map<String, dynamic>;
+        if (!isSoftDeletedAppgtRow(payload)) loadedWorkers.add(payload);
       } catch (_) {}
     }
 
@@ -2359,9 +2909,10 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         try {
           final payload = jsonDecode(r['payload_json']?.toString() ?? '{}');
           if (payload is Map<String, dynamic>) {
-            loadedLotes.add(payload);
+            if (!isSoftDeletedAppgtRow(payload)) loadedLotes.add(payload);
           } else if (payload is Map) {
-            loadedLotes.add(Map<String, dynamic>.from(payload));
+            final mapped = Map<String, dynamic>.from(payload);
+            if (!isSoftDeletedAppgtRow(mapped)) loadedLotes.add(mapped);
           }
         } catch (_) {}
       }
@@ -2710,11 +3261,22 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return null;
   }
 
-  void _addWorker(Map<String, dynamic> w) {
+  Future<void> _addWorker(Map<String, dynamic> w) async {
     final dni =
         (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
-    if (dni.isEmpty ||
-        selectedWorkers.any((e) => (e['DNI']?.toString() ?? '') == dni)) return;
+    if (dni.isEmpty) return;
+    final normalizedDni = _digits(dni);
+    if (selectedWorkers
+        .any((e) => _digits(e['DNI']?.toString() ?? '') == normalizedDni)) {
+      await _showAppGtAlert(
+        context,
+        'El trabajador con DNI $dni ya está considerado en este tareo.',
+        title: 'Trabajador ya considerado',
+        icon: Icons.info_outline_rounded,
+        playSound: true,
+      );
+      return;
+    }
     final nombre = (_rowValue(w, [
               'APELLIDOS Y NOMBRES',
               'Apellidos y Nombres',
@@ -2740,7 +3302,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             SnackBar(content: Text('Trabajador no encontrado: $code')));
       return;
     }
-    _addWorker(w);
+    await _addWorker(w);
   }
 
   double? _hoursBetween(String ingreso, String salida) {
@@ -2770,6 +3332,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         final payload = jsonDecode(record['payload_json']?.toString() ?? '{}');
         if (payload is! Map) continue;
         final row = Map<String, dynamic>.from(payload);
+        if (isSoftDeletedAppgtRow(row)) continue;
         final rowDni = _digits(
           (_rowValue(row, ['DNI', 'DOCUMENTO']) ?? '').toString(),
         );
@@ -2933,9 +3496,24 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
     final missingAttendance = await _workersWithoutAttendanceForDay();
     if (missingAttendance.isNotEmpty) {
-      final omit =
+      final removedDnis =
           await _showMissingAttendanceAlert(context, missingAttendance);
-      if (!omit || !mounted) return;
+      if (removedDnis == null || !mounted) return;
+      if (removedDnis.isNotEmpty) {
+        setState(() {
+          selectedWorkers.removeWhere((worker) =>
+              removedDnis.contains(_digits(worker['DNI']?.toString() ?? '')));
+        });
+        if (selectedWorkers.isEmpty) {
+          await _showAppGtAlert(
+            context,
+            'No queda personal en el tareo. Agrega al menos un trabajador para continuar.',
+            title: 'Tareo sin personal',
+            icon: Icons.group_off_outlined,
+          );
+          return;
+        }
+      }
     }
     final tareador = await _activeUserName();
     final headerPayload = _tareoHeaderPayload();
@@ -3107,9 +3685,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             suffixIcon: IconButton(
                 icon: const Icon(Icons.qr_code_scanner), onPressed: _openQr)),
         onChanged: (_) => setState(() {}),
-        onSubmitted: (v) {
+        onSubmitted: (v) async {
           final w = _findWorker(v);
-          if (w != null) _addWorker(w);
+          if (w != null) await _addWorker(w);
         },
       ),
       const SizedBox(height: 8),
@@ -3132,7 +3710,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
               return ListTile(
                   dense: true,
                   title: Text('$dni-$nombre'),
-                  onTap: () => _addWorker(w));
+                  onTap: () async => _addWorker(w));
             },
           ),
         ),
@@ -3403,13 +3981,19 @@ class _PlagasEnfermedadesSpecialPageState
     // completo y luego mapeamos por nombre de columna normalizado.
     try {
       final rows = await Supabase.instance.client.from(table).select();
-      final parsed = List<Map<String, dynamic>>.from(rows);
-      if (parsed.isNotEmpty) return parsed;
+      final parsed = withoutSoftDeletedAppgtRows(
+        List<Map<String, dynamic>>.from(rows),
+      );
+      // Una respuesta vacía es válida: puede significar que todas las filas
+      // quedaron eliminadas lógicamente. No volver a consultarlas sin flags.
+      return parsed;
     } catch (_) {}
 
     try {
       final rows = await Supabase.instance.client.from(table).select(select);
-      return List<Map<String, dynamic>>.from(rows);
+      return withoutSoftDeletedAppgtRows(
+        List<Map<String, dynamic>>.from(rows),
+      );
     } catch (_) {
       return <Map<String, dynamic>>[];
     }
@@ -3484,7 +4068,10 @@ class _PlagasEnfermedadesSpecialPageState
       try {
         final raw = row['payload_json']?.toString() ?? '';
         final data = jsonDecode(raw);
-        if (data is Map) decoded.add(Map<String, dynamic>.from(data));
+        if (data is Map) {
+          final payload = Map<String, dynamic>.from(data);
+          if (!isSoftDeletedAppgtRow(payload)) decoded.add(payload);
+        }
       } catch (_) {}
     }
     rows = _mapConteoRows(decoded);

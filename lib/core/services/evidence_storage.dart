@@ -2,10 +2,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 class EvidenceStorage {
   static const bucket = 'appgt-evidencias';
+  static const permissionDocumentsBucket = 'permisos-licencias';
   static const uriPrefix = 'storage://$bucket/';
   static const signedUrlTtlSeconds = 60 * 60; // 1 hora. Se regenera al visualizar.
 
-  static String toStorageUri(String path) => '$uriPrefix$path';
+  static String toStorageUri(String path, {String bucketName = bucket}) =>
+      'storage://$bucketName/$path';
 
   static bool isStorageUri(String value) {
     return value.trim().toLowerCase().startsWith('storage://');

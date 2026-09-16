@@ -1,11 +1,12 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/services/app_experience_service.dart';
 import '../../core/widgets/configuration_icon_catalog.dart';
 import '../../core/widgets/responsive_layout.dart';
 import '../../core/widgets/zumac_feature_header.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'configuration_admin_repository.dart';
 import 'creator_document_import_page.dart';
 import 'configuration_entity_wizard_page.dart';
@@ -52,6 +53,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   Map<String, dynamic> restoredViewState = <String, dynamic>{};
   final Set<String> expandedPublishedSections = <String>{};
   final Set<String> expandedPublishedModules = <String>{};
+  int loadGeneration = 0;
 
   bool get canManage => contextData['puede_gestionar'] == true;
   bool get canPublish => contextData['puede_publicar'] == true;
@@ -119,8 +121,9 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
   }
 
   Future<void> _load() async {
+    final generation = ++loadGeneration;
     await _restoreViewState();
-    if (!mounted) return;
+    if (!mounted || generation != loadGeneration) return;
     final hasContent =
         contextData.isNotEmpty || publishedConfigurations.isNotEmpty;
     setState(() {
@@ -132,14 +135,19 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
       error = null;
     });
     try {
-      final loadedContext = await repository.loadContext();
-      final loadedDrafts = loadedContext['puede_gestionar'] == true
-          ? await repository.listDrafts()
-          : <Map<String, dynamic>>[];
-      final loadedPublished = loadedContext['puede_gestionar'] == true
-          ? await repository.listPublishedNavigation()
-          : <Map<String, dynamic>>[];
-      if (!mounted) return;
+      final loadedContext =
+          await repository.loadContext().timeout(const Duration(seconds: 25));
+      var loadedDrafts = <Map<String, dynamic>>[];
+      var loadedPublished = <Map<String, dynamic>>[];
+      if (loadedContext['puede_gestionar'] == true) {
+        final loaded = await Future.wait<List<Map<String, dynamic>>>([
+          repository.listDrafts(),
+          repository.listPublishedNavigation(),
+        ]).timeout(const Duration(seconds: 25));
+        loadedDrafts = loaded[0];
+        loadedPublished = loaded[1];
+      }
+      if (!mounted || generation != loadGeneration) return;
       setState(() {
         contextData = loadedContext;
         drafts = loadedDrafts;
@@ -163,7 +171,7 @@ class _ConfigurationAdminPageState extends State<ConfigurationAdminPage> {
         refreshing = false;
       });
     } catch (exception) {
-      if (!mounted) return;
+      if (!mounted || generation != loadGeneration) return;
       setState(() {
         error = 'No se pudo abrir el constructor: $exception';
         loading = false;

@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'knowledge_retrieval_engine.dart';
 import 'local_db.dart';
+import 'soft_delete.dart';
 
 enum ZumacConsultantIntent {
   knowledge,
@@ -224,7 +225,7 @@ class ZumacConsultantService {
           .range(from, from + pageSize - 1)
           .timeout(_remoteTableTimeout);
       final mapped = List<Map<String, dynamic>>.from(page);
-      rows.addAll(mapped);
+      rows.addAll(mapped.where((row) => !isSoftDeletedAppgtRow(row)));
       if (mapped.length < pageSize) break;
     }
     return rows;
@@ -436,6 +437,7 @@ class ZumacConsultantService {
       ];
       final seen = <String>{};
       for (final row in combined) {
+        if (isSoftDeletedAppgtRow(row)) continue;
         final fingerprint = _rowFingerprint(row);
         if (!seen.add(fingerprint)) continue;
         allRows.add(row);

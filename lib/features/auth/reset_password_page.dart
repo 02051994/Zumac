@@ -1,4 +1,6 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
+
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class ResetPasswordPage extends StatefulWidget {

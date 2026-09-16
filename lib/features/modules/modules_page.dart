@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:speech_to_text/speech_to_text.dart' as stt;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -15,6 +15,7 @@ import '../../core/services/sync_service.dart';
 import '../../core/services/zumac_consultant_service.dart';
 import '../../core/widgets/branded_loading.dart';
 import '../../core/widgets/zumac_feature_header.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/onboarding_service.dart';
 import '../auth/login_page.dart';
@@ -449,6 +450,7 @@ class _ModulesPageState extends State<ModulesPage> {
   String? _expandedSectionId;
   bool canManageConfiguration = false;
   bool canManageCompany = false;
+  bool isCompanyAdmin = false;
   bool canUseZumacConsultor = false;
   bool canUseZumacCreator = false;
   bool canUseZumacAlerts = false;
@@ -520,7 +522,20 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Future<void> _loadCachedAndRefresh() async {
-    await loadLocal();
+    // En web la base local puede estar creándose por primera vez. Si una
+    // lectura temprana falla, antes el estado busy quedaba activo y el menú se
+    // veía atenuado sin aceptar clics hasta recargar la página.
+    try {
+      await loadLocal();
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          busyMessage = null;
+          busyProgress = 0;
+        });
+      }
+    }
     await _refreshIncrementallyOnEntry();
   }
 
@@ -742,6 +757,7 @@ class _ModulesPageState extends State<ModulesPage> {
               (summary['acciones_pendientes'] as num?)?.toInt() ?? 0;
         }
         canManageCompany = contextData['puede_gestionar_empresa'] == true;
+        isCompanyAdmin = contextData['es_admin_empresa'] == true;
         canManageConfiguration = canManageCompany && canUseZumacCreator;
       });
     } catch (_) {
@@ -751,6 +767,7 @@ class _ModulesPageState extends State<ModulesPage> {
         setState(() {
           canManageConfiguration = false;
           canManageCompany = false;
+          isCompanyAdmin = false;
           canUseZumacConsultor = false;
           canUseZumacCreator = false;
           canUseZumacAlerts = false;
@@ -1206,6 +1223,34 @@ class _ModulesPageState extends State<ModulesPage> {
     }
   }
 
+  bool _sectionAllowedForRuntime(Map<String, dynamic> section) {
+    final kind = _sectionKind(section);
+    if (isOnlineFirstRuntime) return kind != 'REGISTROS_LOCALES';
+    if (!isMobileCaptureRuntime) return true;
+
+    final fingerprint = _normalizarMenuText([
+      section['id'],
+      section['nombre'],
+      section['tipo_contenido'],
+    ].map(_txt).join(' '));
+    return kind == 'REGISTROS_LOCALES' ||
+        fingerprint.contains('OPERACIONES') ||
+        fingerprint.contains('REGISTROS_PENDIENTES');
+  }
+
+  String _normalizarMenuText(String value) {
+    return value
+        .trim()
+        .toUpperCase()
+        .replaceAll(RegExp(r'[ÁÀÄÂ]'), 'A')
+        .replaceAll(RegExp(r'[ÉÈËÊ]'), 'E')
+        .replaceAll(RegExp(r'[ÍÌÏÎ]'), 'I')
+        .replaceAll(RegExp(r'[ÓÒÖÔ]'), 'O')
+        .replaceAll(RegExp(r'[ÚÙÜÛ]'), 'U')
+        .replaceAll('Ñ', 'N')
+        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
+  }
+
   bool _sectionUsesDynamicViews(Map<String, dynamic> section) =>
       _sectionKind(section) == 'VISTAS_DINAMICAS' ||
       _sectionHasDynamicViews(_txt(section['id']));
@@ -1365,7 +1410,8 @@ class _ModulesPageState extends State<ModulesPage> {
   bool _canReportView(Map<String, dynamic> module, Map<String, dynamic> view) {
     final user = Supabase.instance.client.auth.currentUser;
     if (user == null) return true;
-    if (reportPermissions.isEmpty) return true;
+    if (isCompanyAdmin) return true;
+    if (reportPermissions.isEmpty) return false;
     final moduleId = _txt(module['id']);
     final viewId = _txt(view['id']);
     return reportPermissions.any((p) =>
@@ -1723,6 +1769,11 @@ class _ModulesPageState extends State<ModulesPage> {
         _toolActions,
       }.contains(_activeWorkspaceTool);
 
+  bool get _isCreatorWorkspace => const {
+        _toolCreatorCreate,
+        _toolCreatorEdit,
+      }.contains(_activeWorkspaceTool);
+
   bool get _canClearConsultant =>
       _activeWorkspaceTool == _toolConsultant &&
       (_consultantTurns.isNotEmpty ||
@@ -1886,6 +1937,14 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _animatedContent(Widget child) {
+    // Creator contiene árboles grandes y scrollables. Animarlo dentro de capas
+    // cacheadas podía dejar una textura gris en Flutter web al volver a Editar.
+    if (_isCreatorWorkspace) {
+      return KeyedSubtree(
+        key: ValueKey('content-${_desktopContentSignature()}'),
+        child: child,
+      );
+    }
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 220),
       switchInCurve: Curves.easeOutCubic,
@@ -1943,10 +2002,14 @@ class _ModulesPageState extends State<ModulesPage> {
 
   // ignore: unused_element
   Widget _menuItems() {
-    final visibleSections =
-        sections.where((s) => _canSection(s['id']?.toString() ?? '')).toList();
+    final visibleSections = sections
+        .where((s) => _canSection(s['id']?.toString() ?? ''))
+        .where(_sectionAllowedForRuntime)
+        .toList();
 
-    if (visibleSections.isEmpty && _canSection('modulos')) {
+    if (!isMobileCaptureRuntime &&
+        visibleSections.isEmpty &&
+        _canSection('modulos')) {
       visibleSections.add({
         'id': 'modulos',
         'nombre': 'Formatos',
@@ -2229,20 +2292,21 @@ class _ModulesPageState extends State<ModulesPage> {
           label: 'Actualizar datos',
           onPressed: busy ? null : download,
         ),
-        action(
-          icon: online ? Icons.sync : Icons.sync_problem_outlined,
-          label: 'Sincronizar',
-          onPressed: busy ? null : syncPending,
-          badge: pending <= 0
-              ? null
-              : CircleAvatar(
-                  radius: 9,
-                  child: Text(
-                    '$pending',
-                    style: const TextStyle(fontSize: 9),
+        if (!isOnlineFirstRuntime)
+          action(
+            icon: online ? Icons.sync : Icons.sync_problem_outlined,
+            label: 'Sincronizar',
+            onPressed: busy ? null : syncPending,
+            badge: pending <= 0
+                ? null
+                : CircleAvatar(
+                    radius: 9,
+                    child: Text(
+                      '$pending',
+                      style: const TextStyle(fontSize: 9),
+                    ),
                   ),
-                ),
-        ),
+          ),
         action(
           icon: Icons.help_outline,
           label: 'Guía de uso',
@@ -3126,6 +3190,7 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget _desktopSelectedContentCached() {
+    if (_isCreatorWorkspace) return _desktopSelectedContentRaw();
     final key = _desktopContentSignature();
     if (_desktopContentCacheKey == key && _desktopContentCache != null) {
       return _desktopContentCache!;
@@ -3346,6 +3411,7 @@ class _ModulesPageState extends State<ModulesPage> {
   Widget _desktopSidebar() {
     final visibleSections = sections
         .where((section) => _canSection(section['id']?.toString() ?? ''))
+        .where(_sectionAllowedForRuntime)
         .where((section) => _sectionKind(section) != 'REPORTES')
         .toList();
     final viewportWidth = MediaQuery.sizeOf(context).width;
@@ -3881,19 +3947,6 @@ class _ModulesPageState extends State<ModulesPage> {
           onSavedAndExit: _closeMobileFormatAfterSpecialSave,
         );
       }
-      if (_asBool(format['tabla_visible_app'])) {
-        return DesktopFormatRecordsPage(
-          key: key,
-          module: module,
-          format: format,
-          embedded: true,
-          mobileMode: true,
-          onLocalRecordsChanged: loadLocal,
-          initialTableName: _consultantTableName,
-          initialRecordField: _consultantRecordField,
-          initialRecordValue: _consultantRecordValue,
-        );
-      }
       return FormRunnerPage(
         key: key,
         moduleId: moduleId,
@@ -3977,10 +4030,13 @@ class _ModulesPageState extends State<ModulesPage> {
   Widget _mobileMenuItems() {
     final visibleSections = sections
         .where((s) => _canSection(s['id']?.toString() ?? ''))
+        .where(_sectionAllowedForRuntime)
         .where((s) => _sectionKind(s) != 'REPORTES')
         .toList();
 
-    if (visibleSections.isEmpty && _canSection('modulos')) {
+    if (!isMobileCaptureRuntime &&
+        visibleSections.isEmpty &&
+        _canSection('modulos')) {
       visibleSections.add({
         'id': 'modulos',
         'nombre': 'Formatos',
@@ -4310,43 +4366,44 @@ class _ModulesPageState extends State<ModulesPage> {
               icon: const Icon(Icons.refresh),
               tooltip: 'Actualizar datos',
             ),
-            Stack(
-              clipBehavior: Clip.none,
-              children: [
-                IconButton(
-                  onPressed: busy ? null : syncPending,
-                  tooltip: 'Sincronizar',
-                  icon: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    child: busy
-                        ? const SizedBox(
-                            key: ValueKey('desktop-syncing'),
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : Icon(
-                            online ? Icons.sync : Icons.sync_problem_outlined,
-                            key: ValueKey(
-                              online ? 'desktop-online' : 'desktop-offline',
+            if (!isOnlineFirstRuntime)
+              Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  IconButton(
+                    onPressed: busy ? null : syncPending,
+                    tooltip: 'Sincronizar',
+                    icon: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 180),
+                      child: busy
+                          ? const SizedBox(
+                              key: ValueKey('desktop-syncing'),
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : Icon(
+                              online ? Icons.sync : Icons.sync_problem_outlined,
+                              key: ValueKey(
+                                online ? 'desktop-online' : 'desktop-offline',
+                              ),
                             ),
-                          ),
-                  ),
-                ),
-                if (pending > 0)
-                  Positioned(
-                    right: -2,
-                    top: -2,
-                    child: CircleAvatar(
-                      radius: 9,
-                      child: Text(
-                        '$pending',
-                        style: const TextStyle(fontSize: 9),
-                      ),
                     ),
                   ),
-              ],
-            ),
+                  if (pending > 0)
+                    Positioned(
+                      right: -2,
+                      top: -2,
+                      child: CircleAvatar(
+                        radius: 9,
+                        child: Text(
+                          '$pending',
+                          style: const TextStyle(fontSize: 9),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             IconButton(
               onPressed: busy ? null : () => _openOnboarding(replay: true),
               icon: const Icon(Icons.help_outline),
@@ -4602,9 +4659,11 @@ class _ModulesPageState extends State<ModulesPage> {
                 children: [
                   _desktopTopBar(isHome: isHome),
                   Expanded(
-                    child: RepaintBoundary(
-                      child: _animatedContent(content),
-                    ),
+                    child: _isCreatorWorkspace
+                        ? _animatedContent(content)
+                        : RepaintBoundary(
+                            child: _animatedContent(content),
+                          ),
                   ),
                 ],
               ),

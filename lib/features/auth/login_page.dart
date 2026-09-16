@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/services/local_db.dart';
@@ -8,6 +8,7 @@ import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../config/app_version.dart';
 import '../../core/widgets/branded_loading.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../modules/modules_page.dart';
 
 class LoginPage extends StatefulWidget {

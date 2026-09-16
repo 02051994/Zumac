@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../users/hierarchical_permissions_page.dart';
+import '../users/governed_permissions_page.dart';
 
 class GenericSectionPage extends StatelessWidget {
   final Map<String, dynamic> section;
@@ -21,7 +21,7 @@ class GenericSectionPage extends StatelessWidget {
     if (normalized.contains('permis') ||
         normalized.contains('gestión de accesos') ||
         normalized.contains('gestion de accesos')) {
-      return HierarchicalPermissionsPage(embedded: embedded);
+      return GovernedPermissionsPage(embedded: embedded);
     }
 
     final body = Center(

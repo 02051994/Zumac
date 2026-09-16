@@ -1,9 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/zumac_feature_header.dart';
+import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'alerts_actions_repository.dart';
 
 const _navy = Color(0xFF17324D);

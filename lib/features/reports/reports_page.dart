@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/services/soft_delete.dart';
+
 class ReportsPage extends StatefulWidget {
   final bool embedded;
   final String? initialModuleId;
@@ -33,6 +35,7 @@ class _ReportsPageState extends State<ReportsPage> {
   List<Map<String, dynamic>> allViews = [];
   List<Map<String, dynamic>> views = [];
   List<Map<String, dynamic>> reportPermissions = [];
+  bool isCompanyAdmin = false;
   List<Map<String, dynamic>> filters = [];
   List<Map<String, dynamic>> charts = [];
   Map<String, dynamic>? selectedModule;
@@ -184,9 +187,8 @@ class _ReportsPageState extends State<ReportsPage> {
     final user = _supabase.auth.currentUser;
     if (user == null) return true;
 
-    // Si no hay registros de permisos, se deja visible para no bloquear el desarrollo inicial.
-    // Cuando empieces a llenar PERMISOS_REPORTES_USUARIOS_APPGT, solo se mostrarán los permitidos.
-    if (reportPermissions.isEmpty) return true;
+    if (isCompanyAdmin) return true;
+    if (reportPermissions.isEmpty) return false;
 
     return reportPermissions.any((p) {
       final sameView = _text(p['id_vista_reporte']) == viewId;
@@ -229,9 +231,12 @@ class _ReportsPageState extends State<ReportsPage> {
       final viewRows = await _supabase.from('MATRIZ_VISTAS_REPORTES').select();
 
       List<Map<String, dynamic>> permissionRows = [];
+      var admin = false;
       final user = _supabase.auth.currentUser;
       if (user != null) {
         try {
+          final role = await _supabase.rpc('appgt_rol_empresa_actual');
+          admin = role?.toString().toUpperCase() == 'ADMIN';
           final perms = await _supabase
               .from('PERMISOS_REPORTES_USUARIOS_APPGT')
               .select()
@@ -242,6 +247,7 @@ class _ReportsPageState extends State<ReportsPage> {
           permissionRows = [];
         }
       }
+      isCompanyAdmin = admin;
 
       final loadedViews = List<Map<String, dynamic>>.from(viewRows)
           .where((v) => _asBool(v['activo'], fallback: true))
@@ -375,34 +381,6 @@ class _ReportsPageState extends State<ReportsPage> {
     }
   }
 
-  String _selectColumns(String table, Map<String, dynamic> chart) {
-    final columns = <String>{};
-    final ejeX = _asMap(chart['eje_x']);
-    final ejeY1 = _asMap(chart['eje_y_1']);
-    final ejeY2 = _asMap(chart['eje_y_2']);
-
-    for (final ref in [ejeX['campo'], ejeY1['campo'], ejeY2['campo']]) {
-      final column = _fieldColumn(table, ref);
-      if (column.isNotEmpty) columns.add(_quoteColumn(column));
-    }
-
-    for (final filter in filters) {
-      final column = _fieldColumn(table, filter['campo']);
-      if (column.isNotEmpty &&
-          selectedFilters.containsKey(_text(filter['codigo_filtro']))) {
-        columns.add(_quoteColumn(column));
-      }
-    }
-
-    final extra = _asList(chart['campos_select']);
-    for (final value in extra) {
-      final column = _fieldColumn(table, value);
-      if (column.isNotEmpty) columns.add(_quoteColumn(column));
-    }
-
-    return columns.isEmpty ? '*' : columns.join(',');
-  }
-
   dynamic _applyFilter(
       dynamic query, String column, String operator, dynamic value) {
     switch (operator) {
@@ -445,7 +423,9 @@ class _ReportsPageState extends State<ReportsPage> {
         params[param] = value;
       }
       final rows = await _supabase.rpc(rpcName, params: params);
-      return List<Map<String, dynamic>>.from(rows);
+      return withoutSoftDeletedAppgtRows(
+        List<Map<String, dynamic>>.from(rows),
+      );
     }
 
     final table = _text(chart['tabla_origen']);
@@ -453,7 +433,10 @@ class _ReportsPageState extends State<ReportsPage> {
 
     await _ensureReportFieldsForTable(table);
 
-    dynamic query = _supabase.from(table).select(_selectColumns(table, chart));
+    // Se traen también las columnas técnicas de borrado lógico. Una proyección
+    // solo con los ejes del gráfico ocultaba `eliminado`/`deleted_at` y hacía
+    // imposible excluir esas filas de forma genérica.
+    dynamic query = _supabase.from(table).select();
     for (final filter in filters) {
       final code = _text(filter['codigo_filtro']);
       final column = _fieldColumn(table, filter['campo']);
@@ -487,7 +470,7 @@ class _ReportsPageState extends State<ReportsPage> {
       from += pageSize;
     }
 
-    return allRows;
+    return withoutSoftDeletedAppgtRows(allRows);
   }
 
   Future<void> _loadChartData() async {

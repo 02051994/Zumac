@@ -29,4 +29,27 @@ void main() {
       );
     });
   });
+
+  test('BUSCAR y LISTA ignoran filas eliminadas lógicamente', () {
+    final engine = FormulaEngine(
+      fields: const [],
+      matrixRowsByTable: const {
+        'personal': [
+          {'dni': '123', 'nombre': 'Registro eliminado', 'eliminado': true},
+          {'dni': '123', 'nombre': 'Registro vigente', 'eliminado': false},
+          {'dni': '456', 'nombre': 'Otro vigente', 'eliminado': false},
+        ],
+      },
+      getValue: (_) => null,
+    );
+
+    expect(
+      engine.evaluateToText("BUSCAR('personal', 'dni', '123', 'nombre')"),
+      'Registro vigente',
+    );
+    expect(
+      engine.evaluateToText("LISTA('personal', 'dni')"),
+      '123, 456',
+    );
+  });
 }
