@@ -13,6 +13,7 @@ import 'local_db.dart';
 import 'local_session.dart';
 import 'evidence_storage.dart';
 import 'offline_record_state.dart';
+import 'tareo_draft_policy.dart';
 
 /// Orquesta la sincronización autenticada entre Supabase y la caché local.
 ///
@@ -3365,32 +3366,37 @@ class SyncService {
       throw Exception('No hay un usuario autenticado para sincronizar.');
     }
     final activeEmpresaId = await LocalSession().cachedEmpresaId();
-    final pending = await _local.pendingRecords(
+    final allPending = await _local.pendingRecords(
       userId: activeUserId,
       empresaId: activeEmpresaId,
     );
-    var tareosSinHoraFin = 0;
-    for (var pendingIndex = 0; pendingIndex < pending.length; pendingIndex++) {
-      final row = pending[pendingIndex];
+    final pending = <Map<String, dynamic>>[];
+    for (var pendingIndex = 0;
+        pendingIndex < allPending.length;
+        pendingIndex++) {
+      final row = allPending[pendingIndex];
       if (pendingIndex > 0 && pendingIndex % 40 == 0) await _yieldToUi();
       final table = row['tabla_destino']?.toString() ?? '';
-      if (table != 'GT-TAREO_PERSONAL') continue;
+      if (table != 'GT-TAREO_PERSONAL') {
+        pending.add(row);
+        continue;
+      }
       try {
         final payload =
             jsonDecode(row['payload_json'] as String) as Map<String, dynamic>;
-        final horaFin = (payload['HORA_FIN'] ?? payload['HORA FIN'] ?? '')
-            .toString()
-            .trim();
-        if (horaFin.isEmpty || horaFin.toLowerCase() == 'null') {
-          tareosSinHoraFin++;
-          await _local.markError(row['id_local'] as String,
-              'Todos los tareos deben tener hora fin');
+        if (isOpenTareoDraft(payload)) {
+          // Un tareo abierto es trabajo local válido, no un error. Se conserva
+          // editable en Registros pendientes y no bloquea el resto de la cola.
+          continue;
         }
-      } catch (_) {}
+        pending.add(row);
+      } catch (_) {
+        // Si el payload está dañado se deja entrar al flujo habitual para que
+        // quede marcado con el error real de sincronización.
+        pending.add(row);
+      }
     }
-    if (tareosSinHoraFin > 0) {
-      throw Exception('Todos los tareos deben tener hora fin');
-    }
+    if (pending.isEmpty) return 0;
     int synced = 0;
     int conflicts = 0;
     int errors = 0;

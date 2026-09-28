@@ -45,6 +45,22 @@ double metricsCanvasGestureDelta({
   return screenDelta / canvasScale;
 }
 
+/// Convierte una medida visual a coordenadas del lienzo sin permitir que el
+/// área interactiva consuma una tarjeta pequeña completa.
+///
+/// Al reducir el lienzo, dividir siempre entre la escala puede producir zonas
+/// de agarre más grandes que el propio gráfico. El límite proporcional mantiene
+/// disponibles tanto el contenido como todos sus bordes.
+double metricsCanvasHitTarget({
+  required double screenPixels,
+  required double canvasScale,
+  required double maximumCanvasPixels,
+}) {
+  if (screenPixels <= 0 || maximumCanvasPixels <= 0) return 0;
+  final safeScale = math.max(.1, canvasScale);
+  return math.min(screenPixels / safeScale, maximumCanvasPixels);
+}
+
 /// Tamaño responsive del título sin perder el valor configurado por el usuario.
 double metricsResponsiveDashboardTitleSize({
   required double configuredSize,
@@ -86,12 +102,15 @@ bool metricsCanResizeWidget({
   required bool filterPanelOpen,
   required String? editingWidgetId,
   required String widgetId,
-}) =>
-    canManage &&
-    !filterPanelOpen &&
-    editingWidgetId != null &&
-    editingWidgetId.isNotEmpty &&
-    editingWidgetId == widgetId;
+}) {
+  final selectedId = editingWidgetId?.trim() ?? '';
+  final candidateId = widgetId.trim();
+  return canManage &&
+      !filterPanelOpen &&
+      selectedId.isNotEmpty &&
+      candidateId.isNotEmpty &&
+      selectedId == candidateId;
+}
 
 /// Los gráficos históricos conservan su radio anterior. Los nuevos guardan
 /// explícitamente cero y por eso nacen con esquinas cuadradas.

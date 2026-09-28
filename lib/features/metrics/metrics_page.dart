@@ -296,6 +296,11 @@ class _MetricsPageState extends State<MetricsPage> {
   final Map<String, Offset> _liveWidgetPositions = {};
   Offset? _geometryGestureOrigin;
   Offset? _geometryPointerPosition;
+  Offset? _geometryPointerDownPosition;
+  Timer? _geometryHoldTimer;
+  int? _geometryPointerId;
+  bool _geometryMoveMode = false;
+  bool _geometryGestureChanged = false;
   String? _error;
 
   bool get _canManage => _context['puede_gestionar'] == true;
@@ -319,6 +324,7 @@ class _MetricsPageState extends State<MetricsPage> {
 
   @override
   void dispose() {
+    _geometryHoldTimer?.cancel();
     widget.toolbarController?.detach(this);
     super.dispose();
   }
@@ -1355,13 +1361,6 @@ class _MetricsPageState extends State<MetricsPage> {
                               ),
                             ),
                           ),
-                        if (_canManage)
-                          _widgetMoveHandle(
-                            widget: widget,
-                            rect: rect,
-                            canvasWidth: geometryWidth,
-                            canvasScale: scale,
-                          ),
                         if (canResize) ...[
                           _geometryEdge(
                             widget: widget,
@@ -1424,77 +1423,6 @@ class _MetricsPageState extends State<MetricsPage> {
     );
   }
 
-  Widget _widgetMoveHandle({
-    required Map<String, dynamic> widget,
-    required Rect rect,
-    required double canvasWidth,
-    required double canvasScale,
-  }) {
-    final widgetId = widget['id']?.toString() ?? '';
-    final safeScale = math.max(.1, canvasScale);
-    final handleSize = 34 / safeScale;
-    return Positioned(
-      left: 8 / safeScale,
-      top: 8 / safeScale,
-      width: handleSize,
-      height: handleSize,
-      child: MouseRegion(
-        cursor: SystemMouseCursors.move,
-        child: Tooltip(
-          message: 'Arrastra para mover el gráfico',
-          child: GestureDetector(
-            behavior: HitTestBehavior.opaque,
-            onPanStart: (details) {
-              _geometryGestureOrigin =
-                  _liveWidgetPositions[widgetId] ?? rect.topLeft;
-              _geometryPointerPosition = details.globalPosition;
-              setState(() => _movingWidgetId = widgetId);
-            },
-            onPanUpdate: (details) {
-              final current = _liveWidgetPositions[widgetId] ?? rect.topLeft;
-              final previousPointer =
-                  _geometryPointerPosition ?? details.globalPosition;
-              final screenDelta = details.globalPosition - previousPointer;
-              _geometryPointerPosition = details.globalPosition;
-              final canvasDelta = Offset(
-                metricsCanvasGestureDelta(
-                  screenDelta: screenDelta.dx,
-                  canvasScale: safeScale,
-                ),
-                metricsCanvasGestureDelta(
-                  screenDelta: screenDelta.dy,
-                  canvasScale: safeScale,
-                ),
-              );
-              final next = Offset(
-                (current.dx + canvasDelta.dx)
-                    .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
-                math.max(0.0, current.dy + canvasDelta.dy),
-              );
-              setState(() => _liveWidgetPositions[widgetId] = next);
-            },
-            onPanEnd: (_) async {
-              _geometryGestureOrigin = null;
-              _geometryPointerPosition = null;
-              await _persistWidgetGeometry(widget);
-              if (mounted) setState(() => _movingWidgetId = null);
-            },
-            onPanCancel: () {
-              _geometryGestureOrigin = null;
-              _geometryPointerPosition = null;
-              if (mounted) setState(() => _movingWidgetId = null);
-            },
-            child: Icon(
-              Icons.drag_indicator_rounded,
-              size: 21 / safeScale,
-              color: _metricsMuted,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
   Widget _geometryEdge({
     required Map<String, dynamic> widget,
     required Rect rect,
@@ -1506,6 +1434,26 @@ class _MetricsPageState extends State<MetricsPage> {
     final widgetId = widget['id']?.toString() ?? '';
     final horizontalBorder =
         side == _MetricGeometrySide.top || side == _MetricGeometrySide.bottom;
+    final horizontalInset = metricsCanvasHitTarget(
+      screenPixels: 16,
+      canvasScale: safeScale,
+      maximumCanvasPixels: rect.width * .20,
+    );
+    final verticalInset = metricsCanvasHitTarget(
+      screenPixels: 16,
+      canvasScale: safeScale,
+      maximumCanvasPixels: rect.height * .20,
+    );
+    final verticalEdgeWidth = metricsCanvasHitTarget(
+      screenPixels: 14,
+      canvasScale: safeScale,
+      maximumCanvasPixels: rect.width * .25,
+    );
+    final horizontalEdgeHeight = metricsCanvasHitTarget(
+      screenPixels: 14,
+      canvasScale: safeScale,
+      maximumCanvasPixels: rect.height * .25,
+    );
     final edge = MouseRegion(
       cursor: horizontalBorder
           ? SystemMouseCursors.resizeUpDown
@@ -1514,17 +1462,62 @@ class _MetricsPageState extends State<MetricsPage> {
         message: horizontalBorder
             ? 'Arrastra para ajustar el alto; mantén presionado para mover'
             : 'Arrastra para ajustar el ancho; mantén presionado para mover',
-        child: GestureDetector(
+        child: Listener(
+          key: ValueKey('metrics-geometry-${side.name}-$widgetId'),
           behavior: HitTestBehavior.opaque,
-          onPanStart: (details) {
-            _geometryPointerPosition = details.globalPosition;
-            setState(() => _resizingWidgetId = widgetId);
+          onPointerDown: (event) {
+            if (_geometryPointerId != null) return;
+            _geometryHoldTimer?.cancel();
+            _geometryPointerId = event.pointer;
+            _geometryGestureOrigin =
+                _liveWidgetPositions[widgetId] ?? rect.topLeft;
+            _geometryPointerPosition = event.position;
+            _geometryPointerDownPosition = event.position;
+            _geometryMoveMode = false;
+            _geometryGestureChanged = false;
+            _geometryHoldTimer = Timer(const Duration(milliseconds: 420), () {
+              if (!mounted || _geometryPointerId != event.pointer) return;
+              setState(() {
+                _geometryMoveMode = true;
+                _movingWidgetId = widgetId;
+              });
+            });
           },
-          onPanUpdate: (details) {
-            final previousPointer =
-                _geometryPointerPosition ?? details.globalPosition;
-            final screenDelta = details.globalPosition - previousPointer;
-            _geometryPointerPosition = details.globalPosition;
+          onPointerMove: (event) {
+            if (_geometryPointerId != event.pointer) return;
+            final previousPointer = _geometryPointerPosition ?? event.position;
+            final pointerDown = _geometryPointerDownPosition ?? previousPointer;
+            final screenDelta = event.position - previousPointer;
+            final totalScreenDelta = event.position - pointerDown;
+            _geometryPointerPosition = event.position;
+            if (!_geometryMoveMode && totalScreenDelta.distance < 3) return;
+            _geometryGestureChanged = true;
+            if (_geometryMoveMode) {
+              final origin = _geometryGestureOrigin ?? rect.topLeft;
+              final next = Offset(
+                (origin.dx +
+                        metricsCanvasGestureDelta(
+                          screenDelta: totalScreenDelta.dx,
+                          canvasScale: safeScale,
+                        ))
+                    .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
+                math.max(
+                  0.0,
+                  origin.dy +
+                      metricsCanvasGestureDelta(
+                        screenDelta: totalScreenDelta.dy,
+                        canvasScale: safeScale,
+                      ),
+                ),
+              );
+              setState(() => _liveWidgetPositions[widgetId] = next);
+              return;
+            }
+            _geometryHoldTimer?.cancel();
+            setState(() {
+              _movingWidgetId = null;
+              _resizingWidgetId = widgetId;
+            });
             _resizeWidgetFromEdge(
               widget,
               rect,
@@ -1542,53 +1535,13 @@ class _MetricsPageState extends State<MetricsPage> {
               canvasWidth: canvasWidth,
             );
           },
-          onPanEnd: (_) async {
-            _geometryPointerPosition = null;
-            await _persistWidgetGeometry(widget);
-            if (mounted && _editingWidget?['id']?.toString() != widgetId) {
-              setState(() => _resizingWidgetId = null);
-            }
+          onPointerUp: (event) {
+            if (_geometryPointerId != event.pointer) return;
+            _finishGeometryPointer(widget, widgetId, persist: true);
           },
-          onPanCancel: () {
-            _geometryPointerPosition = null;
-            if (mounted && _editingWidget?['id']?.toString() != widgetId) {
-              setState(() => _resizingWidgetId = null);
-            }
-          },
-          onLongPressStart: (details) {
-            _geometryGestureOrigin =
-                _liveWidgetPositions[widgetId] ?? rect.topLeft;
-            _geometryPointerPosition = details.globalPosition;
-            setState(() => _movingWidgetId = widgetId);
-          },
-          onLongPressMoveUpdate: (details) {
-            final origin = _geometryGestureOrigin ?? rect.topLeft;
-            final pointerOrigin =
-                _geometryPointerPosition ?? details.globalPosition;
-            final screenDelta = details.globalPosition - pointerOrigin;
-            final next = Offset(
-              (origin.dx +
-                      metricsCanvasGestureDelta(
-                        screenDelta: screenDelta.dx,
-                        canvasScale: safeScale,
-                      ))
-                  .clamp(0.0, math.max(0.0, canvasWidth - rect.width)),
-              math.max(
-                0.0,
-                origin.dy +
-                    metricsCanvasGestureDelta(
-                      screenDelta: screenDelta.dy,
-                      canvasScale: safeScale,
-                    ),
-              ),
-            );
-            setState(() => _liveWidgetPositions[widgetId] = next);
-          },
-          onLongPressEnd: (_) async {
-            _geometryGestureOrigin = null;
-            _geometryPointerPosition = null;
-            await _persistWidgetGeometry(widget);
-            if (mounted) setState(() => _movingWidgetId = null);
+          onPointerCancel: (event) {
+            if (_geometryPointerId != event.pointer) return;
+            _finishGeometryPointer(widget, widgetId, persist: false);
           },
           child: const SizedBox.expand(),
         ),
@@ -1597,33 +1550,57 @@ class _MetricsPageState extends State<MetricsPage> {
     return switch (side) {
       _MetricGeometrySide.left => Positioned(
           left: 0,
-          top: 12 / safeScale,
-          bottom: 12 / safeScale,
-          width: 8 / safeScale,
+          top: verticalInset,
+          bottom: verticalInset,
+          width: verticalEdgeWidth,
           child: edge,
         ),
       _MetricGeometrySide.right => Positioned(
           right: 0,
-          top: 12 / safeScale,
-          bottom: 42 / safeScale,
-          width: 8 / safeScale,
+          top: verticalInset,
+          bottom: verticalInset,
+          width: verticalEdgeWidth,
           child: edge,
         ),
       _MetricGeometrySide.top => Positioned(
-          left: 12 / safeScale,
-          right: 12 / safeScale,
+          left: horizontalInset,
+          right: horizontalInset,
           top: 0,
-          height: 8 / safeScale,
+          height: horizontalEdgeHeight,
           child: edge,
         ),
       _MetricGeometrySide.bottom => Positioned(
-          left: 12 / safeScale,
-          right: 42 / safeScale,
+          left: horizontalInset,
+          right: horizontalInset,
           bottom: 0,
-          height: 8 / safeScale,
+          height: horizontalEdgeHeight,
           child: edge,
         ),
     };
+  }
+
+  void _finishGeometryPointer(
+    Map<String, dynamic> widget,
+    String widgetId, {
+    required bool persist,
+  }) {
+    _geometryHoldTimer?.cancel();
+    _geometryHoldTimer = null;
+    final changed = _geometryGestureChanged;
+    _geometryPointerId = null;
+    _geometryGestureOrigin = null;
+    _geometryPointerPosition = null;
+    _geometryPointerDownPosition = null;
+    _geometryMoveMode = false;
+    _geometryGestureChanged = false;
+    if (mounted) {
+      setState(() {
+        _movingWidgetId = null;
+        _resizingWidgetId =
+            _editingWidget?['id']?.toString() == widgetId ? widgetId : null;
+      });
+    }
+    if (persist && changed) unawaited(_persistWidgetGeometry(widget));
   }
 
   void _resizeWidgetFromEdge(

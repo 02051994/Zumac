@@ -9,9 +9,12 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../core/platform/app_platform.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/soft_delete.dart';
+import '../../core/services/sync_service.dart';
+import '../../core/services/tareo_draft_policy.dart';
 import 'form_runner_page.dart';
 
 Future<void> _showAppGtAlert(
@@ -199,6 +202,51 @@ DateTime _safeDatePickerInitialDate(
   return date;
 }
 
+const Color _zumacFormatBlue = Color(0xFF0F5265);
+
+AppBar _zumacFormatAppBar({
+  required Widget title,
+  VoidCallback? onBack,
+  List<Widget>? actions,
+}) {
+  return AppBar(
+    toolbarHeight: 52,
+    backgroundColor: _zumacFormatBlue,
+    foregroundColor: Colors.white,
+    elevation: 0,
+    titleSpacing: 2,
+    leading: onBack == null
+        ? null
+        : IconButton(
+            tooltip: 'Volver',
+            icon: const Icon(Icons.arrow_back),
+            onPressed: onBack,
+          ),
+    title: title,
+    actions: actions,
+  );
+}
+
+/// Respaldo determinista cuando la metadata de formatos especiales todavía no
+/// terminó de descargarse. Evita que Asistencia o Tareo aparezcan como un
+/// formulario genérico durante el arranque del APK.
+Map<String, dynamic>? appGtSpecialFormatFallback(Map<String, dynamic> format) {
+  final table = _specialNorm(format['tabla_destino']?.toString() ?? '');
+  if (table == 'GT_ASISTENCIA_PERSONAL') {
+    return <String, dynamic>{
+      'tipo_pantalla': 'asistencia_personal',
+      'activo': 1,
+    };
+  }
+  if (table == 'GT_TAREO_PERSONAL') {
+    return <String, dynamic>{
+      'tipo_pantalla': 'tareo_personal',
+      'activo': 1,
+    };
+  }
+  return null;
+}
+
 class SpecialFormRouterPage extends StatelessWidget {
   final String moduleId;
   final Map<String, dynamic> format;
@@ -246,6 +294,9 @@ class SpecialFormRouterPage extends StatelessWidget {
     if (tipo == 'asistencia_personal' ||
         tipo == 'asistencia_qr' ||
         tipo == 'asistencia_movilidad') {
+      if (!isMobileCaptureRuntime) {
+        return const _AttendanceCaptureUnavailablePage();
+      }
       return AsistenciaPersonalSpecialPage(
         moduleId: moduleId,
         format: format,
@@ -258,6 +309,14 @@ class SpecialFormRouterPage extends StatelessWidget {
     if (tipo == 'tareo_personal' ||
         tipo == 'tareo_qr' ||
         (format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
+      if (initialPayload == null && editIdLocal == null) {
+        return TareoPersonalDayPage(
+          moduleId: moduleId,
+          format: format,
+          onLocalChanged: onLocalChanged,
+          onBack: onSavedAndExit,
+        );
+      }
       return TareoPersonalSpecialPage(
         moduleId: moduleId,
         format: format,
@@ -282,6 +341,53 @@ class SpecialFormRouterPage extends StatelessWidget {
         format: format,
         initialPayload: initialPayload,
         editIdLocal: editIdLocal);
+  }
+}
+
+class _AttendanceCaptureUnavailablePage extends StatelessWidget {
+  const _AttendanceCaptureUnavailablePage();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: _zumacFormatAppBar(
+        title: const Text('Asistencia de Personal'),
+      ),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: const Card(
+              child: Padding(
+                padding: EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.phonelink_lock_outlined,
+                        size: 54, color: Color(0xFF31552F)),
+                    SizedBox(height: 16),
+                    Text(
+                      'Marcación disponible solo en el APK',
+                      textAlign: TextAlign.center,
+                      style:
+                          TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+                    ),
+                    SizedBox(height: 8),
+                    Text(
+                      'Desde la versión web puedes consultar la tabla de '
+                      'asistencias, pero los ingresos y salidas se registran '
+                      'únicamente desde la aplicación móvil.',
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -730,7 +836,8 @@ class _SpecialMatrixHeader {
   }
 
   Widget buildField(BuildContext context, Map<String, dynamic> field,
-      void Function(void Function()) setState) {
+      void Function(void Function()) setState,
+      {DateTime? firstDate, DateTime? lastDate}) {
     final campo = field['campo']?.toString() ?? '';
     final ctrl = controllers[campo];
     if (ctrl == null) return const SizedBox.shrink();
@@ -804,12 +911,17 @@ class _SpecialMatrixHeader {
         onTap: editable
             ? () async {
                 final today = DateTime.now();
-                final current = DateTime.tryParse(ctrl.text.trim()) ?? today;
+                final minDate = firstDate ?? DateTime(today.year - 3);
+                final maxDate = lastDate ?? DateTime(today.year + 3);
+                final current = _safeDatePickerInitialDate(
+                    DateTime.tryParse(ctrl.text.trim()) ?? today,
+                    minDate,
+                    maxDate);
                 final picked = await showDatePicker(
                     context: context,
                     initialDate: current,
-                    firstDate: DateTime(today.year - 3),
-                    lastDate: DateTime(today.year + 3));
+                    firstDate: minDate,
+                    lastDate: maxDate);
                 if (picked != null) {
                   setState(() => ctrl.text = _specialDateIso(picked));
                   await _recalculateFormulaControllers();
@@ -885,7 +997,9 @@ class _SpecialMatrixHeader {
 
   List<Widget> buildFields(
       BuildContext context, void Function(void Function()) setState,
-      {bool Function(Map<String, dynamic>)? filter}) {
+      {bool Function(Map<String, dynamic>)? filter,
+      DateTime? firstDate,
+      DateTime? lastDate}) {
     final visibleFields =
         filter == null ? fields : fields.where(filter).toList();
     if (loading) return const [LinearProgressIndicator()];
@@ -912,7 +1026,9 @@ class _SpecialMatrixHeader {
               .compareTo(_gridNumber(b['orden'], 999));
         });
       final columns = rowFields
-          .map((field) => Expanded(child: buildField(context, field, setState)))
+          .map((field) => Expanded(
+              child: buildField(context, field, setState,
+                  firstDate: firstDate, lastDate: lastDate)))
           .toList();
       widgets.add(Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         for (var i = 0; i < columns.length; i++) ...[
@@ -959,8 +1075,6 @@ class _AsistenciaPersonalSpecialPageState
   final scannerCtrl = TextEditingController();
   final scannerFocus = FocusNode();
   final ScrollController _asistenciaVerticalCtrl = ScrollController();
-  final ScrollController _asistenciaHorizontalCtrl = ScrollController();
-  final ScrollController _asistenciaTableVerticalCtrl = ScrollController();
   late final _SpecialMatrixHeader asistenciaHeader;
   final List<Map<String, dynamic>> scannedRows = [];
   List<Map<String, dynamic>> asistenciaWorkers = [];
@@ -996,8 +1110,6 @@ class _AsistenciaPersonalSpecialPageState
     scannerFocus.dispose();
     asistenciaHeader.dispose();
     _asistenciaVerticalCtrl.dispose();
-    _asistenciaHorizontalCtrl.dispose();
-    _asistenciaTableVerticalCtrl.dispose();
     super.dispose();
   }
 
@@ -1363,6 +1475,11 @@ class _AsistenciaPersonalSpecialPageState
       (_rowValue(worker, ['Status', 'ESTADO', 'ESTADO_PERSONAL']) ?? '')
           .toString(),
     );
+    final contractStart = _dateValue(_rowValue(worker, [
+      'Fecha inicio de Contrato',
+      'FECHA_INICIO_CONTRATO',
+      'FECHA INICIO DE CONTRATO',
+    ]));
     final contractEnd = _dateValue(_rowValue(worker, [
       'Fecha fin de Contrato',
       'FECHA_FIN_CONTRATO',
@@ -1373,11 +1490,18 @@ class _AsistenciaPersonalSpecialPageState
           ? 'Contrato vencido. Derivar a Gestión Humana para su renovación.'
           : 'El trabajador no está activo: ${status.replaceAll('_', ' ')}.';
     }
+    if (contractStart == null) {
+      return 'El trabajador no tiene fecha de inicio de contrato configurada.';
+    }
     if (contractEnd == null) {
       return 'El trabajador no tiene fecha de fin de contrato configurada.';
     }
     final day =
         DateTime(attendanceDate.year, attendanceDate.month, attendanceDate.day);
+    if (day.isBefore(contractStart)) {
+      return 'El contrato inicia el ${contractStart.day.toString().padLeft(2, '0')}/'
+          '${contractStart.month.toString().padLeft(2, '0')}/${contractStart.year}.';
+    }
     if (contractEnd.isBefore(day)) {
       return 'Contrato vencido el ${contractEnd.day.toString().padLeft(2, '0')}/'
           '${contractEnd.month.toString().padLeft(2, '0')}/${contractEnd.year}.';
@@ -2499,155 +2623,37 @@ class _AsistenciaPersonalSpecialPageState
     );
   }
 
-  Widget _rowsTable() {
-    final table = DataTable(
-      headingRowColor: MaterialStateProperty.all(const Color(0xFF3F5B73)),
-      columnSpacing: 22,
-      dataRowMinHeight: 44,
-      dataRowMaxHeight: 76,
-      headingRowHeight: 56,
-      columns: const [
-        DataColumn(
-            label: SizedBox(
-                width: 95,
-                child: Text('DNI',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 260,
-                child: Text('Apellidos y nombres',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 150,
-                child: Text('Placa',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 170,
-                child: Text('Reclutador',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 180,
-                child: Text('Puesto',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 115,
-                child: Text('Fecha ingreso',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 90,
-                child: Text('Ingreso',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 115,
-                child: Text('Fecha salida',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 90,
-                child: Text('Salida',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-        DataColumn(
-            label: SizedBox(
-                width: 80,
-                child: Text('Horas',
-                    style: TextStyle(
-                        color: Colors.white, fontWeight: FontWeight.bold)))),
-      ],
-      rows: scannedRows
-          .map((r) => DataRow(cells: [
-                DataCell(SizedBox(
-                    width: 95,
-                    child: Text(r['DNI']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 260,
-                    child: Text(r['APELLIDOS Y NOMBRES']?.toString() ?? '',
-                        maxLines: 3, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 150,
-                    child: Text(r['PLACA']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 170,
-                    child: Text(r['RECLUTADOR']?.toString() ?? '',
-                        maxLines: 3, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 180,
-                    child: Text(r['PUESTO']?.toString() ?? '',
-                        maxLines: 3, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 115,
-                    child: Text(r['FECHA_INGRESO']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 90,
-                    child: Text(r['HORA_INGRESO']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 115,
-                    child: Text(r['FECHA_SALIDA']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 90,
-                    child: Text(r['HORA_SALIDA']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-                DataCell(SizedBox(
-                    width: 80,
-                    child: Text(r['HORAS_ASISTENCIA']?.toString() ?? '',
-                        maxLines: 2, overflow: TextOverflow.ellipsis))),
-              ]))
-          .toList(),
-    );
+  String _attendanceDateLabel() {
+    final raw = _headerValue(['FECHA'], fallback: fechaCtrl.text.trim());
+    final parsed = DateTime.tryParse(raw);
+    return parsed == null ? raw : _dateTitle(parsed);
+  }
 
-    return Container(
-      margin: const EdgeInsets.only(top: 14),
-      decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE1EEF1))),
-      clipBehavior: Clip.antiAlias,
-      child: SizedBox(
-        height: scannedRows.length > 7 ? 410 : null,
-        child: Scrollbar(
-          controller: _asistenciaHorizontalCtrl,
-          // Sin filas, el pulgar quedaba sobre el encabezado DNI. El scroll
-          // horizontal continúa disponible en cuanto existe contenido.
-          thumbVisibility: scannedRows.isNotEmpty,
-          notificationPredicate: (notification) =>
-              notification.metrics.axis == Axis.horizontal,
-          child: SingleChildScrollView(
-            controller: _asistenciaHorizontalCtrl,
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.only(bottom: 10),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 1320),
-              child: scannedRows.length > 7
-                  ? Scrollbar(
-                      controller: _asistenciaTableVerticalCtrl,
-                      thumbVisibility: true,
-                      child: SingleChildScrollView(
-                        controller: _asistenciaTableVerticalCtrl,
-                        child: table,
-                      ),
-                    )
-                  : table,
-            ),
-          ),
+  Future<void> _openWorkersPage() async {
+    await _loadDailyAttendanceRows();
+    if (!mounted) return;
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _AttendanceWorkersPage(
+          dateLabel: _attendanceDateLabel(),
+          rows: scannedRows
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList(growable: false),
+        ),
+      ),
+    );
+  }
+
+  Widget _workersButton() {
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: OutlinedButton.icon(
+        onPressed: _openWorkersPage,
+        icon: const Icon(Icons.groups_2_outlined),
+        label: Text(
+          scannedRows.isEmpty
+              ? 'Ver Trabajadores'
+              : 'Ver Trabajadores (${scannedRows.length})',
         ),
       ),
     );
@@ -2657,20 +2663,18 @@ class _AsistenciaPersonalSpecialPageState
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF4F8F7),
-      appBar: AppBar(
-        title: const Text('Asistencia de Personal'),
-        backgroundColor: const Color(0xFFF4F8F7),
-        elevation: 0,
-        actions: [
-          IconButton(
-            tooltip: 'Cerrar cabecera',
-            icon: const Icon(Icons.close),
-            onPressed: () {
-              widget.onSavedAndExit?.call();
-              Navigator.maybePop(context);
-            },
-          )
-        ],
+      appBar: _zumacFormatAppBar(
+        title: const Text(
+          'Asistencia de Personal',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        onBack: () {
+          if (widget.onSavedAndExit != null) {
+            widget.onSavedAndExit!.call();
+          } else {
+            Navigator.maybePop(context);
+          }
+        },
       ),
       body: Center(
         child: ConstrainedBox(
@@ -2683,9 +2687,289 @@ class _AsistenciaPersonalSpecialPageState
                 padding: const EdgeInsets.all(18),
                 children: [
                   _headerCard(),
-                  _rowsTable(),
+                  _workersButton(),
                 ]),
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AttendanceWorkerColumn {
+  final String label;
+  final List<String> keys;
+  final double width;
+
+  const _AttendanceWorkerColumn(this.label, this.keys, this.width);
+}
+
+class _AttendanceWorkersPage extends StatefulWidget {
+  final String dateLabel;
+  final List<Map<String, dynamic>> rows;
+
+  const _AttendanceWorkersPage({
+    required this.dateLabel,
+    required this.rows,
+  });
+
+  @override
+  State<_AttendanceWorkersPage> createState() => _AttendanceWorkersPageState();
+}
+
+class _AttendanceWorkersPageState extends State<_AttendanceWorkersPage> {
+  static const double _rowHeight = 58;
+  static const double _headerHeight = 56;
+  static const double _dniWidth = 126;
+  static const _columns = <_AttendanceWorkerColumn>[
+    _AttendanceWorkerColumn('Apellidos y nombres',
+        ['APELLIDOS Y NOMBRES', 'APELLIDOS_NOMBRES', 'NOMBRE COMPLETO'], 270),
+    _AttendanceWorkerColumn(
+        'Placa', ['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'], 150),
+    _AttendanceWorkerColumn('Reclutador', ['RECLUTADOR'], 180),
+    _AttendanceWorkerColumn('Puesto', ['PUESTO', 'CARGO'], 190),
+    _AttendanceWorkerColumn(
+        'Fecha ingreso', ['FECHA_INGRESO', 'FECHA INGRESO'], 130),
+    _AttendanceWorkerColumn(
+        'Ingreso (hora)', ['HORA_INGRESO', 'HORA INGRESO'], 120),
+    _AttendanceWorkerColumn(
+        'Fecha salida', ['FECHA_SALIDA', 'FECHA SALIDA'], 130),
+    _AttendanceWorkerColumn(
+        'Salida (hora)', ['HORA_SALIDA', 'HORA SALIDA'], 120),
+    _AttendanceWorkerColumn(
+        'Horas', ['HORAS_ASISTENCIA', 'HORAS ASISTENCIA', 'HORAS'], 100),
+  ];
+
+  final TextEditingController _searchController = TextEditingController();
+  final ScrollController _verticalController = ScrollController();
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _verticalController.dispose();
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  String _normalize(String value) => value
+      .trim()
+      .toUpperCase()
+      .replaceAll('Á', 'A')
+      .replaceAll('É', 'E')
+      .replaceAll('Í', 'I')
+      .replaceAll('Ó', 'O')
+      .replaceAll('Ú', 'U')
+      .replaceAll('Ü', 'U')
+      .replaceAll('Ñ', 'N')
+      .replaceAll(RegExp(r'[^A-Z0-9]+'), '');
+
+  String _value(Map<String, dynamic> row, Iterable<String> keys) {
+    final wanted = keys.map(_normalize).toSet();
+    for (final entry in row.entries) {
+      if (wanted.contains(_normalize(entry.key))) {
+        final value = entry.value?.toString().trim() ?? '';
+        if (value.toLowerCase() != 'null') return value;
+      }
+    }
+    return '';
+  }
+
+  List<Map<String, dynamic>> get _filteredRows {
+    final query = _normalize(_searchController.text);
+    if (query.isEmpty) return widget.rows;
+    return widget.rows.where((row) {
+      return row.values.any(
+        (value) => _normalize(value?.toString() ?? '').contains(query),
+      );
+    }).toList(growable: false);
+  }
+
+  Widget _cell({
+    required double width,
+    required String text,
+    required bool header,
+    required bool alternate,
+  }) {
+    return Container(
+      width: width,
+      height: header ? _headerHeight : _rowHeight,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: header
+            ? const Color(0xFF3F5B73)
+            : (alternate ? const Color(0xFFF7FAFB) : Colors.white),
+        border: const Border(
+          right: BorderSide(color: Color(0xFFDDE7EC)),
+          bottom: BorderSide(color: Color(0xFFDDE7EC)),
+        ),
+      ),
+      child: Text(
+        text.isEmpty && !header ? '—' : text,
+        maxLines: header ? 2 : 3,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: header ? Colors.white : const Color(0xFF263B4A),
+          fontSize: header ? 12.5 : 13,
+          fontWeight: header ? FontWeight.w800 : FontWeight.w500,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final rows = _filteredRows;
+    final scrollingWidth =
+        _columns.fold<double>(0, (total, column) => total + column.width);
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F8F7),
+      appBar: _zumacFormatAppBar(
+        title: Text(
+          'Trabajadores - ${widget.dateLabel}',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+      ),
+      body: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 14),
+        child: Column(
+          children: [
+            TextField(
+              controller: _searchController,
+              onChanged: (_) => setState(() {}),
+              textInputAction: TextInputAction.search,
+              decoration: InputDecoration(
+                hintText: 'Buscar trabajador',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchController.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Limpiar búsqueda',
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: rows.isEmpty
+                  ? const Center(
+                      child: Text('No se encontraron trabajadores.'),
+                    )
+                  : LayoutBuilder(
+                      builder: (context, constraints) {
+                        return Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(color: const Color(0xFFDDE7EC)),
+                          ),
+                          clipBehavior: Clip.antiAlias,
+                          child: Scrollbar(
+                            controller: _verticalController,
+                            thumbVisibility: true,
+                            child: SingleChildScrollView(
+                              controller: _verticalController,
+                              child: SizedBox(
+                                width: constraints.maxWidth,
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Material(
+                                      elevation: 5,
+                                      shadowColor: Colors.black26,
+                                      child: Column(
+                                        children: [
+                                          _cell(
+                                            width: _dniWidth,
+                                            text: 'DNI',
+                                            header: true,
+                                            alternate: false,
+                                          ),
+                                          for (var index = 0;
+                                              index < rows.length;
+                                              index++)
+                                            _cell(
+                                              width: _dniWidth,
+                                              text: _value(rows[index],
+                                                  const ['DNI', 'DOCUMENTO']),
+                                              header: false,
+                                              alternate: index.isOdd,
+                                            ),
+                                        ],
+                                      ),
+                                    ),
+                                    Expanded(
+                                      child: Scrollbar(
+                                        controller: _horizontalController,
+                                        thumbVisibility: true,
+                                        trackVisibility: true,
+                                        scrollbarOrientation:
+                                            ScrollbarOrientation.bottom,
+                                        notificationPredicate: (notification) =>
+                                            notification.metrics.axis ==
+                                            Axis.horizontal,
+                                        child: SingleChildScrollView(
+                                          controller: _horizontalController,
+                                          scrollDirection: Axis.horizontal,
+                                          padding:
+                                              const EdgeInsets.only(bottom: 12),
+                                          child: SizedBox(
+                                            width: scrollingWidth,
+                                            child: Column(
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    for (final column
+                                                        in _columns)
+                                                      _cell(
+                                                        width: column.width,
+                                                        text: column.label,
+                                                        header: true,
+                                                        alternate: false,
+                                                      ),
+                                                  ],
+                                                ),
+                                                for (var index = 0;
+                                                    index < rows.length;
+                                                    index++)
+                                                  Row(
+                                                    children: [
+                                                      for (final column
+                                                          in _columns)
+                                                        _cell(
+                                                          width: column.width,
+                                                          text: _value(
+                                                              rows[index],
+                                                              column.keys),
+                                                          header: false,
+                                                          alternate:
+                                                              index.isOdd,
+                                                        ),
+                                                    ],
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
         ),
       ),
     );
@@ -2710,7 +2994,9 @@ class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Escanear asistencia')),
+      appBar: _zumacFormatAppBar(
+        title: const Text('Escanear asistencia'),
+      ),
       body: MobileScanner(onDetect: (capture) {
         for (final b in capture.barcodes) {
           final raw = b.rawValue?.trim() ?? '';
@@ -2724,11 +3010,318 @@ class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
   }
 }
 
+class TareoPersonalDayPage extends StatefulWidget {
+  final String moduleId;
+  final Map<String, dynamic> format;
+  final VoidCallback? onLocalChanged;
+  final VoidCallback? onBack;
+
+  const TareoPersonalDayPage({
+    super.key,
+    required this.moduleId,
+    required this.format,
+    this.onLocalChanged,
+    this.onBack,
+  });
+
+  @override
+  State<TareoPersonalDayPage> createState() => _TareoPersonalDayPageState();
+}
+
+class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
+  final local = LocalDb.instance;
+  late DateTime selectedDate;
+  List<TareoDayGroup> groups = const [];
+  bool loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final now = DateTime.now();
+    selectedDate = DateTime(now.year, now.month, now.day);
+    _load();
+  }
+
+  String _dateIso(DateTime date) =>
+      '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+
+  String _dateLabel(DateTime date) =>
+      '${date.day.toString().padLeft(2, '0')}/${date.month.toString().padLeft(2, '0')}/${date.year}';
+
+  Future<void> _load() async {
+    if (mounted) setState(() => loading = true);
+    final session = LocalSession();
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await session.cachedUserId();
+    final empresaId = await session.cachedEmpresaId();
+    final rows = await local.allRecords(
+      userId: userId,
+      empresaId: empresaId,
+    );
+    final formatId = widget.format['id']?.toString() ?? '';
+    final scoped = rows.where((row) {
+      if ((row['tabla_destino']?.toString() ?? '').toUpperCase() !=
+          'GT-TAREO_PERSONAL') return false;
+      final rowFormat = row['formato_id']?.toString() ?? '';
+      return formatId.isEmpty || rowFormat.isEmpty || rowFormat == formatId;
+    });
+    final loaded = groupTareoQueueRows(scoped, fecha: _dateIso(selectedDate));
+    if (!mounted) return;
+    setState(() {
+      groups = loaded;
+      loading = false;
+    });
+  }
+
+  Future<void> _pickDate() async {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _safeDatePickerInitialDate(selectedDate, yesterday, today),
+      firstDate: yesterday,
+      lastDate: today,
+    );
+    if (picked == null || !mounted) return;
+    setState(
+        () => selectedDate = DateTime(picked.year, picked.month, picked.day));
+    await _load();
+  }
+
+  Future<void> _openForm({TareoDayGroup? group, bool close = false}) async {
+    final initialPayload = group == null
+        ? <String, dynamic>{'FECHA': _dateIso(selectedDate)}
+        : group.editPayload;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => TareoPersonalSpecialPage(
+        moduleId: widget.moduleId,
+        format: widget.format,
+        initialPayload: initialPayload,
+        editIdLocal: group?.idLocal,
+        closeOnSave: close,
+        onLocalChanged: () {
+          widget.onLocalChanged?.call();
+          _load();
+        },
+        onSavedAndExit: widget.onLocalChanged,
+      ),
+    ));
+    await _load();
+  }
+
+  Future<void> _showActions(TareoDayGroup group) async {
+    if (group.closed) {
+      await showModalBottomSheet<void>(
+        context: context,
+        showDragHandle: true,
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(24, 4, 24, 28),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.lock_rounded,
+                  size: 42, color: Color(0xFF31552F)),
+              const SizedBox(height: 12),
+              Text(group.synchronized ? 'Tareo enviado' : 'Tareo cerrado',
+                  style: Theme.of(sheetContext)
+                      .textTheme
+                      .titleLarge
+                      ?.copyWith(fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(
+                group.synchronized
+                    ? 'Este tareo ya fue enviado a la nube y no se puede modificar.'
+                    : 'Este tareo ya fue cerrado y no se puede modificar.',
+                textAlign: TextAlign.center,
+              ),
+            ]),
+          ),
+        ),
+      );
+      return;
+    }
+
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            ListTile(
+              leading: const Icon(Icons.edit_outlined),
+              title: const Text('Editar tareo'),
+              subtitle: const Text('Modificar labor, personal u horas'),
+              onTap: () => Navigator.pop(sheetContext, 'edit'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.lock_clock_outlined,
+                  color: Color(0xFF31552F)),
+              title: const Text('Cerrar tareo'),
+              subtitle: const Text('Revisar horas y confirmar el cierre'),
+              onTap: () => Navigator.pop(sheetContext, 'close'),
+            ),
+          ]),
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'edit') await _openForm(group: group);
+    if (action == 'close') await _openForm(group: group, close: true);
+  }
+
+  String _statusLabel(TareoDayGroup group) => group.synchronized
+      ? 'Enviado'
+      : group.closed
+          ? 'Cerrado'
+          : 'Pendiente';
+
+  Widget _summaryLine(String label, String value) => Text(
+        '$label: $value',
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        style: const TextStyle(
+          fontSize: 13.5,
+          height: 1.35,
+          fontWeight: FontWeight.w600,
+          color: Color(0xFF263B4A),
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final isToday = selectedDate == today;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F8F7),
+      appBar: _zumacFormatAppBar(
+        title: const Text(
+          'Tareo de personal',
+          style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+        onBack: widget.onBack,
+      ),
+      body: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Material(
+            color: Colors.white,
+            child: InkWell(
+              onTap: _pickDate,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(18, 10, 18, 10),
+                child: Row(
+                  children: [
+                    const Icon(Icons.calendar_month_outlined,
+                        size: 20, color: _zumacFormatBlue),
+                    const SizedBox(width: 9),
+                    Text(
+                      _dateLabel(selectedDate),
+                      style: const TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: _zumacFormatBlue,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: RefreshIndicator(
+              onRefresh: _load,
+              child: loading
+                  ? ListView(children: const [
+                      SizedBox(height: 220),
+                      Center(child: CircularProgressIndicator()),
+                    ])
+                  : groups.isEmpty
+                      ? ListView(children: [
+                          const SizedBox(height: 150),
+                          Icon(Icons.assignment_outlined,
+                              size: 58, color: Colors.grey.shade400),
+                          const SizedBox(height: 16),
+                          Text('Sin tareos aún',
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .titleLarge
+                                  ?.copyWith(fontWeight: FontWeight.w800)),
+                          const SizedBox(height: 6),
+                          Text(
+                            isToday
+                                ? 'Agrega el primer tareo del día.'
+                                : 'No registraste tareos en esta fecha.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ])
+                      : ListView.separated(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 96),
+                          itemCount: groups.length,
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 10),
+                          itemBuilder: (_, index) {
+                            final group = groups[index];
+                            final people = group.peopleCount;
+                            return Card(
+                              margin: EdgeInsets.zero,
+                              clipBehavior: Clip.antiAlias,
+                              child: InkWell(
+                                onTap: () => _showActions(group),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(14),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      _summaryLine(
+                                        'Labor',
+                                        group.labor.isEmpty
+                                            ? 'Sin labor'
+                                            : group.labor,
+                                      ),
+                                      _summaryLine(
+                                        'Cc',
+                                        group.centroCosto.isEmpty
+                                            ? 'Sin centro de costo'
+                                            : group.centroCosto,
+                                      ),
+                                      _summaryLine(
+                                        'Persona',
+                                        '$people ${people == 1 ? 'persona' : 'personas'}',
+                                      ),
+                                      _summaryLine(
+                                        'Estado',
+                                        _statusLabel(group),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+            ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        tooltip: 'Agregar nuevo tareo',
+        onPressed: () => _openForm(),
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+
 class TareoPersonalSpecialPage extends StatefulWidget {
   final String moduleId;
   final Map<String, dynamic> format;
   final Map<String, dynamic>? initialPayload;
   final String? editIdLocal;
+  final bool closeOnSave;
   final VoidCallback? onLocalChanged;
   final VoidCallback? onSavedAndExit;
 
@@ -2738,6 +3331,7 @@ class TareoPersonalSpecialPage extends StatefulWidget {
     required this.format,
     this.initialPayload,
     this.editIdLocal,
+    this.closeOnSave = false,
     this.onLocalChanged,
     this.onSavedAndExit,
   });
@@ -2759,19 +3353,22 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   final trabajadorCtrl = TextEditingController();
   final horaInicioCtrl = TextEditingController();
   final horaFinCtrl = TextEditingController();
+  final observacionCtrl = TextEditingController();
   late final _SpecialMatrixHeader tareoHeader;
 
   List<Map<String, dynamic>> fields = [];
   List<Map<String, dynamic>> workers = [];
   List<Map<String, dynamic>> lotesVariedades = [];
   final List<Map<String, dynamic>> selectedWorkers = [];
-  bool secondStep = false;
+  bool showHours = false;
+  bool showObservation = false;
   bool saving = false;
   String draftIdLocal = '';
 
   @override
   void initState() {
     super.initState();
+    showHours = widget.closeOnSave;
     final now = DateTime.now();
     fechaCtrl.text = _dateIso(now);
     horaInicioCtrl.text = _timeHm(now);
@@ -2794,6 +3391,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     trabajadorCtrl.dispose();
     horaInicioCtrl.dispose();
     horaFinCtrl.dispose();
+    observacionCtrl.dispose();
     tareoHeader.dispose();
     super.dispose();
   }
@@ -2889,6 +3487,17 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
 
   Future<void> _load() async {
     await tareoHeader.load(initialPayload: widget.initialPayload);
+    final requestedDate = widget.initialPayload == null
+        ? ''
+        : (_rowValue(widget.initialPayload!, ['FECHA']) ?? '')
+            .toString()
+            .trim();
+    if (requestedDate.isNotEmpty) {
+      for (final entry in tareoHeader.controllers.entries) {
+        if (_norm(entry.key) == 'FECHA') entry.value.text = requestedDate;
+      }
+      fechaCtrl.text = requestedDate;
+    }
     final fs = tareoHeader.fields;
     final planilla = await local.where('local_matrix_rows', 'source_table = ?',
         ['GH-REGISTRO_PERSONAL_PLANILLA']);
@@ -2929,6 +3538,11 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'],
         fallback: horaFinCtrl.text.trim());
     if (hf.isNotEmpty) horaFinCtrl.text = hf;
+    final observation = tareoHeader.valueByCandidates(
+      ['OBSERVACION', 'OBSERVACIÓN'],
+      fallback: observacionCtrl.text.trim(),
+    );
+    if (observation.isNotEmpty) observacionCtrl.text = observation;
     if (mounted)
       setState(() {
         fields = fs;
@@ -2951,6 +3565,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             .toString();
     horaFinCtrl.text =
         (_rowValue(p, ['HORA_FIN', 'HORA FIN']) ?? '').toString();
+    observacionCtrl.text =
+        (_rowValue(p, ['OBSERVACION', 'OBSERVACIÓN']) ?? '').toString();
     final raw = p['__TRABAJADORES__'] ?? p['__tareo_rows'];
     if (raw is List) {
       selectedWorkers
@@ -3407,6 +4023,94 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
   }
 
+  Future<bool> _confirmShortWorkday(
+    Map<String, double> dailyHoursByDni,
+  ) async {
+    final shortWorkers =
+        dailyHoursByDni.entries.where((entry) => entry.value < 8).map((entry) {
+      final worker = selectedWorkers.cast<Map<String, dynamic>?>().firstWhere(
+            (item) =>
+                _digits(item?['DNI']?.toString() ?? '') == _digits(entry.key),
+            orElse: () => null,
+          );
+      final name = worker?['APELLIDOS Y NOMBRES']?.toString().trim() ?? '';
+      return (
+        dni: entry.key,
+        name: name,
+        hours: entry.value,
+        missing: tareoHoursMissingForFullDay(entry.value),
+      );
+    }).toList(growable: false);
+    if (shortWorkers.isEmpty) return true;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706)),
+            SizedBox(width: 10),
+            Expanded(child: Text('Jornada menor a 8 horas')),
+          ],
+        ),
+        content: SizedBox(
+          width: 520,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Los siguientes trabajadores no completan 8 horas acumuladas '
+                'en la fecha del tareo:',
+              ),
+              const SizedBox(height: 12),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 260),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: shortWorkers.length,
+                  separatorBuilder: (_, __) => const Divider(height: 12),
+                  itemBuilder: (_, index) {
+                    final worker = shortWorkers[index];
+                    final label = worker.name.isEmpty
+                        ? worker.dni
+                        : '${worker.dni} - ${worker.name}';
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.schedule_outlined),
+                      title: Text(label),
+                      subtitle: Text(
+                        '${worker.hours.toStringAsFixed(2)} h registradas · '
+                        'faltan ${worker.missing.toStringAsFixed(2)} h',
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Puedes volver para completar otro tareo o cerrar de todas '
+                'formas si la jornada corta es correcta.',
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Volver y corregir'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Cerrar de todas formas'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
   bool _timeEndsBeforeStart(String start, String end) {
     try {
       final startParts = start.trim().split(':');
@@ -3451,7 +4155,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       if (_norm(entry.key) == 'HORA_FIN') entry.value.clear();
     }
     if (mounted) {
-      setState(() => secondStep = true);
+      setState(() => showHours = true);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Corrige la HORA_FIN para continuar.')),
       );
@@ -3466,6 +4170,11 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         campo == 'HORA_INCIO';
   }
 
+  bool _isTareoObservationField(Map<String, dynamic> field) {
+    final campo = _norm(field['campo']?.toString() ?? '');
+    return campo == 'OBSERVACION';
+  }
+
   Map<String, dynamic> _tareoHeaderPayload() {
     final payload = tareoHeader.payload();
     final hi = tareoHeader.valueByCandidates(
@@ -3475,13 +4184,15 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         fallback: horaFinCtrl.text.trim());
     if (hi.isNotEmpty) payload['HORA_INICIO'] = hi;
     if (hf.isNotEmpty) payload['HORA_FIN'] = hf;
+    final observation = tareoHeader.valueByCandidates(
+      ['OBSERVACION', 'OBSERVACIÓN'],
+      fallback: observacionCtrl.text.trim(),
+    );
+    if (observation.isNotEmpty) payload['OBSERVACION'] = observation;
     return payload;
   }
 
-  Future<void> _saveDraft({
-    required bool goNext,
-    bool closeTareo = false,
-  }) async {
+  Future<void> _saveDraft({bool closeTareo = false}) async {
     if (selectedWorkers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Agrega al menos un trabajador.')));
@@ -3489,12 +4200,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
     final userId = Supabase.instance.client.auth.currentUser?.id ??
         await LocalSession().cachedUserId();
+    if (!mounted) return;
     if (userId == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('No hay usuario local para guardar tareo.')));
       return;
     }
     final missingAttendance = await _workersWithoutAttendanceForDay();
+    if (!mounted) return;
     if (missingAttendance.isNotEmpty) {
       final removedDnis =
           await _showMissingAttendanceAlert(context, missingAttendance);
@@ -3516,16 +4229,19 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       }
     }
     final tareador = await _activeUserName();
+    if (!mounted) return;
     final headerPayload = _tareoHeaderPayload();
     final horaInicio = headerPayload['HORA_INICIO']?.toString().trim() ?? '';
     final horaFin = headerPayload['HORA_FIN']?.toString().trim() ?? '';
     if (!await _confirmOvernightShift(horaInicio, horaFin)) return;
+    if (!mounted) return;
     final horasMatriz =
         tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
     final horas = horasMatriz.trim().isNotEmpty
         ? horasMatriz.trim()
         : _hoursBetween(horaInicio, horaFin);
     if (closeTareo && (horaFin.isEmpty || horas == null)) {
+      setState(() => showHours = true);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
         content: Text('Complete HORA_FIN antes de cerrar el tareo.'),
       ));
@@ -3538,13 +4254,20 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final fecha = tareoHeader
         .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim());
     final overtimeByDni = <String, double>{};
-    if (closeTareo && currentHours > 0) {
+    final dailyHoursByDni = <String, double>{};
+    if (closeTareo) {
       for (final worker in selectedWorkers) {
         final dni = worker['DNI']?.toString().trim() ?? '';
         final previous = await _existingTareoHours(dni, fecha);
-        overtimeByDni[dni] =
-            (previous + currentHours - 8).clamp(0, double.infinity);
+        final dailyHours = previous + currentHours;
+        dailyHoursByDni[dni] = dailyHours;
+        overtimeByDni[dni] = (dailyHours - 8).clamp(0, double.infinity);
       }
+    }
+    if (closeTareo &&
+        dailyHoursByDni.isNotEmpty &&
+        (!mounted || !await _confirmShortWorkday(dailyHoursByDni))) {
+      return;
     }
     final maxOvertime = overtimeByDni.values.fold<double>(
       0,
@@ -3578,6 +4301,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'CENTRO_COSTO',
       'LABOR',
       'VARIEDAD',
+      'OBSERVACION',
       'HORA_INICIO',
       'HORA_FIN',
       'HORAS_TRABAJADAS',
@@ -3634,14 +4358,42 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
           'created_by': tareador,
         });
       }
+      var sent = false;
+      String? sendFailure;
+      if (closeTareo && isOnlineFirstRuntime) {
+        try {
+          final syncService = SyncService();
+          await syncService.syncPending();
+          final storedRows = await local.allRecords(userId: userId);
+          final tareoRows = storedRows.where((row) {
+            final id = row['id_local']?.toString() ?? '';
+            return id == draftIdLocal || id.startsWith('${draftIdLocal}_');
+          }).toList(growable: false);
+          sent = tareoRows.isNotEmpty &&
+              tareoRows.every((row) =>
+                  row['estado']?.toString().toLowerCase() == 'sincronizado');
+          if (!sent) {
+            sendFailure = 'el servidor no confirmó el envío';
+          }
+        } catch (error) {
+          sendFailure = SyncService().friendlyError(error);
+        }
+      }
       widget.onLocalChanged?.call();
-      if (goNext) {
-        setState(() => secondStep = true);
-      } else if (mounted) {
+      if (mounted) {
+        final String message;
+        if (!closeTareo) {
+          message = 'Tareo guardado como borrador.';
+        } else if (sent) {
+          message = 'Tareo cerrado y enviado.';
+        } else if (isOnlineFirstRuntime) {
+          message =
+              'Tareo cerrado, pero no se pudo enviar: ${sendFailure ?? 'inténtalo nuevamente'}.';
+        } else {
+          message = 'Tareo cerrado. Sincronízalo para enviarlo.';
+        }
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text(closeTareo
-              ? 'Tareo cerrado y enviado para aprobación.'
-              : 'Tareo guardado como borrador.'),
+          content: Text(message),
         ));
         widget.onSavedAndExit?.call();
         Navigator.pop(context);
@@ -3714,111 +4466,428 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             },
           ),
         ),
-      const SizedBox(height: 8),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: DataTable(
-            columns: const [
-              DataColumn(label: Text('DNI')),
-              DataColumn(label: Text('Apellidos y nombres')),
-              DataColumn(label: Text('')),
-            ],
-            rows: selectedWorkers
-                .map((w) => DataRow(cells: [
-                      DataCell(Text(w['DNI']?.toString() ?? '')),
-                      DataCell(
-                          Text(w['APELLIDOS Y NOMBRES']?.toString() ?? '')),
-                      DataCell(IconButton(
-                          icon: const Icon(Icons.delete_outline),
-                          onPressed: () =>
-                              setState(() => selectedWorkers.remove(w)))),
-                    ]))
-                .toList()),
-      ),
     ]);
   }
 
-  Widget _headerStep() =>
-      ListView(padding: const EdgeInsets.all(14), children: [
-        Text('Tareo de personal',
-            style: Theme.of(context)
-                .textTheme
-                .titleLarge
-                ?.copyWith(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 12),
-        ...tareoHeader.buildFields(context, setState,
-            filter: (field) => !_isTareoTimeField(field)),
-        _workersPicker(),
-        const SizedBox(height: 18),
-        FilledButton.icon(
-            onPressed: saving ? null : () => _saveDraft(goNext: true),
-            icon: const Icon(Icons.arrow_forward),
-            label: const Text('Continuar')),
-      ]);
+  String _currentTareoHoursLabel() {
+    final configured =
+        tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
+    if (configured.trim().isNotEmpty) return configured.trim();
+    final start = tareoHeader.valueByCandidates(
+      ['HORA_INICIO', 'HORA INICIO', 'HORA_INCIO'],
+      fallback: horaInicioCtrl.text.trim(),
+    );
+    final end = tareoHeader.valueByCandidates(
+      ['HORA_FIN', 'HORA FIN'],
+      fallback: horaFinCtrl.text.trim(),
+    );
+    final hours = _hoursBetween(start, end);
+    if (hours == null) return 'Pendiente';
+    return hours == hours.roundToDouble()
+        ? '${hours.toInt()} h'
+        : '${hours.toStringAsFixed(2)} h';
+  }
 
-  Widget _hoursStep() {
+  Future<void> _openTareoWorkersPage() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => _TareoWorkersPage(
+          workers: selectedWorkers,
+          hoursLabel: _currentTareoHoursLabel(),
+          onRemove: (worker) {
+            if (!mounted) return;
+            setState(() => selectedWorkers.remove(worker));
+          },
+        ),
+      ),
+    );
+    if (mounted) setState(() {});
+  }
+
+  Widget _quickAction({
+    required String tooltip,
+    required IconData icon,
+    required bool selected,
+    required VoidCallback onPressed,
+    int? badge,
+  }) {
+    final button = IconButton.filledTonal(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      style: IconButton.styleFrom(
+        minimumSize: const Size(54, 54),
+        backgroundColor:
+            selected ? const Color(0xFFD5EBF0) : const Color(0xFFEAF2F4),
+        foregroundColor: _zumacFormatBlue,
+      ),
+      icon: Icon(icon),
+    );
+    if (badge == null) return button;
+    return Badge(
+      label: Text('$badge'),
+      backgroundColor: const Color(0xFF31552F),
+      child: button,
+    );
+  }
+
+  Widget _quickActions() => Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+          children: [
+            _quickAction(
+              tooltip: 'Horas del tareo',
+              icon: Icons.access_time_rounded,
+              selected: showHours,
+              onPressed: () => setState(() => showHours = !showHours),
+            ),
+            _quickAction(
+              tooltip: 'Observación',
+              icon: Icons.chat_bubble_outline_rounded,
+              selected: showObservation,
+              onPressed: () =>
+                  setState(() => showObservation = !showObservation),
+            ),
+            _quickAction(
+              tooltip: 'Trabajadores agregados',
+              icon: Icons.person_outline_rounded,
+              selected: false,
+              badge: selectedWorkers.length,
+              onPressed: _openTareoWorkersPage,
+            ),
+          ],
+        ),
+      );
+
+  List<Widget> _hoursEditor() {
     final timeFields = tareoHeader.fieldsWhere(_isTareoTimeField);
-    return ListView(padding: const EdgeInsets.all(14), children: [
-      Text('Horas del tareo',
-          style: Theme.of(context)
-              .textTheme
-              .titleLarge
-              ?.copyWith(fontWeight: FontWeight.w800)),
+    if (timeFields.isNotEmpty) {
+      return tareoHeader.buildFields(
+        context,
+        setState,
+        filter: _isTareoTimeField,
+      );
+    }
+    return [
+      TextField(
+        controller: horaInicioCtrl,
+        readOnly: true,
+        onTap: () => _pickTime(horaInicioCtrl),
+        decoration: const InputDecoration(
+          labelText: 'HORA_INICIO',
+          border: OutlineInputBorder(),
+          suffixIcon: Icon(Icons.access_time),
+        ),
+      ),
       const SizedBox(height: 12),
-      if (timeFields.isNotEmpty)
-        ...tareoHeader.buildFields(context, setState, filter: _isTareoTimeField)
-      else ...[
-        TextField(
-            controller: horaInicioCtrl,
-            readOnly: true,
-            onTap: () => _pickTime(horaInicioCtrl),
-            decoration: const InputDecoration(
-                labelText: 'HORA_INICIO',
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.access_time))),
-        const SizedBox(height: 10),
-        TextField(
-            controller: horaFinCtrl,
-            readOnly: true,
-            onTap: () => _pickTime(horaFinCtrl),
-            decoration: const InputDecoration(
-                labelText: 'HORA_FIN',
-                helperText:
-                    'Puede quedar vacío, pero no sincronizará hasta completarlo.',
-                border: OutlineInputBorder(),
-                suffixIcon: Icon(Icons.access_time))),
-      ],
-      const SizedBox(height: 18),
-      Row(children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: saving ? null : () => _saveDraft(goNext: false),
-            icon: const Icon(Icons.save_outlined),
-            label: const Text('Guardar borrador'),
-          ),
+      TextField(
+        controller: horaFinCtrl,
+        readOnly: true,
+        onTap: () => _pickTime(horaFinCtrl),
+        decoration: const InputDecoration(
+          labelText: 'HORA_FIN',
+          border: OutlineInputBorder(),
+          suffixIcon: Icon(Icons.access_time),
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: saving
-                ? null
-                : () => _saveDraft(goNext: false, closeTareo: true),
-            icon: const Icon(Icons.lock_clock_outlined),
-            label: const Text('Cerrar tareo'),
-          ),
+      ),
+      const SizedBox(height: 12),
+    ];
+  }
+
+  List<Widget> _observationEditor() {
+    final observationFields = tareoHeader.fieldsWhere(_isTareoObservationField);
+    if (observationFields.isNotEmpty) {
+      return tareoHeader.buildFields(
+        context,
+        setState,
+        filter: _isTareoObservationField,
+      );
+    }
+    return [
+      TextField(
+        controller: observacionCtrl,
+        minLines: 2,
+        maxLines: 4,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(
+          labelText: 'Observación',
+          border: OutlineInputBorder(),
         ),
-      ]),
-      TextButton(
-          onPressed: () => setState(() => secondStep = false),
-          child: const Text('Volver a trabajadores')),
+      ),
+      const SizedBox(height: 12),
+    ];
+  }
+
+  Widget _editorBody() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final yesterday = today.subtract(const Duration(days: 1));
+    return ListView(padding: const EdgeInsets.all(14), children: [
+      ...tareoHeader.buildFields(
+        context,
+        setState,
+        filter: (field) =>
+            !_isTareoTimeField(field) && !_isTareoObservationField(field),
+        firstDate: yesterday,
+        lastDate: today,
+      ),
+      _quickActions(),
+      if (showHours) ..._hoursEditor(),
+      if (showObservation) ..._observationEditor(),
+      _workersPicker(),
+      const SizedBox(height: 22),
+      Center(
+        child: IconButton.filled(
+          key: const ValueKey('tareo-save-icon'),
+          tooltip: widget.closeOnSave ? 'Guardar y cerrar tareo' : 'Guardar',
+          onPressed:
+              saving ? null : () => _saveDraft(closeTareo: widget.closeOnSave),
+          style: IconButton.styleFrom(
+            minimumSize: const Size(58, 58),
+            backgroundColor: _zumacFormatBlue,
+            foregroundColor: Colors.white,
+          ),
+          icon: saving
+              ? const SizedBox(
+                  width: 22,
+                  height: 22,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Colors.white,
+                  ),
+                )
+              : const Icon(Icons.save_outlined, size: 28),
+        ),
+      ),
+      const SizedBox(height: 24),
     ]);
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Tareo de personal')),
-        body: secondStep ? _hoursStep() : _headerStep(),
+        backgroundColor: const Color(0xFFF4F8F7),
+        appBar: _zumacFormatAppBar(
+          title: const Text(
+            'Tareo de personal',
+            style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+          ),
+        ),
+        body: _editorBody(),
       );
+}
+
+class _TareoWorkersPage extends StatefulWidget {
+  final List<Map<String, dynamic>> workers;
+  final String hoursLabel;
+  final ValueChanged<Map<String, dynamic>> onRemove;
+
+  const _TareoWorkersPage({
+    required this.workers,
+    required this.hoursLabel,
+    required this.onRemove,
+  });
+
+  @override
+  State<_TareoWorkersPage> createState() => _TareoWorkersPageState();
+}
+
+class _TareoWorkersPageState extends State<_TareoWorkersPage> {
+  static const double _headerHeight = 52;
+  static const double _rowHeight = 58;
+  static const double _dniWidth = 124;
+  final ScrollController _verticalController = ScrollController();
+  final ScrollController _horizontalController = ScrollController();
+
+  @override
+  void dispose() {
+    _verticalController.dispose();
+    _horizontalController.dispose();
+    super.dispose();
+  }
+
+  Widget _cell({
+    required double width,
+    required double height,
+    required Widget child,
+    required bool header,
+    required bool alternate,
+  }) {
+    return Container(
+      width: width,
+      height: height,
+      alignment: Alignment.centerLeft,
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      decoration: BoxDecoration(
+        color: header
+            ? const Color(0xFF3F5B73)
+            : (alternate ? const Color(0xFFF7FAFB) : Colors.white),
+        border: const Border(
+          right: BorderSide(color: Color(0xFFDDE7EC)),
+          bottom: BorderSide(color: Color(0xFFDDE7EC)),
+        ),
+      ),
+      child: DefaultTextStyle(
+        style: TextStyle(
+          color: header ? Colors.white : const Color(0xFF263B4A),
+          fontSize: header ? 12.5 : 13,
+          fontWeight: header ? FontWeight.w800 : FontWeight.w500,
+        ),
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+        child: child,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final workers = widget.workers;
+    return Scaffold(
+      backgroundColor: const Color(0xFFF4F8F7),
+      appBar: _zumacFormatAppBar(
+        title: Text(
+          'Trabajadores (${workers.length})',
+          style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w700),
+        ),
+      ),
+      body: workers.isEmpty
+          ? const Center(child: Text('Aún no agregaste trabajadores.'))
+          : Padding(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 14),
+              child: Container(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: const Color(0xFFDDE7EC)),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Scrollbar(
+                  controller: _verticalController,
+                  thumbVisibility: true,
+                  child: SingleChildScrollView(
+                    controller: _verticalController,
+                    child: Row(
+                      key: const ValueKey('tareo-workers-fixed-dni'),
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Column(
+                          children: [
+                            _cell(
+                              width: _dniWidth,
+                              height: _headerHeight,
+                              child: const Text('DNI'),
+                              header: true,
+                              alternate: false,
+                            ),
+                            for (var index = 0; index < workers.length; index++)
+                              _cell(
+                                width: _dniWidth,
+                                height: _rowHeight,
+                                child: Text(
+                                  workers[index]['DNI']?.toString() ?? '—',
+                                ),
+                                header: false,
+                                alternate: index.isOdd,
+                              ),
+                          ],
+                        ),
+                        Expanded(
+                          child: Scrollbar(
+                            controller: _horizontalController,
+                            thumbVisibility: true,
+                            trackVisibility: true,
+                            scrollbarOrientation: ScrollbarOrientation.bottom,
+                            notificationPredicate: (notification) =>
+                                notification.metrics.axis == Axis.horizontal,
+                            child: SingleChildScrollView(
+                              controller: _horizontalController,
+                              scrollDirection: Axis.horizontal,
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: SizedBox(
+                                width: 470,
+                                child: Column(
+                                  children: [
+                                    Row(
+                                      children: [
+                                        _cell(
+                                          width: 290,
+                                          height: _headerHeight,
+                                          child:
+                                              const Text('Apellidos y nombres'),
+                                          header: true,
+                                          alternate: false,
+                                        ),
+                                        _cell(
+                                          width: 110,
+                                          height: _headerHeight,
+                                          child: const Text('Horas totales'),
+                                          header: true,
+                                          alternate: false,
+                                        ),
+                                        _cell(
+                                          width: 70,
+                                          height: _headerHeight,
+                                          child: const SizedBox.shrink(),
+                                          header: true,
+                                          alternate: false,
+                                        ),
+                                      ],
+                                    ),
+                                    for (var index = 0;
+                                        index < workers.length;
+                                        index++)
+                                      Row(
+                                        children: [
+                                          _cell(
+                                            width: 290,
+                                            height: _rowHeight,
+                                            child: Text(workers[index]
+                                                        ['APELLIDOS Y NOMBRES']
+                                                    ?.toString() ??
+                                                '—'),
+                                            header: false,
+                                            alternate: index.isOdd,
+                                          ),
+                                          _cell(
+                                            width: 110,
+                                            height: _rowHeight,
+                                            child: Text(widget.hoursLabel),
+                                            header: false,
+                                            alternate: index.isOdd,
+                                          ),
+                                          _cell(
+                                            width: 70,
+                                            height: _rowHeight,
+                                            child: IconButton(
+                                              tooltip: 'Quitar trabajador',
+                                              icon: const Icon(
+                                                  Icons.delete_outline,
+                                                  size: 20),
+                                              onPressed: () {
+                                                final worker = workers[index];
+                                                widget.onRemove(worker);
+                                                setState(() {});
+                                              },
+                                            ),
+                                            header: false,
+                                            alternate: index.isOdd,
+                                          ),
+                                        ],
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+    );
+  }
 }
 
 class _PlagaHallazgo {
@@ -5155,10 +6224,13 @@ class _PlagasEnfermedadesSpecialPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      appBar: _zumacFormatAppBar(
         title: Text(
             widget.isConteoFruta ? 'Conteo de Fruta' : 'Plagas y Enfermedades',
             style: const TextStyle(fontSize: 16)),
+        onBack: widget.onSavedAndExit == null
+            ? null
+            : () => widget.onSavedAndExit!.call(),
         actions: [
           IconButton(
               onPressed: (saving || pickingPhoto) ? null : _pickPhoto,
@@ -5763,8 +6835,11 @@ class _PlantEvaluationSpecialPageState
     final evalFields = fields.where(_isEvaluationField).toList();
 
     return Scaffold(
-      appBar: AppBar(
+      appBar: _zumacFormatAppBar(
         title: Text(title, style: const TextStyle(fontSize: 16)),
+        onBack: widget.onSavedAndExit == null
+            ? null
+            : () => widget.onSavedAndExit!.call(),
         actions: [
           IconButton(
               onPressed: savingPlant ? null : () => _savePlant(moveNext: false),
@@ -6297,11 +7372,13 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     final signatures = fields.where(_isSignature).toList();
 
     return Scaffold(
-      appBar: AppBar(
-          title: const Text('Horas Maquinaria', style: TextStyle(fontSize: 16)),
-          actions: [
-            IconButton(onPressed: _save, icon: const Icon(Icons.save))
-          ]),
+      appBar: _zumacFormatAppBar(
+        title: const Text('Horas Maquinaria', style: TextStyle(fontSize: 16)),
+        onBack: widget.onSavedAndExit == null
+            ? null
+            : () => widget.onSavedAndExit!.call(),
+        actions: [IconButton(onPressed: _save, icon: const Icon(Icons.save))],
+      ),
       floatingActionButton: FloatingActionButton(
           onPressed: _save, tooltip: 'Guardar', child: const Icon(Icons.save)),
       body: loading

@@ -79,6 +79,41 @@ void main() {
     });
   });
 
+  group('metricsCanvasHitTarget', () {
+    test('conserva el tamaño visual cuando hay espacio suficiente', () {
+      expect(
+        metricsCanvasHitTarget(
+          screenPixels: 10,
+          canvasScale: .5,
+          maximumCanvasPixels: 65,
+        ),
+        20,
+      );
+    });
+
+    test('no consume una tarjeta pequeña con una escala extrema', () {
+      expect(
+        metricsCanvasHitTarget(
+          screenPixels: 12,
+          canvasScale: .1,
+          maximumCanvasPixels: 38,
+        ),
+        38,
+      );
+    });
+
+    test('devuelve cero ante un área disponible inválida', () {
+      expect(
+        metricsCanvasHitTarget(
+          screenPixels: 10,
+          canvasScale: .5,
+          maximumCanvasPixels: 0,
+        ),
+        0,
+      );
+    });
+  });
+
   group('metricsResponsiveDashboardTitleSize', () {
     test('reduce el título en pantallas pequeñas', () {
       expect(
@@ -175,6 +210,16 @@ void main() {
           widgetId: 'grafico-ce',
         ),
         isFalse,
+      );
+      expect(
+        metricsCanResizeWidget(
+          canManage: true,
+          filterPanelOpen: false,
+          editingWidgetId: ' grafico-ce ',
+          widgetId: 'grafico-ce',
+        ),
+        isTrue,
+        reason: 'la selección debe sobrevivir a espacios del origen remoto',
       );
     });
   });

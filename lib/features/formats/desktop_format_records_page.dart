@@ -19,6 +19,7 @@ import 'package:uuid/uuid.dart';
 import '../../config/supabase_config.dart';
 import '../../core/platform/file_download.dart';
 import '../../core/platform/network_bytes.dart';
+import '../../core/platform/app_platform.dart';
 import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
@@ -597,6 +598,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   bool _isNamedTable(String? table, String expected) =>
       _norm(table ?? '') == _norm(expected);
+
+  bool _attendanceCaptureBlocked(String? table) =>
+      !isMobileCaptureRuntime && _isNamedTable(table, 'GT-ASISTENCIA_PERSONAL');
 
   Future<void> _preparePayrollLifecycle(String resolvedTable) async {
     if (_isNamedTable(resolvedTable, 'GH-REGISTRO_PERSONAL_PLANILLA') &&
@@ -1490,12 +1494,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         'formato_id = ? and activo = 1',
         [formatId],
       );
-      if (special.isEmpty &&
-          (widget.format['tabla_destino']?.toString() ?? '') ==
-              'GT-TAREO_PERSONAL') {
-        special = [
-          <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}
-        ];
+      if (special.isEmpty) {
+        final fallback = appGtSpecialFormatFallback(widget.format);
+        if (fallback != null) special = [fallback];
       }
 
       final validInternalTables = internalTables
@@ -1511,6 +1512,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               : _clean(widget.format['tabla_destino']));
       internalTableRows = validInternalTables;
       selectedTableName = resolvedTable;
+      final attendanceCaptureBlocked = _attendanceCaptureBlocked(resolvedTable);
 
       if (resolvedTable == null) {
         setState(() {
@@ -1520,12 +1522,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           _knownTotalRows = null;
           loading = false;
           canExport = exportAllowed;
-          canImport = importAllowed;
-          canInsert = insertAllowed;
-          canUpdate = updateAllowed;
-          canDelete = deleteAllowed;
-          canReview = reviewAllowed;
-          canApprove = approveAllowed;
+          canImport = importAllowed && !attendanceCaptureBlocked;
+          canInsert = insertAllowed && !attendanceCaptureBlocked;
+          canUpdate = updateAllowed && !attendanceCaptureBlocked;
+          canDelete = deleteAllowed && !attendanceCaptureBlocked;
+          canReview = reviewAllowed && !attendanceCaptureBlocked;
+          canApprove = approveAllowed && !attendanceCaptureBlocked;
           error = 'Este formato no tiene tabla destino configurada.';
         });
         return;
@@ -1571,12 +1573,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           loading = false;
           offline = true;
           canExport = exportAllowed;
-          canImport = importAllowed;
-          canInsert = insertAllowed;
-          canUpdate = updateAllowed;
-          canDelete = deleteAllowed;
-          canReview = reviewAllowed;
-          canApprove = approveAllowed;
+          canImport = importAllowed && !attendanceCaptureBlocked;
+          canInsert = insertAllowed && !attendanceCaptureBlocked;
+          canUpdate = updateAllowed && !attendanceCaptureBlocked;
+          canDelete = deleteAllowed && !attendanceCaptureBlocked;
+          canReview = reviewAllowed && !attendanceCaptureBlocked;
+          canApprove = approveAllowed && !attendanceCaptureBlocked;
         });
         return;
       }
@@ -1644,12 +1646,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         loading = false;
         offline = false;
         canExport = exportAllowed;
-        canImport = importAllowed;
-        canInsert = insertAllowed;
-        canUpdate = updateAllowed;
-        canDelete = deleteAllowed;
-        canReview = reviewAllowed;
-        canApprove = approveAllowed;
+        canImport = importAllowed && !attendanceCaptureBlocked;
+        canInsert = insertAllowed && !attendanceCaptureBlocked;
+        canUpdate = updateAllowed && !attendanceCaptureBlocked;
+        canDelete = deleteAllowed && !attendanceCaptureBlocked;
+        canReview = reviewAllowed && !attendanceCaptureBlocked;
+        canApprove = approveAllowed && !attendanceCaptureBlocked;
         _selectedDeleteRowKeys.clear();
         _selectedDeleteRows.clear();
       });
@@ -5389,6 +5391,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   Future<void> _newRecord() async {
+    if (_attendanceCaptureBlocked(selectedTableName ?? tableName)) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La asistencia solo se puede marcar desde la aplicación móvil.',
+          ),
+        ),
+      );
+      return;
+    }
     final Widget page = special.isNotEmpty
         ? SpecialFormRouterPage(
             moduleId: widget.module['id'] as String,
@@ -7455,7 +7468,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         c.dispose();
       }
 
-      await supabase.from(table).update(payload).eq(pkColumn, pkValue);
+      final updated = await supabase
+          .from(table)
+          .update(payload)
+          .eq(pkColumn, pkValue)
+          .select()
+          .maybeSingle();
+      if (updated != null) {
+        await local.upsertMatrixRowPayload(
+          table,
+          Map<String, dynamic>.from(updated),
+        );
+      }
       await _load();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -7466,9 +7490,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         c.dispose();
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No se pudo actualizar el registro: $e')),
-      );
+      final rawError = e.toString().toLowerCase();
+      final message = rawError.contains('statement timeout') ||
+              rawError.contains('code: 57014')
+          ? 'La actualización tardó más de lo permitido y no se completó. Inténtelo nuevamente.'
+          : 'No se pudo actualizar el registro: $e';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     }
   }
 

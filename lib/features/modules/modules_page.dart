@@ -12,6 +12,7 @@ import '../../core/widgets/responsive_layout.dart';
 import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/sync_service.dart';
+import '../../core/services/tareo_draft_policy.dart';
 import '../../core/services/zumac_consultant_service.dart';
 import '../../core/widgets/branded_loading.dart';
 import '../../core/widgets/zumac_feature_header.dart';
@@ -36,7 +37,11 @@ import 'generic_section_page.dart';
 import 'dynamic_views_page.dart';
 
 class ModulesPage extends StatefulWidget {
-  const ModulesPage({super.key});
+  const ModulesPage({super.key, this.refreshOnEntry = true});
+
+  /// El login ya actualiza permisos o descarga el primer bootstrap. Esta marca
+  /// evita repetir inmediatamente la misma sincronización al abrir el menú.
+  final bool refreshOnEntry;
 
   @override
   State<ModulesPage> createState() => _ModulesPageState();
@@ -515,7 +520,6 @@ class _ModulesPageState extends State<ModulesPage> {
     super.initState();
     unawaited(_restoreExperience());
     unawaited(_loadCachedAndRefresh());
-    unawaited(_loadConfigurationAccess());
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_maybeOpenOnboarding());
     });
@@ -536,14 +540,19 @@ class _ModulesPageState extends State<ModulesPage> {
         });
       }
     }
-    await _refreshIncrementallyOnEntry();
+    // El menú ya puede usarse con la caché. Las verificaciones remotas continúan
+    // sin bloquear el primer contenido visible.
+    unawaited(_loadConfigurationAccess());
+    if (widget.refreshOnEntry) {
+      unawaited(_refreshIncrementallyOnEntry(refreshAccess: false));
+    }
   }
 
   /// Revalida configuración, permisos y registros al entrar a cualquier vista.
   /// Las llamadas simultáneas se agrupan para que navegar rápido no dispare
   /// varias descargas; si hubo otra entrada durante la descarga, se ejecuta un
   /// último delta al terminar.
-  Future<void> _refreshIncrementallyOnEntry() async {
+  Future<void> _refreshIncrementallyOnEntry({bool refreshAccess = true}) async {
     if (Supabase.instance.client.auth.currentUser == null) return;
     if (_incrementalRefreshRunning) {
       _incrementalRefreshQueued = true;
@@ -560,7 +569,7 @@ class _ModulesPageState extends State<ModulesPage> {
             forceConfigurationRefresh: false,
           );
           await loadLocal();
-          await _loadConfigurationAccess();
+          if (refreshAccess) await _loadConfigurationAccess();
           final completedAt = DateTime.now();
           if (mounted) {
             setState(() {
@@ -719,63 +728,41 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Future<void> _loadConfigurationAccess() async {
     if (Supabase.instance.client.auth.currentUser == null) return;
-    try {
-      final contextData = await ConfigurationAdminRepository()
-          .loadContext()
-          .timeout(const Duration(seconds: 4));
-      Map<String, dynamic> alertsContext = const {};
-      Map<String, dynamic> metricsContext = const {};
+    Future<Map<String, dynamic>> safeMap(Future<dynamic> request) async {
       try {
-        final raw = await Supabase.instance.client
-            .rpc('appgt_alertas_contexto_v1')
-            .timeout(const Duration(seconds: 4));
-        if (raw is Map) alertsContext = Map<String, dynamic>.from(raw);
+        final raw = await request.timeout(const Duration(seconds: 4));
+        return raw is Map ? Map<String, dynamic>.from(raw) : const {};
       } catch (_) {
-        // Permite que una compilación nueva siga entrando mientras la migración
-        // de Alerts/Actions aún está pendiente de desplegar en Supabase.
-      }
-      try {
-        final raw = await Supabase.instance.client
-            .rpc('appgt_metrics_contexto_v1')
-            .timeout(const Duration(seconds: 4));
-        if (raw is Map) metricsContext = Map<String, dynamic>.from(raw);
-      } catch (_) {
-        // Una app nueva puede convivir temporalmente con el esquema anterior.
-      }
-      if (!mounted) return;
-      setState(() {
-        canUseZumacConsultor =
-            contextData['zumac_consultor_habilitado'] == true;
-        canUseZumacCreator = contextData['zumac_creator_habilitado'] == true;
-        canUseZumacAlerts = alertsContext['alerts_habilitado'] == true;
-        canUseZumacActions = alertsContext['actions_habilitado'] == true;
-        canUseZumacMetrics = metricsContext['metrics_habilitado'] == true;
-        final summary = alertsContext['resumen'];
-        if (summary is Map) {
-          openAlertEvents = (summary['eventos_abiertos'] as num?)?.toInt() ?? 0;
-          pendingActions =
-              (summary['acciones_pendientes'] as num?)?.toInt() ?? 0;
-        }
-        canManageCompany = contextData['puede_gestionar_empresa'] == true;
-        isCompanyAdmin = contextData['es_admin_empresa'] == true;
-        canManageConfiguration = canManageCompany && canUseZumacCreator;
-      });
-    } catch (_) {
-      // El constructor requiere conexión. La navegación offline principal no
-      // debe bloquearse si Supabase no responde.
-      if (mounted) {
-        setState(() {
-          canManageConfiguration = false;
-          canManageCompany = false;
-          isCompanyAdmin = false;
-          canUseZumacConsultor = false;
-          canUseZumacCreator = false;
-          canUseZumacAlerts = false;
-          canUseZumacActions = false;
-          canUseZumacMetrics = false;
-        });
+        return const {};
       }
     }
+
+    // Son contextos independientes. Ejecutarlos en serie hacía que una red
+    // lenta acumulara hasta tres esperas de cuatro segundos.
+    final contexts = await Future.wait<Map<String, dynamic>>([
+      safeMap(ConfigurationAdminRepository().loadContext()),
+      safeMap(Supabase.instance.client.rpc('appgt_alertas_contexto_v1')),
+      safeMap(Supabase.instance.client.rpc('appgt_metrics_contexto_v1')),
+    ]);
+    if (!mounted) return;
+    final contextData = contexts[0];
+    final alertsContext = contexts[1];
+    final metricsContext = contexts[2];
+    setState(() {
+      canUseZumacConsultor = contextData['zumac_consultor_habilitado'] == true;
+      canUseZumacCreator = contextData['zumac_creator_habilitado'] == true;
+      canUseZumacAlerts = alertsContext['alerts_habilitado'] == true;
+      canUseZumacActions = alertsContext['actions_habilitado'] == true;
+      canUseZumacMetrics = metricsContext['metrics_habilitado'] == true;
+      final summary = alertsContext['resumen'];
+      if (summary is Map) {
+        openAlertEvents = (summary['eventos_abiertos'] as num?)?.toInt() ?? 0;
+        pendingActions = (summary['acciones_pendientes'] as num?)?.toInt() ?? 0;
+      }
+      canManageCompany = contextData['puede_gestionar_empresa'] == true;
+      isCompanyAdmin = contextData['es_admin_empresa'] == true;
+      canManageConfiguration = canManageCompany && canUseZumacCreator;
+    });
   }
 
   Future<void> _openConfigurationAdmin({
@@ -1226,29 +1213,11 @@ class _ModulesPageState extends State<ModulesPage> {
   bool _sectionAllowedForRuntime(Map<String, dynamic> section) {
     final kind = _sectionKind(section);
     if (isOnlineFirstRuntime) return kind != 'REGISTROS_LOCALES';
-    if (!isMobileCaptureRuntime) return true;
-
-    final fingerprint = _normalizarMenuText([
-      section['id'],
-      section['nombre'],
-      section['tipo_contenido'],
-    ].map(_txt).join(' '));
-    return kind == 'REGISTROS_LOCALES' ||
-        fingerprint.contains('OPERACIONES') ||
-        fingerprint.contains('REGISTROS_PENDIENTES');
-  }
-
-  String _normalizarMenuText(String value) {
-    return value
-        .trim()
-        .toUpperCase()
-        .replaceAll(RegExp(r'[ÁÀÄÂ]'), 'A')
-        .replaceAll(RegExp(r'[ÉÈËÊ]'), 'E')
-        .replaceAll(RegExp(r'[ÍÌÏÎ]'), 'I')
-        .replaceAll(RegExp(r'[ÓÒÖÔ]'), 'O')
-        .replaceAll(RegExp(r'[ÚÙÜÛ]'), 'U')
-        .replaceAll('Ñ', 'N')
-        .replaceAll(RegExp(r'[^A-Z0-9]+'), '_');
+    // En APK y escritorio no existe una lista fija de secciones permitidas:
+    // el catálogo y los permisos cacheados del usuario son la única fuente de
+    // verdad. El filtro anterior ocultaba Administración, Reportes y cualquier
+    // sección nueva aunque el usuario tuviera permiso explícito.
+    return true;
   }
 
   bool _sectionUsesDynamicViews(Map<String, dynamic> section) =>
@@ -1642,7 +1611,7 @@ class _ModulesPageState extends State<ModulesPage> {
       final hasCache = await local.hasOfflineBootstrapCache();
       await sync.downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: true,
+        forceConfigurationRefresh: !hasCache,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -1690,20 +1659,60 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Future<void> syncPending() async {
+    final session = LocalSession();
+    final userId = Supabase.instance.client.auth.currentUser?.id ??
+        await session.cachedUserId();
+    final empresaId = await session.cachedEmpresaId();
+    final beforeRows = await local.pendingRecords(
+      userId: userId,
+      empresaId: empresaId,
+    );
+    final beforeTareos = groupTareoQueueRows(beforeRows);
+    final closedBeforeIds = beforeTareos
+        .where((group) => group.closed)
+        .map((group) => group.idLocal)
+        .toSet();
     setState(() => busy = true);
     await Future<void>.delayed(const Duration(milliseconds: 48));
     try {
       final count = await sync.syncPending();
       await loadLocal();
       if (!mounted) return;
+      final afterRows = await local.pendingRecords(
+        userId: userId,
+        empresaId: empresaId,
+      );
+      if (!mounted) return;
+      final afterTareos = groupTareoQueueRows(afterRows);
+      final closedAfterIds = afterTareos
+          .where((group) => group.closed)
+          .map((group) => group.idLocal)
+          .toSet();
+      final sentTareos = closedBeforeIds.difference(closedAfterIds).length;
+      final openTareos = afterTareos.where((group) => !group.closed).length;
       final completedAt = DateTime.now();
       setState(() {
         lastSyncAt = completedAt;
         online = true;
       });
       unawaited(experience.saveLastSync(completedAt));
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Registros sincronizados: $count')));
+      final String message;
+      if (beforeTareos.isNotEmpty &&
+          closedBeforeIds.isEmpty &&
+          openTareos > 0) {
+        message = 'Aún no se han cerrado los tareos.';
+      } else if (openTareos > 0) {
+        message =
+            '$sentTareos ${sentTareos == 1 ? 'tareo enviado' : 'tareos enviados'} y '
+            '$openTareos ${openTareos == 1 ? 'tareo aún falta cerrar' : 'tareos aún falta cerrar'}.';
+      } else if (closedBeforeIds.isNotEmpty) {
+        message =
+            '$sentTareos ${sentTareos == 1 ? 'tareo enviado' : 'tareos enviados'}.';
+      } else {
+        message = 'Registros sincronizados: $count';
+      }
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
     } catch (e) {
       if (!mounted) return;
       setState(() => online = false);
@@ -1893,6 +1902,9 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Widget _mobileTitleBar() {
     if (_mobileIsHome()) return const SizedBox.shrink();
+    if (desktopSelectedModule != null && desktopSelectedFormat != null) {
+      return const SizedBox.shrink();
+    }
     // Cuando se abre un formato en móvil, FormRunnerPage ya trae su propio AppBar
     // con flecha y título. Evita el segundo título fijo que quitaba espacio útil.
     return Container(
@@ -2158,17 +2170,7 @@ class _ModulesPageState extends State<ModulesPage> {
         final horizontalPadding =
             (constraints.maxWidth * 0.045).clamp(14.0, 64.0);
         return DecoratedBox(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                Color(0xFFF8FBFC),
-                Color(0xFFEAF4F6),
-                Color(0xFFF4F8FA),
-              ],
-            ),
-          ),
+          decoration: const BoxDecoration(color: Color(0xFFF4F8F7)),
           child: Stack(
             children: [
               const Positioned(
@@ -2318,13 +2320,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   Widget _consultantWorkspace({required bool desktop}) {
     return DecoratedBox(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFFF8FBFC), Color(0xFFEAF4F6)],
-        ),
-      ),
+      decoration: const BoxDecoration(color: Color(0xFFF4F8F7)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -3858,12 +3854,7 @@ class _ModulesPageState extends State<ModulesPage> {
       desktopSelectedReportView = null;
       mobileSelectedSpecial = specialRows.isNotEmpty
           ? Map<String, dynamic>.from(specialRows.first)
-          : ((format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL'
-              ? <String, dynamic>{
-                  'tipo_pantalla': 'tareo_personal',
-                  'activo': 1
-                }
-              : null);
+          : appGtSpecialFormatFallback(format);
     });
     unawaited(_persistNavigation());
   }

@@ -5843,13 +5843,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         foregroundColor: Colors.white,
         elevation: 0,
         titleSpacing: 2,
-        flexibleSpace: const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [Color(0xFF0B4050), Color(0xFF0D5F78)],
-            ),
-          ),
-        ),
         leading: widget.onBack != null
             ? IconButton(
                 tooltip: 'Volver',

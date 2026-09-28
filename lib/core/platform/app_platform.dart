@@ -19,8 +19,12 @@ bool get isMobileCaptureRuntime {
 }
 
 bool isWideDesktopLayout(BuildContext context) {
-  // En pantallas angostas se conserva la navegación táctil/responsive.
-  // Solo la web usa guardado online-first; escritorio conserva su cola local.
-  return (kIsWeb || isDesktopRuntime) &&
-      MediaQuery.sizeOf(context).width >= 900;
+  // La versión web conserva siempre la navegación y las tablas de escritorio,
+  // incluso si el navegador reduce su ancho. El contenido tabular se desplaza
+  // horizontalmente en lugar de convertirse en formularios/listas móviles.
+  if (kIsWeb) return true;
+
+  // Las aplicaciones de escritorio sí pueden adoptar el diseño compacto en
+  // ventanas muy angostas. Android/iOS mantienen su experiencia táctil.
+  return isDesktopRuntime && MediaQuery.sizeOf(context).width >= 900;
 }

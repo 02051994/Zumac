@@ -153,7 +153,7 @@ class _LoginPageState extends State<LoginPage> {
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: true,
+        forceConfigurationRefresh: !hasCache,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -454,11 +454,12 @@ class _LoginPageState extends State<LoginPage> {
         loadingProgress = 1;
         loadingMessage = 'Listo';
       });
-      await Future<void>.delayed(const Duration(milliseconds: 180));
       if (!mounted) return;
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (_) => const ModulesPage()),
+        MaterialPageRoute(
+          builder: (_) => const ModulesPage(refreshOnEntry: false),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
@@ -476,18 +477,7 @@ class _LoginPageState extends State<LoginPage> {
       body: Stack(
         children: [
           Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xFF061F36),
-                  Color(0xFF0D5F78),
-                  Color(0xFF2B7A78),
-                ],
-                stops: [0, 0.58, 1],
-              ),
-            ),
+            decoration: const BoxDecoration(color: Color(0xFF0D3E5A)),
             child: Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(22, 76, 22, 28),

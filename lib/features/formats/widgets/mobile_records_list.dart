@@ -359,9 +359,7 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
       key: const Key('mobile-table-header'),
       height: _headerHeight,
       decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF0F5265), Color(0xFF176B87)],
-        ),
+        color: Color(0xFF0F5265),
         borderRadius: BorderRadius.only(topRight: Radius.circular(12)),
       ),
       child: Row(

@@ -27,12 +27,7 @@ class ZumacFeatureHeader extends StatelessWidget {
         vertical: compact ? 5 : 7,
       ),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [
-            Color.lerp(color, Colors.white, .84)!,
-            Color.lerp(color, const Color(0xFFF7F4FC), .91)!,
-          ],
-        ),
+        color: Color.lerp(color, Colors.white, .88),
         borderRadius: BorderRadius.circular(compact ? 10 : 12),
         border: Border.all(color: color.withValues(alpha: .20)),
       ),

@@ -28,7 +28,8 @@ class _FormatsPageState extends State<FormatsPage> {
       'modulo = ? and can_view = 1',
       [widget.module['id']],
     );
-    final allowedFormatIds = permissions.map((e) => e['formato'] as String).toSet().toList();
+    final allowedFormatIds =
+        permissions.map((e) => e['formato'] as String).toSet().toList();
     if (allowedFormatIds.isEmpty) {
       setState(() => formats = []);
       return;
@@ -49,7 +50,8 @@ class _FormatsPageState extends State<FormatsPage> {
     return Scaffold(
       appBar: AppBar(title: Text('Formatos - $moduleName')),
       body: formats.isEmpty
-          ? const Center(child: Text('No tienes formatos permitidos en este módulo.'))
+          ? const Center(
+              child: Text('No tienes formatos permitidos en este módulo.'))
           : ListView.separated(
               padding: const EdgeInsets.all(16),
               itemCount: formats.length,
@@ -69,9 +71,7 @@ class _FormatsPageState extends State<FormatsPage> {
                       );
                       final resolvedSpecial = special.isNotEmpty
                           ? Map<String, dynamic>.from(special.first)
-                          : ((f['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL'
-                              ? <String, dynamic>{'tipo_pantalla': 'tareo_personal', 'activo': 1}
-                              : null);
+                          : appGtSpecialFormatFallback(f);
                       if (!context.mounted) return;
                       Navigator.push(
                         context,

@@ -7,6 +7,7 @@ import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/soft_delete.dart';
+import '../../core/services/tareo_draft_policy.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
 
@@ -834,6 +835,12 @@ class _LocalRecordsPageState extends State<LocalRecordsPage> {
     if (group.isEmpty) return;
     final first = group.first;
     final payload = _payloadOf(first);
+    if (!isOpenTareoDraft(payload)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Este tareo ya fue cerrado y no se puede modificar.'),
+      ));
+      return;
+    }
     final workers = <Map<String, dynamic>>[];
     for (final child in group) {
       final p = _payloadOf(child);

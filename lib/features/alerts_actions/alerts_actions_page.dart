@@ -1968,8 +1968,7 @@ class _SummaryHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient:
-            LinearGradient(colors: [color, Color.lerp(color, _navy, .45)!]),
+        color: color,
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(

@@ -8,7 +8,6 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'features/auth/login_page.dart';
 import 'features/auth/reset_password_page.dart';
 import 'features/modules/modules_page.dart';
-import 'core/widgets/zumac_animated_loader.dart';
 
 class AppGT extends StatefulWidget {
   const AppGT({super.key});
@@ -18,7 +17,6 @@ class AppGT extends StatefulWidget {
 }
 
 class _AppGTState extends State<AppGT> {
-  bool _showStartupSplash = true;
   final _navigatorKey = GlobalKey<NavigatorState>();
   StreamSubscription<AuthState>? _authSub;
 
@@ -140,15 +138,7 @@ class _AppGTState extends State<AppGT> {
           suffixIconColor: const Color(0xFF176B87),
         ),
       ),
-      home: _showStartupSplash
-          ? ZumacStartupSplash(
-              onFinished: () {
-                if (mounted) setState(() => _showStartupSplash = false);
-              },
-            )
-          : session == null
-              ? const LoginPage()
-              : const ModulesPage(),
+      home: session == null ? const LoginPage() : const ModulesPage(),
     );
   }
 }

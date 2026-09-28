@@ -242,8 +242,15 @@ abstract class KnowledgeRepository {
 }
 
 class SupabaseKnowledgeRepository implements KnowledgeRepository {
+  static const _cacheTtl = Duration(minutes: 5);
+  static const _requestTimeout = Duration(seconds: 7);
+
   final SupabaseClient? _providedClient;
   final Map<String, KnowledgeSource> _sourcesByCode = {};
+  List<KnowledgeSource>? _cachedSources;
+  DateTime? _sourcesCachedAt;
+  final Map<String, _KnowledgeDocumentsCache> _documentCache = {};
+  final Map<String, _KnowledgeSearchCache> _searchCache = {};
 
   SupabaseKnowledgeRepository({SupabaseClient? client})
       : _providedClient = client;
@@ -252,12 +259,19 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
 
   @override
   Future<List<KnowledgeSource>> loadSources() async {
+    final now = DateTime.now();
+    if (_cachedSources != null &&
+        _sourcesCachedAt != null &&
+        now.difference(_sourcesCachedAt!) < _cacheTtl) {
+      return _cachedSources!;
+    }
     try {
       final rows = await client
           .from('FUENTES_CONOCIMIENTO_APPGT')
           .select()
           .eq('activa', true)
-          .order('prioridad');
+          .order('prioridad')
+          .timeout(_requestTimeout);
       final sources = List<Map<String, dynamic>>.from(rows)
           .map(KnowledgeSource.fromMap)
           .where((source) => source.code.isNotEmpty)
@@ -265,6 +279,8 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
       _sourcesByCode
         ..clear()
         ..addEntries(sources.map((source) => MapEntry(source.code, source)));
+      _cachedSources = sources;
+      _sourcesCachedAt = now;
       return sources;
     } catch (_) {
       return const <KnowledgeSource>[];
@@ -277,21 +293,106 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
     required String query,
     int limit = 300,
   }) async {
+    final serverSearch = await _loadServerSearch(query, limit: limit);
+    if (serverSearch != null) {
+      return (serverSearch[source.code] ?? const <KnowledgeDocument>[])
+          .take(limit)
+          .toList(growable: false);
+    }
+
+    // Compatibilidad con bases que todavía no tienen desplegada la función de
+    // búsqueda. Esta ruta carga una fuente completa, pero conserva una caché
+    // corta para no repetir la descarga en cada pregunta de la conversación.
+    final cached = _documentCache[source.code];
+    if (cached != null &&
+        DateTime.now().difference(cached.createdAt) < _cacheTtl) {
+      return cached.documents.take(limit).toList(growable: false);
+    }
     try {
       final response = await client
           .from('BASE_CONOCIMIENTO_APPGT')
           .select()
           .eq('fuente_codigo', source.code)
-          .inFilter('estado', const ['APROBADA', 'GENERADA_IA']).limit(limit);
+          .eq('estado', 'APROBADA')
+          .limit(limit)
+          .timeout(_requestTimeout);
       final rows = List<Map<String, dynamic>>.from(response)
           .map(Map<String, dynamic>.from)
           .toList(growable: false);
       await _attachRelations(rows);
-      return rows
+      final documents = rows
           .map((row) => KnowledgeDocument.fromMap(row, source))
           .toList(growable: false);
+      _documentCache[source.code] = _KnowledgeDocumentsCache(
+        createdAt: DateTime.now(),
+        documents: documents,
+      );
+      return documents;
     } catch (_) {
       return const <KnowledgeDocument>[];
+    }
+  }
+
+  /// Usa la búsqueda textual/fuzzy del servidor y devuelve únicamente
+  /// conocimiento revisado. `null` significa que el RPC no está disponible y
+  /// habilita el fallback compatible; un mapa vacío es una búsqueda válida sin
+  /// resultados.
+  Future<Map<String, List<KnowledgeDocument>>?> _loadServerSearch(
+    String query, {
+    required int limit,
+  }) async {
+    final normalized = query.trim().toLowerCase();
+    if (normalized.isEmpty) return const {};
+    final cached = _searchCache[normalized];
+    if (cached != null &&
+        DateTime.now().difference(cached.createdAt) < _cacheTtl) {
+      return cached.documentsBySource;
+    }
+
+    try {
+      final raw = await client.rpc(
+        'appgt_buscar_conocimiento_v1',
+        params: {
+          'p_consulta': query.trim(),
+          'p_limite': math.min(limit, 120),
+          'p_incluir_generada_ia': false,
+        },
+      ).timeout(_requestTimeout);
+      final rows = raw is List
+          ? List<Map<String, dynamic>>.from(raw)
+          : const <Map<String, dynamic>>[];
+      final grouped = <String, List<KnowledgeDocument>>{};
+      for (final result in rows) {
+        final documentRaw = result['documento'];
+        final sourceRaw = result['fuente'];
+        if (documentRaw is! Map || sourceRaw is! Map) continue;
+        final sourceMap = Map<String, dynamic>.from(sourceRaw);
+        final resolvedSource = KnowledgeSource.fromMap(sourceMap);
+        if (!resolvedSource.active || resolvedSource.code.isEmpty) continue;
+        _sourcesByCode[resolvedSource.code] = resolvedSource;
+
+        final documentMap = Map<String, dynamic>.from(documentRaw);
+        final rawRelations = result['relaciones'];
+        if (rawRelations is List) {
+          documentMap['relaciones'] = rawRelations
+              .whereType<Map>()
+              .map(Map<String, dynamic>.from)
+              .where((relation) => relation['estado'] == 'APROBADA')
+              .toList(growable: false);
+        }
+        final document = KnowledgeDocument.fromMap(
+          documentMap,
+          resolvedSource,
+        );
+        grouped.putIfAbsent(resolvedSource.code, () => []).add(document);
+      }
+      _searchCache[normalized] = _KnowledgeSearchCache(
+        createdAt: DateTime.now(),
+        documentsBySource: grouped,
+      );
+      return grouped;
+    } catch (_) {
+      return null;
     }
   }
 
@@ -312,7 +413,8 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
           .from('BASE_CONOCIMIENTO_APPGT')
           .select()
           .inFilter('id', ids)
-          .inFilter('estado', const ['APROBADA', 'GENERADA_IA']);
+          .eq('estado', 'APROBADA')
+          .timeout(_requestTimeout);
       final rows = List<Map<String, dynamic>>.from(response)
           .map(Map<String, dynamic>.from)
           .toList(growable: false);
@@ -350,8 +452,9 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
               'tipo_relacion, peso',
             )
             .inFilter('documento_origen_id', ids.sublist(start, end))
-            .inFilter('estado', const ['APROBADA', 'GENERADA_IA']).order('peso',
-                ascending: false);
+            .eq('estado', 'APROBADA')
+            .order('peso', ascending: false)
+            .timeout(_requestTimeout);
         for (final relation
             in List<Map<String, dynamic>>.from(relationResponse)) {
           final documentId = relation['documento_origen_id']?.toString() ?? '';
@@ -365,6 +468,26 @@ class SupabaseKnowledgeRepository implements KnowledgeRepository {
       row['relaciones'] = relationsByDocument[row['id']?.toString()] ?? [];
     }
   }
+}
+
+class _KnowledgeDocumentsCache {
+  const _KnowledgeDocumentsCache({
+    required this.createdAt,
+    required this.documents,
+  });
+
+  final DateTime createdAt;
+  final List<KnowledgeDocument> documents;
+}
+
+class _KnowledgeSearchCache {
+  const _KnowledgeSearchCache({
+    required this.createdAt,
+    required this.documentsBySource,
+  });
+
+  final DateTime createdAt;
+  final Map<String, List<KnowledgeDocument>> documentsBySource;
 }
 
 class InMemoryKnowledgeRepository implements KnowledgeRepository {

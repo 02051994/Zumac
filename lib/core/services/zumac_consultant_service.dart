@@ -292,13 +292,24 @@ class ZumacConsultantService {
     final period = _periodFor(normalized);
     final requestedLots = _requestedLots(normalized);
 
-    final fields = await _safeLocalRows('local_form_fields');
-    final formats = await _safeLocalRows('local_formats');
-    final formatTables = await _safeLocalRows('local_format_tables');
-    final modules = await _safeLocalRows('local_modules');
-    final sections = await _safeLocalRows('local_sections');
-    final sourceTables = await local.matrixSourceTables();
-    final pendingRecords = await local.allRecords();
+    // Estas lecturas son independientes. En móvil, abrir SQLite siete veces en
+    // serie hacía perceptible la espera antes de iniciar siquiera la consulta.
+    final localData = await Future.wait<dynamic>([
+      _safeLocalRows('local_form_fields'),
+      _safeLocalRows('local_formats'),
+      _safeLocalRows('local_format_tables'),
+      _safeLocalRows('local_modules'),
+      _safeLocalRows('local_sections'),
+      local.matrixSourceTables(),
+      local.allRecords(),
+    ]);
+    final fields = localData[0] as List<Map<String, dynamic>>;
+    final formats = localData[1] as List<Map<String, dynamic>>;
+    final formatTables = localData[2] as List<Map<String, dynamic>>;
+    final modules = localData[3] as List<Map<String, dynamic>>;
+    final sections = localData[4] as List<Map<String, dynamic>>;
+    final sourceTables = localData[5] as List<String>;
+    final pendingRecords = localData[6] as List<Map<String, dynamic>>;
 
     final metadataByTable = <String, List<Map<String, dynamic>>>{};
     for (final field in fields) {

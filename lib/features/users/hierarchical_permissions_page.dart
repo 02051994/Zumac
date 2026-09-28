@@ -1301,9 +1301,7 @@ class _HierarchicalPermissionsPageState
                     Container(
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        gradient: const LinearGradient(
-                          colors: [Color(0xFF0F5265), Color(0xFF176B87)],
-                        ),
+                        color: const Color(0xFF0F5265),
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Column(

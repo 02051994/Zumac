@@ -260,9 +260,7 @@ class _ConfigurationPreviewPageState extends State<ConfigurationPreviewPage> {
         Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF0F5265), Color(0xFF176B87)],
-            ),
+            color: const Color(0xFF0F5265),
             borderRadius: BorderRadius.circular(14),
           ),
           child: Column(
