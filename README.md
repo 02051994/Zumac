@@ -54,6 +54,11 @@ APK esperado:
 La documentación técnica y las garantías de despliegue están en
 `docs/ARCHITECTURE_IMPLEMENTATION_REPORT.md`.
 
+El flujo obligatorio de ramas, respaldo del código fuente y publicación web
+está documentado en `docs/GIT_WORKFLOW.md`. El código fuente vive en
+`main`; el build compilado de GitHub Pages vive de forma separada en
+`gh-pages`.
+
 La operación de Zumac Consultor, Creator, motores de IA, sincronización por
 plataforma, escalabilidad y pasos pendientes de producción está documentada en
 `docs/ARQUITECTURA_OPERATIVA_IA_Y_SINCRONIZACION.md`.

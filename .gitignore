@@ -43,3 +43,33 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Local task/runtime caches and generated working artifacts
+/.temp/
+/.video_runtime/
+/artifacts/
+/output/
+/tmp/
+
+# Local database snapshots and reports (may contain production data/secrets)
+/supabase/backup_supabase_proyecto_zumac/
+/supabase-security-advisor.csv
+
+# Local environment and credential files
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+
+# Common local/generated files
+.firebase/
+*.bak
+*.orig
+*.tmp
+Thumbs.db
+Desktop.ini
