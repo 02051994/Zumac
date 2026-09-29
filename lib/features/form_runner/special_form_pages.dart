@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart' hide ScaffoldMessenger;
@@ -12,6 +13,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../core/platform/app_platform.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/local_session.dart';
+import '../../core/services/human_resources_rules.dart';
 import '../../core/services/soft_delete.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/services/tareo_draft_policy.dart';
@@ -1298,17 +1300,12 @@ class _AsistenciaPersonalSpecialPageState
       out[_digits(dni).isNotEmpty ? _digits(dni) : dni] = payload;
     }
 
-    for (final source in [
+    for (final source in {
       'GH-REGISTRO_PERSONAL_PLANILLA',
-      'GH_REGISTRO_PERSONAL_PLANILLA'
-    ]) {
-      final rows =
-          await local.where('local_matrix_rows', 'source_table = ?', [source]);
-      for (final r in rows) {
-        try {
-          addWorker(jsonDecode(r['payload_json']?.toString() ?? '{}')
-              as Map<String, dynamic>);
-        } catch (_) {}
+      'GH_REGISTRO_PERSONAL_PLANILLA',
+    }) {
+      for (final payload in await _localPayloadsForTable(source)) {
+        addWorker(payload);
       }
     }
     final pending = await local.allRecords();
@@ -1517,7 +1514,16 @@ class _AsistenciaPersonalSpecialPageState
       final state = _norm(
         (_rowValue(sanction, ['estado', 'ESTADO']) ?? '').toString(),
       );
-      if (state != 'VIGENTE' ||
+      final approvalValue = _rowValue(
+        sanction,
+        ['estado_aprobacion', 'ESTADO_APROBACION'],
+      );
+      final approvalState = _norm(approvalValue?.toString() ?? '');
+      final approved = approvalValue == null
+          ? state == 'VIGENTE'
+          : approvalState == 'APROBADO';
+      if (!approved ||
+          state != 'VIGENTE' ||
           !_boolValue(_rowValue(
               sanction, ['bloquea_asistencia', 'BLOQUEA_ASISTENCIA']))) {
         continue;
@@ -1812,7 +1818,6 @@ class _AsistenciaPersonalSpecialPageState
           mobilityValidationMessage =
               'Registro cancelado por alerta de movilidad.';
         });
-        await Navigator.maybePop(context);
       }
       return false;
     }
@@ -2435,6 +2440,109 @@ class _AsistenciaPersonalSpecialPageState
     return value.isEmpty ? fallback : value;
   }
 
+  DateTime _mobilityAuthorizationDate() {
+    return _dateValue(
+          _headerValue(['FECHA'], fallback: fechaCtrl.text.trim()),
+        ) ??
+        DateTime.now();
+  }
+
+  bool _selectedMobilityIsAuthorized() {
+    final mobility = selectedMobility;
+    if (mobility == null) return false;
+    return mobilityIsAuthorized(
+      soatExpiration: _rowValue(mobility, ['soat_vigencia', 'SOAT_VIGENCIA']),
+      technicalReviewExpiration: _rowValue(mobility, [
+        'revision_tecnica_vigencia',
+        'REVISION_TECNICA_VIGENCIA',
+      ]),
+      onDate: _mobilityAuthorizationDate(),
+    );
+  }
+
+  Future<void> _showMobilityDetails() async {
+    if (selectedMobility == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Información de movilidad'),
+        content: SizedBox(
+          width: 430,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Datos del conductor',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Editar datos del conductor',
+                      icon: const Icon(Icons.edit_outlined),
+                      onPressed: () {
+                        Navigator.pop(dialogContext);
+                        unawaited(_editSelectedDriver());
+                      },
+                    ),
+                  ],
+                ),
+                Text(
+                  _mobilityValue(['conductor', 'conductor_nombre']),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'DNI: ${_mobilityValue(['dni_conductor', 'conductor_dni'])}',
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Licencia: ${_mobilityValue(['licencia_conducir'])}',
+                ),
+                const SizedBox(height: 20),
+                const Text(
+                  'Datos de movilidad',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text('SOAT: ${_mobilityValue(['soat_vigencia'])}'),
+                const SizedBox(height: 5),
+                Text(
+                  'Revisión técnica: ${_mobilityValue([
+                        'revision_tecnica_vigencia'
+                      ])}',
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  'Proveedor: ${_mobilityValue([
+                        'proveedor',
+                        'nombre_proveedor',
+                        'PROVEEDOR'
+                      ])}',
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _mobilitySelector() {
     final current = _selectedPlate();
     final plates = mobilityRows.map(_mobilityPlate).toList();
@@ -2444,15 +2552,10 @@ class _AsistenciaPersonalSpecialPageState
     final selected = current.isEmpty
         ? ''
         : plates.firstWhere((plate) => _norm(plate) == _norm(current));
-    final issues = _currentMobilityIssues();
     final hasMobility = selectedMobility != null && current.isNotEmpty;
-    final statusColor = current.isEmpty
-        ? const Color(0xFF0D5F78)
-        : issues.isEmpty
-            ? Colors.green.shade700
-            : _mobilityWarningAccepted
-                ? Colors.orange.shade800
-                : Colors.red.shade700;
+    final isAuthorized = hasMobility && _selectedMobilityIsAuthorized();
+    final statusColor =
+        isAuthorized ? Colors.green.shade700 : Colors.red.shade700;
 
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       DropdownButtonFormField<String>(
@@ -2487,68 +2590,41 @@ class _AsistenciaPersonalSpecialPageState
       if (hasMobility)
         Container(
           width: double.infinity,
-          padding: const EdgeInsets.all(14),
+          padding: const EdgeInsets.fromLTRB(14, 7, 5, 7),
           decoration: BoxDecoration(
             color: const Color(0xFFF8FBFA),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: const Color(0xFFD8E5DD)),
           ),
-          child:
-              Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Row(children: [
-              const Icon(Icons.person_pin_outlined, color: Color(0xFF31552F)),
+          child: Row(
+            children: [
+              Icon(
+                isAuthorized
+                    ? Icons.verified_outlined
+                    : Icons.warning_amber_rounded,
+                size: 20,
+                color: statusColor,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  _mobilityValue(['conductor', 'conductor_nombre']),
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  isAuthorized
+                      ? 'Movilidad autorizada'
+                      : 'Movilidad no autorizada',
+                  style: TextStyle(
+                    color: statusColor,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
-              TextButton.icon(
-                onPressed: _editSelectedDriver,
-                icon: const Icon(Icons.edit_outlined),
-                label: const Text('Editar conductor'),
+              IconButton(
+                tooltip: 'Ver datos del conductor y movilidad',
+                icon: const Icon(Icons.visibility_outlined),
+                onPressed: _showMobilityDetails,
               ),
-            ]),
-            const SizedBox(height: 6),
-            Wrap(spacing: 18, runSpacing: 8, children: [
-              Text(
-                  'DNI: ${_mobilityValue(['dni_conductor', 'conductor_dni'])}'),
-              Text('Licencia: ${_mobilityValue(['licencia_conducir'])}'),
-              Text('Vigencia: ${_mobilityValue(['licencia_vigencia'])}'),
-              Text('SOAT: ${_mobilityValue(['soat_vigencia'])}'),
-              Text('Revisión técnica: ${_mobilityValue([
-                    'revision_tecnica_vigencia'
-                  ])}'),
-            ]),
-          ]),
+            ],
+          ),
         ),
-      Padding(
-        padding: const EdgeInsets.only(top: 8),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Icon(
-            current.isEmpty
-                ? Icons.directions_walk
-                : issues.isEmpty
-                    ? Icons.verified_outlined
-                    : Icons.warning_amber_rounded,
-            size: 20,
-            color: statusColor,
-          ),
-          const SizedBox(width: 7),
-          Expanded(
-            child: Text(
-              mobilityValidationMessage.isEmpty
-                  ? 'Seleccione Sin movilidad o una placa registrada.'
-                  : mobilityValidationMessage,
-              style: TextStyle(
-                color: statusColor,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-          ),
-        ]),
-      ),
       const SizedBox(height: 12),
     ]);
   }
@@ -2983,11 +3059,38 @@ class _AsistenciaScannerPage extends StatefulWidget {
 }
 
 class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
+  late final MobileScannerController scannerController;
   bool returned = false;
+
+  @override
+  void initState() {
+    super.initState();
+    scannerController = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      facing: CameraFacing.back,
+      formats: const [
+        BarcodeFormat.qrCode,
+        BarcodeFormat.pdf417,
+        BarcodeFormat.code128,
+        BarcodeFormat.code39,
+        BarcodeFormat.dataMatrix,
+        BarcodeFormat.aztec,
+      ],
+      returnImage: false,
+    );
+  }
+
+  @override
+  void dispose() {
+    unawaited(scannerController.dispose());
+    super.dispose();
+  }
+
   void _returnCode(String raw) {
     final code = raw.trim();
     if (returned || code.isEmpty) return;
     returned = true;
+    unawaited(scannerController.stop());
     Navigator.of(context).pop(code);
   }
 
@@ -2997,15 +3100,17 @@ class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
       appBar: _zumacFormatAppBar(
         title: const Text('Escanear asistencia'),
       ),
-      body: MobileScanner(onDetect: (capture) {
-        for (final b in capture.barcodes) {
-          final raw = b.rawValue?.trim() ?? '';
-          if (raw.isNotEmpty) {
-            _returnCode(raw);
-            break;
-          }
-        }
-      }),
+      body: MobileScanner(
+          controller: scannerController,
+          onDetect: (capture) {
+            for (final b in capture.barcodes) {
+              final raw = b.rawValue?.trim() ?? '';
+              if (raw.isNotEmpty) {
+                _returnCode(raw);
+                break;
+              }
+            }
+          }),
     );
   }
 }

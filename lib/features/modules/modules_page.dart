@@ -1145,10 +1145,7 @@ class _ModulesPageState extends State<ModulesPage> {
 
   void _closeMobileFormatAfterSpecialSave() {
     if (!mounted) return;
-    setState(() {
-      desktopSelectedFormat = null;
-      mobileSelectedSpecial = null;
-    });
+    _restorePreviousNavigation();
     _refreshPendingBadge();
   }
 

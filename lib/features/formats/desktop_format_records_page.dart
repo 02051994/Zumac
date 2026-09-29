@@ -20,10 +20,12 @@ import '../../config/supabase_config.dart';
 import '../../core/platform/file_download.dart';
 import '../../core/platform/network_bytes.dart';
 import '../../core/platform/app_platform.dart';
+import '../../core/platform/pdf_open.dart';
 import '../../core/services/app_experience_service.dart';
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
 import '../../core/services/formula_engine.dart';
+import '../../core/services/human_resources_rules.dart';
 import '../../core/services/local_session.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/widgets/responsive_layout.dart';
@@ -32,6 +34,7 @@ import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/special_form_pages.dart';
+import 'hr_record_document_pdf.dart';
 import 'payroll_slip_pdf.dart';
 import 'record_import_utils.dart';
 import 'widgets/mobile_records_list.dart';
@@ -4046,6 +4049,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool get _isPayrollSlipTable => _isNamedTable(
       tableName ?? widget.format['tabla_destino']?.toString(),
       'PLANILLA_BOLETAS_APPGT');
+
+  bool get _isPermissionLeaveTable => _isNamedTable(
+      tableName ?? widget.format['tabla_destino']?.toString(),
+      'GH_PERMISOS_LICENCIAS_APPGT');
+
+  bool get _isSanctionTable => _isNamedTable(
+      tableName ?? widget.format['tabla_destino']?.toString(),
+      'GH_SANCIONES_PERSONAL_APPGT');
+
+  bool get _isHumanResourcesApprovalTable =>
+      _isPermissionLeaveTable || _isSanctionTable;
   Future<void> _authorizeSelectedOvertime() async {
     if (!_isTareoTable || _selectedDeleteRows.isEmpty) return;
     final eligible = _selectedDeleteRows.values.where((row) {
@@ -4584,6 +4598,201 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
   }
 
+  bool _isHumanResourcesDocumentColumn(String column) {
+    if (!_isHumanResourcesApprovalTable) return false;
+    return const {'DOCUMENTO_GENERADO', 'DOCUMENTO_SUSTENTO'}
+        .contains(_norm(column));
+  }
+
+  String _humanResourcesDocumentFileName(
+    Map<String, dynamic> row,
+    String column,
+  ) {
+    if (_norm(column) == 'DOCUMENTO_GENERADO') {
+      return _isSanctionTable
+          ? HumanResourcesRecordPdf.sanctionFileName(row)
+          : HumanResourcesRecordPdf.permissionFileName(row);
+    }
+    return 'documento_sustento.pdf';
+  }
+
+  Future<void> _presentHumanResourcesPdf(
+    String fileName,
+    Uint8List bytes,
+  ) async {
+    if (bytes.length < 5 || String.fromCharCodes(bytes.take(5)) != '%PDF-') {
+      throw StateError('El archivo almacenado no es un PDF válido.');
+    }
+    if (kIsWeb) {
+      await openPdfBytes(fileName: fileName, bytes: bytes);
+      return;
+    }
+    final dir = _downloadsDirectory();
+    if (!await dir.exists()) await dir.create(recursive: true);
+    final file = File('${dir.path}\\$fileName');
+    await file.writeAsBytes(bytes, flush: true);
+    await OpenFilex.open(file.path);
+  }
+
+  Future<void> _openHumanResourcesStoredDocument(
+    Map<String, dynamic> row,
+    String column,
+  ) async {
+    final source = (_value(row, [column]) ?? '').toString().trim();
+    if (source.isEmpty || source.toUpperCase() == 'NULL') return;
+    try {
+      final bytes = await _downloadBytesForPdf(
+        source,
+        defaultBucket: _norm(column) == 'DOCUMENTO_GENERADO'
+            ? EvidenceStorage.laborDocumentsBucket
+            : EvidenceStorage.permissionDocumentsBucket,
+      );
+      if (bytes == null) {
+        throw StateError('No se encontró el archivo en el almacenamiento.');
+      }
+      await _presentHumanResourcesPdf(
+        _humanResourcesDocumentFileName(row, column),
+        bytes,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo abrir el documento: $error')),
+      );
+    }
+  }
+
+  Future<void> _openOrGenerateHumanResourcesDocument(
+    Map<String, dynamic> row,
+  ) async {
+    if (!isApprovedHumanResourcesRecord(row)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content:
+              Text('El documento se genera únicamente después de aprobar.'),
+        ),
+      );
+      return;
+    }
+
+    final stored =
+        (_value(row, ['documento_generado']) ?? '').toString().trim();
+    if (stored.isNotEmpty && stored.toUpperCase() != 'NULL') {
+      final existing = await _downloadBytesForPdf(
+        stored,
+        defaultBucket: EvidenceStorage.laborDocumentsBucket,
+      );
+      if (existing != null &&
+          existing.length >= 5 &&
+          String.fromCharCodes(existing.take(5)) == '%PDF-') {
+        await _presentHumanResourcesPdf(
+          _humanResourcesDocumentFileName(row, 'documento_generado'),
+          existing,
+        );
+        return;
+      }
+    }
+
+    if (!canApprove) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No tiene permiso para generar este documento.'),
+        ),
+      );
+      return;
+    }
+
+    final table = tableName;
+    if (table == null || table.trim().isEmpty) return;
+    try {
+      final bytes = _isSanctionTable
+          ? await HumanResourcesRecordPdf.buildSanction(row)
+          : await HumanResourcesRecordPdf.buildPermission(row);
+      final fileName =
+          _humanResourcesDocumentFileName(row, 'documento_generado');
+      final empresaId = (_value(row, ['empresa_id']) ??
+              await LocalSession().cachedEmpresaId())
+          .toString()
+          .trim();
+      final primaryKey = _primaryKeyColumn(row);
+      if (empresaId.isEmpty || primaryKey == null || row[primaryKey] == null) {
+        throw StateError('Falta la empresa o el identificador del registro.');
+      }
+      final recordId = _safeFileName(row[primaryKey].toString());
+      final folder = _isSanctionTable ? 'sanciones' : 'permisos';
+      final path = '$empresaId/$folder/$recordId/$fileName';
+      await supabase.storage
+          .from(EvidenceStorage.laborDocumentsBucket)
+          .uploadBinary(
+            path,
+            bytes,
+            fileOptions: const FileOptions(
+              contentType: 'application/pdf',
+              upsert: true,
+            ),
+          );
+
+      var generatedColumn = 'documento_generado';
+      for (final key in row.keys) {
+        if (_norm(key) == 'DOCUMENTO_GENERADO') {
+          generatedColumn = key;
+          break;
+        }
+      }
+      await supabase.from(table).update({
+        generatedColumn: EvidenceStorage.toStorageUri(
+          path,
+          bucketName: EvidenceStorage.laborDocumentsBucket,
+        ),
+      }).eq(primaryKey, row[primaryKey]);
+      await _load();
+      await _presentHumanResourcesPdf(fileName, bytes);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Documento generado y almacenado.')),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo generar el documento: $error')),
+      );
+    }
+  }
+
+  Widget _humanResourcesStoredDocumentButton(
+    Map<String, dynamic> row,
+    String column,
+  ) {
+    final source = (_value(row, [column]) ?? '').toString().trim();
+    final hasDocument = source.isNotEmpty && source.toUpperCase() != 'NULL';
+    final generated = _norm(column) == 'DOCUMENTO_GENERADO';
+    final approved = isApprovedHumanResourcesRecord(row);
+    final enabled = generated ? approved : hasDocument;
+    return Tooltip(
+      message: generated
+          ? (approved
+              ? (hasDocument
+                  ? 'Ver e imprimir documento generado'
+                  : 'Generar documento PDF')
+              : 'Disponible después de aprobar')
+          : (hasDocument
+              ? 'Ver documento de sustento'
+              : 'Sin documento de sustento'),
+      child: IconButton(
+        icon: Icon(
+          hasDocument ? Icons.picture_as_pdf : Icons.picture_as_pdf_outlined,
+          color: enabled ? const Color(0xFFC62828) : Colors.grey,
+        ),
+        onPressed: enabled
+            ? () => generated
+                ? _openOrGenerateHumanResourcesDocument(row)
+                : _openHumanResourcesStoredDocument(row, column)
+            : null,
+      ),
+    );
+  }
+
   Widget _mobileToolsMenu() {
     return PopupMenuButton<String>(
       enabled: !loading && error == null,
@@ -4609,6 +4818,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         }
         if (value == 'payroll_slip' && _selectedDeleteRows.length == 1) {
           await _openOrGeneratePayrollSlip(
+            _selectedDeleteRows.values.single,
+          );
+        }
+        if (value == 'hr_document' && _selectedDeleteRows.length == 1) {
+          await _openOrGenerateHumanResourcesDocument(
             _selectedDeleteRows.values.single,
           );
         }
@@ -4659,7 +4873,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               title: Text('Exportar CSV'),
             ),
           ),
-        if (_approvalsEnabled && canReview)
+        if (_approvalsEnabled && canReview && !_isHumanResourcesApprovalTable)
           PopupMenuItem(
             value: 'review',
             enabled: _selectedDeleteRows.isNotEmpty,
@@ -4707,6 +4921,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               dense: true,
               leading: Icon(Icons.picture_as_pdf_outlined),
               title: Text('Generar o ver boleta PDF'),
+            ),
+          ),
+        if (_isHumanResourcesApprovalTable)
+          PopupMenuItem(
+            value: 'hr_document',
+            enabled: _selectedDeleteRows.length == 1,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.picture_as_pdf_outlined),
+              title: Text('Generar o ver documento PDF'),
             ),
           ),
         if (!canImport &&
@@ -4929,7 +5153,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       {String? defaultBucket}) async {
     final clean = source.trim();
     if (clean.isEmpty || clean.toUpperCase() == 'NULL') return null;
-    if (clean.startsWith('data:image/') && clean.contains(',')) {
+    if ((clean.startsWith('data:image/') ||
+            clean.startsWith('data:application/pdf')) &&
+        clean.contains(',')) {
       try {
         return base64Decode(clean.substring(clean.indexOf(',') + 1));
       } catch (_) {
@@ -6009,6 +6235,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   DataCell _buildCell(String column, Map<String, dynamic> row) {
     final value = row[column];
     final text = _displayCellValue(value);
+    if (_isHumanResourcesDocumentColumn(column)) {
+      return DataCell(_humanResourcesStoredDocumentButton(row, column));
+    }
     if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
       return DataCell(IconButton(
         tooltip: text.isEmpty ? 'Generar boleta PDF' : 'Ver boleta PDF',
@@ -6162,6 +6391,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final custom = _columnWidths[column];
     if (custom != null) return custom;
     if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') return 92;
+    if (_isHumanResourcesApprovalTable &&
+        const {'DOCUMENTO_GENERADO', 'DOCUMENTO_SUSTENTO'}
+            .contains(_norm(column))) {
+      return 130;
+    }
 
     final clean = column.trim();
     if (clean.length > 28) return 230;
@@ -7610,6 +7844,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<void> _setSelectedApprovalState(String nextState) async {
     final table = tableName;
     final desired = nextState.trim().toUpperCase();
+    if (_isHumanResourcesApprovalTable && desired == 'REVISADO') return;
     final allowed = desired == 'REVISADO' ? canReview : canApprove;
     if (!_approvalsEnabled ||
         !allowed ||
@@ -7624,7 +7859,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final column = _approvalColumnForRow(row);
       final current = row[column]?.toString().trim().toUpperCase() ?? '';
       if (desired == 'APROBADO') {
-        if (current == 'REVISADO') eligible.add(row);
+        if (_isHumanResourcesApprovalTable) {
+          if (!const {'APROBADO', 'RECHAZADO', 'ANULADO'}.contains(current)) {
+            eligible.add(row);
+          }
+        } else if (current == 'REVISADO') {
+          eligible.add(row);
+        }
       } else if (current != 'APROBADO') {
         eligible.add(row);
       }
@@ -7633,7 +7874,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(desired == 'APROBADO'
-            ? 'Para aprobar, seleccione registros que ya estén REVISADOS.'
+            ? (_isHumanResourcesApprovalTable
+                ? 'Seleccione solicitudes pendientes de aprobación.'
+                : 'Para aprobar, seleccione registros que ya estén REVISADOS.')
             : 'Los registros seleccionados ya tienen una aprobación posterior.'),
       ));
       return;
@@ -7943,7 +8186,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final text = _displayCellValue(value);
       Widget child;
       final fmt = _tableCellFormat(column, r);
-      if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
+      if (_isHumanResourcesDocumentColumn(column)) {
+        child = _humanResourcesStoredDocumentButton(r, column);
+      } else if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
         child = Tooltip(
           message: text.isEmpty
               ? 'Generar boleta PDF'
@@ -8985,7 +9230,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   ),
                   const SizedBox(width: 10),
                 ],
-                if (_approvalsEnabled && canReview) ...[
+                if (_approvalsEnabled &&
+                    canReview &&
+                    !_isHumanResourcesApprovalTable) ...[
                   _approvalToolbarButton(
                     state: 'REVISADO',
                     icon: Icons.fact_check_outlined,
@@ -9038,6 +9285,21 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                           : null,
                       icon: Icons.picture_as_pdf_outlined,
                       tooltip: 'Generar o ver boleta PDF',
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
+                if (_isHumanResourcesApprovalTable) ...[
+                  ValueListenableBuilder<int>(
+                    valueListenable: _deleteSelectionVersion,
+                    builder: (context, _, __) => _humanWorkflowToolbarButton(
+                      onPressed: _selectedDeleteRows.length == 1
+                          ? () => _openOrGenerateHumanResourcesDocument(
+                                _selectedDeleteRows.values.single,
+                              )
+                          : null,
+                      icon: Icons.picture_as_pdf_outlined,
+                      tooltip: 'Generar o ver documento PDF',
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -9153,6 +9415,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final value = _valueByColumn(row, column);
       final text = _displayCellValue(value);
       final format = _tableCellFormat(column, row);
+      if (_isHumanResourcesDocumentColumn(column)) {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: _humanResourcesStoredDocumentButton(row, column),
+        );
+      }
       if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
         return Align(
           alignment: Alignment.centerLeft,

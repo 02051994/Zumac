@@ -21,6 +21,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../core/services/local_db.dart';
 import '../../core/services/evidence_storage.dart';
+import '../../core/services/human_resources_rules.dart';
 import '../../core/widgets/responsive_layout.dart';
 import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../../core/services/dynamic_rules_repository.dart';
@@ -3386,6 +3387,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   dynamic _valueForField(Map<String, dynamic> field, String idLocal) {
     final campo = field['campo']?.toString() ?? '';
+    if (_isSanctionDocumentField(field) ||
+        (_isPermissionDocumentField(field) &&
+            !_selectedAbsenceRequiresDocument)) {
+      return null;
+    }
     final declaredTipo = field['tipo']?.toString().trim().toLowerCase() ?? '';
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
@@ -3631,8 +3637,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       (tableDestino ?? '').trim().toUpperCase() ==
       'GH_PERMISOS_LICENCIAS_APPGT';
 
+  bool get _isSanctionForm =>
+      (tableDestino ?? '').trim().toUpperCase() ==
+      'GH_SANCIONES_PERSONAL_APPGT';
+
   bool _isPermissionDocumentField(Map<String, dynamic> field) {
     return _isPermissionLeaveForm &&
+        _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
+            'DOCUMENTO_SUSTENTO';
+  }
+
+  bool _isSanctionDocumentField(Map<String, dynamic> field) {
+    return _isSanctionForm &&
         _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
             'DOCUMENTO_SUSTENTO';
   }
@@ -3647,25 +3663,18 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }
 
   bool get _selectedAbsenceRequiresDocument {
-    if (!_isPermissionLeaveForm) return false;
-    final selected = _permissionTypeValue();
-    if (selected.isEmpty) return false;
-    for (final tableEntry in matrixRowsByTable.entries) {
-      if (_normalizarNombreCampo(tableEntry.key) !=
-          'MATRIZ_TIPOS_AUSENCIA_APPGT') {
-        continue;
-      }
-      for (final row in tableEntry.value) {
-        if (_isSoftDeletedMatrixRow(row)) continue;
-        final name = _valueByColumnName(row, 'nombre')?.toString().trim() ?? '';
-        final active = _valueByColumnName(row, 'activo');
-        if (name.toUpperCase() == selected.toUpperCase() &&
-            _asBool(active, defaultValue: true)) {
-          return _asBool(_valueByColumnName(row, 'documento_requerido'));
-        }
-      }
+    return _isPermissionLeaveForm &&
+        permissionRequiresSupportingDocument(_permissionTypeValue());
+  }
+
+  void _clearPermissionDocumentWhenNotRequired() {
+    if (!_isPermissionLeaveForm || _selectedAbsenceRequiresDocument) return;
+    for (final field in fields) {
+      if (!_isPermissionDocumentField(field)) continue;
+      final campo = field['campo']?.toString() ?? '';
+      controllers[campo]?.clear();
+      documentFileNames.remove(campo);
     }
-    return false;
   }
 
   Future<void> _setPdfDocument(
@@ -3721,17 +3730,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   Widget _permissionDocumentWidget(Map<String, dynamic> field) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? 'Documento de sustento';
-    final required = _selectedAbsenceRequiresDocument;
     final raw = controllers[campo]?.text.trim() ?? '';
     final selectedName = documentFileNames[campo];
     final hasDocument = raw.isNotEmpty;
     final content = InputDecorator(
       decoration: InputDecoration(
-        labelText: required ? '$etiqueta *' : etiqueta,
+        labelText: '$etiqueta *',
         border: const OutlineInputBorder(),
-        helperText: required
-            ? 'Obligatorio para este tipo de ausencia. Solo PDF, maximo 15 MB.'
-            : 'Solo PDF, maximo 15 MB. Tambien puede arrastrarlo aqui.',
+        helperText:
+            'Obligatorio para este tipo de ausencia. Solo PDF, maximo 15 MB.',
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3801,20 +3808,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       },
       child: content,
     );
-  }
-
-  bool get _permissionIsApproved {
-    if (!_isPermissionLeaveForm) return false;
-    for (final entry in controllers.entries) {
-      final key = _normalizarNombreCampo(entry.key);
-      if (key == 'ESTADO_APROBACION' || key == 'ESTADO') {
-        if (entry.value.text.trim().toUpperCase() == 'APROBADO') return true;
-      }
-    }
-    final payload = widget.initialPayload ?? const <String, dynamic>{};
-    return _payloadText(payload, ['ESTADO_APROBACION', 'estado'])
-            .toUpperCase() ==
-        'APROBADO';
   }
 
   String _payloadText(Map<String, dynamic> payload, List<String> keys) {
@@ -4274,7 +4267,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
   Future<void> saveLocal({
     bool generarPhotocheck = false,
-    bool generarDocumentoLaboral = false,
   }) async {
     if (savingLocal || capturingPhoto) return;
     FocusScope.of(context).unfocus();
@@ -4433,10 +4425,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final value = _valueForField(field, idLocal);
       if (value != null) payload[campo] = value;
     }
-    if (_isPermissionLeaveForm && generarDocumentoLaboral) {
-      payload['documento_generado'] = _permissionDocumentFileName(payload);
-    }
-
     final currentConfig = _currentFormatTableConfig;
     if (_isDetailTableRow(currentConfig) && _wizardMasterPayload != null) {
       final fk = _cleanNullableText(currentConfig?['campo_fk_hijo']);
@@ -4558,22 +4546,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     if (_isPersonalPlanillaForm && generarPhotocheck) {
       await _generateLocalPhotocheckFromPayload(payload);
-    }
-
-    if (_isPermissionLeaveForm && generarDocumentoLaboral) {
-      try {
-        await _generatePermissionDocumentFromPayload(payload);
-      } catch (error) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(
-                'El registro se guardó, pero no se pudo generar el documento: $error',
-              ),
-            ),
-          );
-        }
-      }
     }
 
     await ScaffoldMessenger.of(context).showSnackBar(
@@ -4799,6 +4771,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               if (selected == null) return;
               setState(() {
                 controllers[campo]?.text = selected;
+                if (_normalizarNombreCampo(campo) == 'TIPO_PERMISO') {
+                  _clearPermissionDocumentWhenNotRequired();
+                }
                 _recalculateDerivedFields();
                 _recalculateMatrixDrivenFields();
               });
@@ -5016,6 +4991,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
     final campo = field['campo']?.toString() ?? '';
+    if (_isSanctionDocumentField(field)) return false;
+    if (_isPermissionDocumentField(field) &&
+        !_selectedAbsenceRequiresDocument) {
+      return false;
+    }
     return _isVisible(field) &&
         !_isAutoFilledDetailField(campo) &&
         tipo != 'hidden_id' &&
@@ -5429,6 +5409,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           controller: controllers[campo],
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
+          onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
+              ? (_) => setState(_clearPermissionDocumentWhenNotRequired)
+              : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
             border: const OutlineInputBorder(),
@@ -5449,6 +5432,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           controller: controllers[campo],
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
+          onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
+              ? (_) => setState(_clearPermissionDocumentWhenNotRequired)
+              : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
             border: const OutlineInputBorder(),
@@ -5986,31 +5972,19 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           ],
           FloatingActionButton.extended(
             heroTag: 'save_${tableDestino ?? ''}',
-            onPressed: _isPermissionLeaveForm
-                ? () => saveLocal(
-                      generarDocumentoLaboral: _permissionIsApproved,
-                    )
-                : saveLocal,
+            onPressed: saveLocal,
             tooltip: _isPermissionLeaveForm
-                ? (_permissionIsApproved
-                    ? 'Guardar y generar la constancia aprobada'
-                    : 'Guardar solicitud para revisión y aprobación')
+                ? 'Guardar solicitud para aprobación en la web'
                 : (isOnlineFirstRuntime
                     ? 'Guardar en el sistema'
                     : 'Guardar en el celular'),
             icon: Icon(
               _isPermissionLeaveForm
-                  ? (_permissionIsApproved
-                      ? Icons.picture_as_pdf_outlined
-                      : Icons.send_outlined)
+                  ? Icons.send_outlined
                   : Icons.save_outlined,
             ),
             label: Text(
-              _isPermissionLeaveForm
-                  ? (_permissionIsApproved
-                      ? 'GENERAR CONSTANCIA'
-                      : 'GUARDAR SOLICITUD')
-                  : 'Guardar',
+              _isPermissionLeaveForm ? 'GUARDAR SOLICITUD' : 'Guardar',
             ),
           ),
         ],

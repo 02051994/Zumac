@@ -1306,9 +1306,14 @@ class SyncService {
     if (shouldCacheOperationalRecords) {
       progress('Actualizando registros modificados...');
       await _yieldToUi();
+      final formatsForDataTables =
+          formats.isNotEmpty ? formats : await _local.getAll('local_formats');
+      final formatTablesForDataTables = formatTables.isNotEmpty
+          ? formatTables
+          : await _local.getAll('local_format_tables');
       dynamicSourceRows.addAll(await _downloadFormatRecordTables(
-        formats,
-        formatTables,
+        formatsForDataTables,
+        formatTablesForDataTables,
         changedTables: changedTables,
         since: incremental ? previousDataSync : null,
         forceAllTables: !incremental || changedTables == null || configChanged,
