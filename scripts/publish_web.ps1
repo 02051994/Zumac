@@ -13,7 +13,8 @@ $projectRoot = [System.IO.Path]::GetFullPath(
 )
 $buildDirectory = Join-Path -Path $projectRoot -ChildPath "build\web"
 $repositoryUrl = "https://github.com/02051994/Zumac.git"
-$deploymentBranch = "gh-pages"
+$sourceBranchName = "source"
+$deploymentBranch = "main"
 $pagesBaseHref = "/Zumac/"
 $temporaryDirectory = $null
 $temporaryDirectoryIsSafe = $false
@@ -63,6 +64,12 @@ Revisa, prueba, agrega y confirma primero los archivos correctos antes de public
     $sourceBranch = Get-NativeText git branch --show-current
     if ([string]::IsNullOrWhiteSpace($sourceBranch)) {
         throw "No se puede publicar desde un HEAD separado de una rama."
+    }
+    if ($sourceBranch -ne $sourceBranchName) {
+        throw @"
+La publicación debe ejecutarse desde '$sourceBranchName', no desde '$sourceBranch'.
+Integra y publica primero el código fuente estable en '$sourceBranchName'.
+"@
     }
 
     $upstream = & git rev-parse --abbrev-ref --symbolic-full-name "@{upstream}" 2>$null
