@@ -36,6 +36,7 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
   List<Map<String, dynamic>> get sections => maps(data['secciones']);
   List<Map<String, dynamic>> get modules => maps(data['modulos']);
   List<Map<String, dynamic>> get formats => maps(data['formatos']);
+  List<Map<String, dynamic>> get tools => maps(data['herramientas']);
   String get actorRole => text(actor['rol']).toUpperCase();
   String get targetRole => text(access['rol']).isNotEmpty
       ? text(access['rol']).toUpperCase()
@@ -51,6 +52,15 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
     final result = <String, PermissionActions>{};
     for (final row in maps(access['permisos_formatos'])) {
       result[text(row['formato'])] = PermissionActions.fromMap(row);
+    }
+    return result;
+  }
+
+  Map<String, bool> get toolPermissions {
+    final result = <String, bool>{};
+    for (final row in maps(access['permisos_herramientas'])) {
+      result[text(row['herramienta']).toUpperCase()] =
+          row['permitido'] == true || row['can_use'] == true;
     }
     return result;
   }
@@ -281,6 +291,32 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
       await message('Permisos del formato guardados.');
     } catch (e) {
       await message('No se pudieron guardar los permisos: $e');
+    } finally {
+      if (mounted) setState(() => saving = false);
+    }
+  }
+
+  Future<void> editTool(Map<String, dynamic> tool, bool permitted) async {
+    if (selectedId == null || saving || tool['delegable'] != true) return;
+    final code = text(tool['codigo']).toUpperCase();
+    if (code.isEmpty) return;
+    setState(() => saving = true);
+    try {
+      await repo.saveToolPermissions(
+        userId: selectedId!,
+        permissions: [
+          {'herramienta': code, 'permitido': permitted},
+        ],
+      );
+      if (!mounted) return;
+      await selectUser(selectedId!);
+      await message(
+        permitted
+            ? 'Herramienta habilitada para el usuario.'
+            : 'Acceso a la herramienta retirado.',
+      );
+    } catch (e) {
+      await message('No se pudo guardar el acceso a la herramienta: $e');
     } finally {
       if (mounted) setState(() => saving = false);
     }
@@ -596,71 +632,110 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
             q.isEmpty ||
             '${text(f['nombre'])} ${text(f['id'])}'.toLowerCase().contains(q))
         .toList();
-    return Column(children: [
-      Padding(
-          padding: const EdgeInsets.fromLTRB(14, 8, 14, 8),
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+      children: [
+        if (tools.isNotEmpty) _toolPermissionsPanel(),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(6, 8, 6, 8),
           child: TextField(
-              controller: formatSearch,
-              onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(
-                  prefixIcon: Icon(Icons.filter_alt_outlined),
-                  hintText: 'Filtrar formatos',
-                  helperText:
-                      'El alcance termina en formato; no existen permisos por registro.',
-                  isDense: true))),
-      Expanded(
-          child: ListView(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-              children: sections.map((section) {
-                final sid = text(section['id']);
-                final smods =
-                    modules.where((m) => text(m['seccion']) == sid).toList();
-                final sf = visible
-                    .where((f) =>
-                        smods.any((m) => text(m['id']) == text(f['modulo_id'])))
-                    .toList();
-                if (sf.isEmpty) return const SizedBox.shrink();
-                return ExpansionTile(
-                    initiallyExpanded: q.isNotEmpty,
-                    leading: const Icon(Icons.account_tree_outlined),
-                    title: Text(name(section, 'Sección')),
-                    subtitle: Text('${sf.length} formatos'),
-                    trailing: _ScopeMenu(
-                        view: () => bulk(sf, revoke: false),
-                        revoke: () => bulk(sf, revoke: true)),
-                    children: smods.map((module) {
-                      final mid = text(module['id']);
-                      final mf = visible
-                          .where((f) => text(f['modulo_id']) == mid)
-                          .toList();
-                      if (mf.isEmpty) return const SizedBox.shrink();
-                      return ExpansionTile(
-                          initiallyExpanded: q.isNotEmpty,
-                          tilePadding:
-                              const EdgeInsets.only(left: 32, right: 8),
-                          leading: const Icon(Icons.folder_outlined),
-                          title: Text(name(module, 'Módulo')),
-                          subtitle: Text('${mf.length} formatos'),
-                          trailing: _ScopeMenu(
-                              view: () => bulk(mf, revoke: false),
-                              revoke: () => bulk(mf, revoke: true)),
-                          children: mf.map((f) {
-                            final a = current[text(f['id'])] ??
-                                const PermissionActions();
-                            return ListTile(
-                                contentPadding:
-                                    const EdgeInsets.only(left: 64, right: 12),
-                                leading: Icon(a.view
-                                    ? Icons.description
-                                    : Icons.description_outlined),
-                                title: Text(name(f, 'Formato')),
-                                subtitle: _ActionSummary(a),
-                                trailing: const Icon(Icons.tune),
-                                onTap: () => editFormat(f));
-                          }).toList());
-                    }).toList());
-              }).toList()))
-    ]);
+            controller: formatSearch,
+            onChanged: (_) => setState(() {}),
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.filter_alt_outlined),
+              hintText: 'Filtrar formatos',
+              helperText:
+                  'El alcance termina en formato; no existen permisos por registro.',
+              isDense: true,
+            ),
+          ),
+        ),
+        ...sections.map((section) {
+          final sid = text(section['id']);
+          final smods =
+              modules.where((m) => text(m['seccion']) == sid).toList();
+          final sf = visible
+              .where((f) =>
+                  smods.any((m) => text(m['id']) == text(f['modulo_id'])))
+              .toList();
+          if (sf.isEmpty) return const SizedBox.shrink();
+          return ExpansionTile(
+            initiallyExpanded: q.isNotEmpty,
+            leading: const Icon(Icons.account_tree_outlined),
+            title: Text(name(section, 'Sección')),
+            subtitle: Text('${sf.length} formatos'),
+            trailing: _ScopeMenu(
+              view: () => bulk(sf, revoke: false),
+              revoke: () => bulk(sf, revoke: true),
+            ),
+            children: smods.map((module) {
+              final mid = text(module['id']);
+              final mf =
+                  visible.where((f) => text(f['modulo_id']) == mid).toList();
+              if (mf.isEmpty) return const SizedBox.shrink();
+              return ExpansionTile(
+                initiallyExpanded: q.isNotEmpty,
+                tilePadding: const EdgeInsets.only(left: 32, right: 8),
+                leading: const Icon(Icons.folder_outlined),
+                title: Text(name(module, 'Módulo')),
+                subtitle: Text('${mf.length} formatos'),
+                trailing: _ScopeMenu(
+                  view: () => bulk(mf, revoke: false),
+                  revoke: () => bulk(mf, revoke: true),
+                ),
+                children: mf.map((f) {
+                  final a = current[text(f['id'])] ?? const PermissionActions();
+                  return ListTile(
+                    contentPadding: const EdgeInsets.only(left: 64, right: 12),
+                    leading: Icon(
+                      a.view ? Icons.description : Icons.description_outlined,
+                    ),
+                    title: Text(name(f, 'Formato')),
+                    subtitle: _ActionSummary(a),
+                    trailing: const Icon(Icons.tune),
+                    onTap: () => editFormat(f),
+                  );
+                }).toList(),
+              );
+            }).toList(),
+          );
+        }),
+      ],
+    );
+  }
+
+  Widget _toolPermissionsPanel() {
+    final granted = toolPermissions;
+    return Card(
+      margin: const EdgeInsets.fromLTRB(6, 10, 6, 6),
+      child: ExpansionTile(
+        initiallyExpanded: true,
+        leading: const Icon(Icons.widgets_outlined),
+        title: const Text('Herramientas de la pantalla principal'),
+        subtitle: const Text('Acceso otorgado por ADMIN o GESTOR'),
+        children: tools.map((tool) {
+          final code = text(tool['codigo']).toUpperCase();
+          final available = tool['habilitada_empresa'] == true;
+          final delegable = tool['delegable'] == true;
+          final permitted = granted[code] == true;
+          return SwitchListTile.adaptive(
+            dense: true,
+            value: permitted,
+            onChanged: available && delegable
+                ? (value) => editTool(tool, value)
+                : null,
+            title: Text(text(tool['nombre'])),
+            subtitle: Text(
+              !available
+                  ? 'La herramienta no está contratada para la empresa.'
+                  : delegable
+                      ? text(tool['descripcion'])
+                      : 'Fuera de su alcance de delegación.',
+            ),
+          );
+        }).toList(growable: false),
+      ),
+    );
   }
 
   String name(Map<String, dynamic> row, String fallback) =>

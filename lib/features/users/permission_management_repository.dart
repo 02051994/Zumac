@@ -6,15 +6,53 @@ class PermissionManagementRepository {
 
   final SupabaseClient _client;
 
-  Future<Map<String, dynamic>> loadContext() async =>
-      _map(await _client.rpc('appgt_contexto_gestion_permisos_v2'));
+  Future<Map<String, dynamic>> loadContext() async {
+    final context =
+        _map(await _client.rpc('appgt_contexto_gestion_permisos_v2'));
+    try {
+      final tools = _map(
+        await _client.rpc('appgt_catalogo_permisos_herramientas_v1'),
+      );
+      context['herramientas'] = tools['herramientas'] ?? const [];
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202' && error.code != '42883') rethrow;
+    }
+    return context;
+  }
 
-  Future<Map<String, dynamic>> loadUserAccess(String userId) async => _map(
+  Future<Map<String, dynamic>> loadUserAccess(String userId) async {
+    final access = _map(
+      await _client.rpc(
+        'appgt_acceso_usuario_v2',
+        params: {'p_user_id': userId},
+      ),
+    );
+    try {
+      final tools = _map(
         await _client.rpc(
-          'appgt_acceso_usuario_v2',
+          'appgt_permisos_herramientas_usuario_v1',
           params: {'p_user_id': userId},
         ),
       );
+      access['permisos_herramientas'] =
+          tools['permisos_herramientas'] ?? const [];
+    } on PostgrestException catch (error) {
+      if (error.code != 'PGRST202' && error.code != '42883') rethrow;
+    }
+    return access;
+  }
+
+  Future<Map<String, dynamic>> loadCurrentToolAccess() async =>
+      _map(await _client.rpc('appgt_acceso_herramientas_actual_v1'));
+
+  Future<Map<String, dynamic>> saveToolPermissions({
+    required String userId,
+    required List<Map<String, dynamic>> permissions,
+  }) async =>
+      _map(await _client.rpc(
+        'appgt_guardar_permisos_herramientas_v1',
+        params: {'p_user_id': userId, 'p_permisos': permissions},
+      ));
 
   Future<Map<String, dynamic>> assignRole({
     required String userId,

@@ -29,6 +29,19 @@ class AppExperienceService {
     await preferences.setString(_lastSyncKey, value.toIso8601String());
   }
 
+  Future<Map<String, dynamic>> loadToolAccess({
+    required String userId,
+    required String empresaId,
+  }) =>
+      _loadMap(_toolAccessKey(userId, empresaId));
+
+  Future<void> saveToolAccess({
+    required String userId,
+    required String empresaId,
+    required Map<String, dynamic> value,
+  }) =>
+      _saveMap(_toolAccessKey(userId, empresaId), value);
+
   Future<Map<String, dynamic>> loadBuilderDraft(String key) =>
       _loadMap(_draftKey(key));
 
@@ -52,6 +65,9 @@ class AppExperienceService {
   String _draftKey(String key) => 'appgt.experience.builder.$key.v1';
 
   String _recordViewKey(String key) => 'appgt.experience.records.$key.v1';
+
+  String _toolAccessKey(String userId, String empresaId) =>
+      'appgt.experience.tool_access.$empresaId.$userId.v1';
 
   Future<Map<String, dynamic>> _loadMap(String key) async {
     final preferences = await SharedPreferences.getInstance();

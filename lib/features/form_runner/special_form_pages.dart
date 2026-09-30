@@ -1118,7 +1118,7 @@ class _AsistenciaPersonalSpecialPageState
   String _dateIso(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
   String _dateTitle(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString().substring(2)}';
+      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year.toString()}';
   String _timeHm(DateTime d) =>
       '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   String _norm(String v) =>
@@ -1131,6 +1131,42 @@ class _AsistenciaPersonalSpecialPageState
       if (wanted.contains(_norm(e.key))) return e.value;
     }
     return null;
+  }
+
+  String _workerName(Map<String, dynamic> row) {
+    final full = (_rowValue(row, [
+              'APELLIDOS Y NOMBRES',
+              'Apellidos y Nombres',
+              'NOMBRE COMPLETO',
+            ]) ??
+            '')
+        .toString()
+        .trim();
+    if (full.isNotEmpty) return full;
+    return [
+      _rowValue(row, ['Apellido_paterno', 'APELLIDO PATERNO']),
+      _rowValue(row, ['Apellido_materno', 'APELLIDO MATERNO']),
+      _rowValue(row, ['Nombres', 'NOMBRES']),
+    ]
+        .map((value) => value?.toString().trim() ?? '')
+        .where((value) => value.isNotEmpty)
+        .join(' ');
+  }
+
+  void _setCanonicalValue(
+    Map<String, dynamic> row,
+    List<String> aliases,
+    String canonical,
+    dynamic value,
+  ) {
+    final wanted = aliases.map(_norm).toSet();
+    final oldKeys = row.keys
+        .where((key) => wanted.contains(_norm(key.toString())))
+        .toList(growable: false);
+    for (final key in oldKeys) {
+      row.remove(key);
+    }
+    row[canonical] = value;
   }
 
   Future<Set<String>> _destinationFieldNorms(String table,
@@ -1216,8 +1252,6 @@ class _AsistenciaPersonalSpecialPageState
   void _hydrateFromInitialPayload() {
     final payload = widget.initialPayload;
     if (payload == null || payload.isEmpty) return;
-    fechaCtrl.text =
-        (_rowValue(payload, ['FECHA', 'Fecha']) ?? fechaCtrl.text).toString();
     placaCtrl.text = (_rowValue(payload, ['PLACA', 'Placa']) ?? '').toString();
     reclutadorCtrl.text =
         (_rowValue(payload, ['RECLUTADOR', 'Reclutador']) ?? '').toString();
@@ -1226,8 +1260,11 @@ class _AsistenciaPersonalSpecialPageState
 
   Future<void> _loadAsistenciaHeader() async {
     await asistenciaHeader.load(initialPayload: widget.initialPayload);
-    final fecha = asistenciaHeader.valueByCandidates(['FECHA', 'Fecha']);
-    if (fecha.isNotEmpty) fechaCtrl.text = fecha;
+    final today = _dateIso(DateTime.now());
+    fechaCtrl.text = today;
+    for (final entry in asistenciaHeader.controllers.entries) {
+      if (_norm(entry.key) == 'FECHA') entry.value.text = today;
+    }
     final placa = asistenciaHeader
         .valueByCandidates(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD']);
     if (placa.isNotEmpty) placaCtrl.text = placa;
@@ -1249,8 +1286,9 @@ class _AsistenciaPersonalSpecialPageState
 
   Map<String, dynamic> _asistenciaHeaderPayload() {
     final payload = asistenciaHeader.payload();
-    final fecha = _headerValue(['FECHA'], fallback: fechaCtrl.text.trim());
-    if (fecha.isNotEmpty) payload['FECHA'] = fecha;
+    final fecha = _dateIso(DateTime.now());
+    fechaCtrl.text = fecha;
+    payload['FECHA'] = fecha;
     final placa = _headerValue(['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'],
         fallback: placaCtrl.text.trim());
     if (placa.isNotEmpty) payload['PLACA'] = placa;
@@ -1318,6 +1356,31 @@ class _AsistenciaPersonalSpecialPageState
             as Map<String, dynamic>);
       } catch (_) {}
     }
+    try {
+      if (await SyncService().hasInternet()) {
+        final remote = await Supabase.instance.client
+            .rpc('appgt_personal_asistencia_v1')
+            .timeout(const Duration(seconds: 8));
+        final rows = remote is List
+            ? remote
+                .whereType<Map>()
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList(growable: false)
+            : const <Map<String, dynamic>>[];
+        for (final row in rows) {
+          addWorker(row);
+        }
+        if (rows.isNotEmpty) {
+          await local.applyMatrixRowsFromPayloads(
+            {'GH-REGISTRO_PERSONAL_PLANILLA': rows},
+            replaceSources: true,
+          );
+        }
+      }
+    } catch (_) {
+      // La lista local sigue disponible cuando no hay red o el RPC aún no fue
+      // desplegado.
+    }
     if (mounted) setState(() => asistenciaWorkers = out.values.toList());
   }
 
@@ -1330,14 +1393,7 @@ class _AsistenciaPersonalSpecialPageState
       final dni = (_rowValue(payload, ['DNI', 'Dni', 'DOCUMENTO']) ?? '')
           .toString()
           .trim();
-      final nombre = (_rowValue(payload, [
-                'APELLIDOS Y NOMBRES',
-                'Apellidos y Nombres',
-                'NOMBRE COMPLETO'
-              ]) ??
-              '')
-          .toString()
-          .trim();
+      final nombre = _workerName(payload);
       final qr =
           (_rowValue(payload, ['QR_PERSONAL', 'CODIGO_PERSONAL', 'id_local']) ??
                   '')
@@ -2006,9 +2062,38 @@ class _AsistenciaPersonalSpecialPageState
     }
     final updated = <String, dynamic>{
       ...mobility,
-      ...values,
       'id_local': idLocal,
     };
+    _setCanonicalValue(
+      updated,
+      const ['PLACA', 'placa'],
+      'PLACA',
+      _rowValue(mobility, const ['PLACA', 'placa']),
+    );
+    _setCanonicalValue(
+      updated,
+      const ['CONDUCTOR', 'conductor', 'conductor_nombre'],
+      'CONDUCTOR',
+      values['conductor'],
+    );
+    _setCanonicalValue(
+      updated,
+      const ['DNI_CONDUCTOR', 'dni_conductor', 'conductor_dni'],
+      'DNI_CONDUCTOR',
+      values['dni_conductor'],
+    );
+    _setCanonicalValue(
+      updated,
+      const ['licencia_conducir'],
+      'licencia_conducir',
+      values['licencia_conducir'],
+    );
+    _setCanonicalValue(
+      updated,
+      const ['licencia_vigencia'],
+      'licencia_vigencia',
+      values['licencia_vigencia'],
+    );
     final formats = await local.getAll('local_formats', orderBy: 'orden');
     Map<String, dynamic>? format;
     for (final row in formats) {
@@ -2163,7 +2248,6 @@ class _AsistenciaPersonalSpecialPageState
     }
     setState(() => saving = true);
     try {
-      if (existing != null) await local.deleteRecord(idLocal);
       await local.insertPending({
         'id_local': idLocal,
         'user_id': userId,
@@ -2207,13 +2291,7 @@ class _AsistenciaPersonalSpecialPageState
             code)
         .toString()
         .trim();
-    final nombre = (_rowValue(resolvedWorker ?? const <String, dynamic>{}, [
-              'APELLIDOS Y NOMBRES',
-              'Apellidos y Nombres',
-              'NOMBRE COMPLETO'
-            ]) ??
-            '')
-        .toString();
+    final nombre = _workerName(resolvedWorker ?? const <String, dynamic>{});
     final puesto = (_rowValue(resolvedWorker ?? const <String, dynamic>{},
                 ['PUESTO', 'Puesto', 'CARGO']) ??
             '')
@@ -2349,13 +2427,7 @@ class _AsistenciaPersonalSpecialPageState
             .where((w) {
               final dni =
                   (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-              final nombre = (_rowValue(w, [
-                        'APELLIDOS Y NOMBRES',
-                        'Apellidos y Nombres',
-                        'NOMBRE COMPLETO'
-                      ]) ??
-                      '')
-                  .toString();
+              final nombre = _workerName(w);
               final haystack = '$dni $nombre'.toLowerCase();
               return haystack.contains(q) ||
                   (qDigits.isNotEmpty && _digits(dni).contains(qDigits));
@@ -2397,13 +2469,7 @@ class _AsistenciaPersonalSpecialPageState
               final w = options[i];
               final dni =
                   (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString();
-              final nombre = (_rowValue(w, [
-                        'APELLIDOS Y NOMBRES',
-                        'Apellidos y Nombres',
-                        'NOMBRE COMPLETO'
-                      ]) ??
-                      '')
-                  .toString();
+              final nombre = _workerName(w);
               return ListTile(
                 dense: true,
                 leading:
@@ -2669,34 +2735,29 @@ class _AsistenciaPersonalSpecialPageState
     ]);
   }
 
-  Widget _headerCard() {
+  Widget _attendanceForm() {
     final primary = const Color(0xFF0D5F78);
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: const Color(0xFFE1EEF1)),
-        boxShadow: const [
-          BoxShadow(
-              color: Color(0x14000000), blurRadius: 12, offset: Offset(0, 4))
-        ],
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Text(
+        _attendanceDateLabel(),
+        style: const TextStyle(
+          color: Color(0xFF17324D),
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+        ),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _movementButtons(primary),
-        const SizedBox(height: 14),
-        ...asistenciaHeader.buildFields(context, setState,
-            filter: _isAsistenciaDateField),
-        _mobilitySelector(),
-        ...asistenciaHeader.buildFields(context, setState,
-            filter: (field) =>
-                !_isAsistenciaMovementField(field) &&
-                !_isAsistenciaDateField(field) &&
-                !_isAsistenciaPlateField(field)),
-        const SizedBox(height: 2),
-        _workerSearchBox(),
-      ]),
-    );
+      const SizedBox(height: 10),
+      _movementButtons(primary),
+      const SizedBox(height: 14),
+      _mobilitySelector(),
+      ...asistenciaHeader.buildFields(context, setState,
+          filter: (field) =>
+              !_isAsistenciaMovementField(field) &&
+              !_isAsistenciaDateField(field) &&
+              !_isAsistenciaPlateField(field)),
+      const SizedBox(height: 2),
+      _workerSearchBox(),
+    ]);
   }
 
   String _attendanceDateLabel() {
@@ -2760,9 +2821,9 @@ class _AsistenciaPersonalSpecialPageState
             thumbVisibility: true,
             child: ListView(
                 controller: _asistenciaVerticalCtrl,
-                padding: const EdgeInsets.all(18),
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
                 children: [
-                  _headerCard(),
+                  _attendanceForm(),
                   _workersButton(),
                 ]),
           ),
@@ -5882,15 +5943,13 @@ class _PlagasEnfermedadesSpecialPageState
         Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) return false;
 
-    await local.deletePendingRecordsByPrefix('${idRegistro}_');
-    await local.deletePendingRecordsByLogicalId(
+    await local.replacePendingRecordsAtomically(
+      rows: _buildPendingRows(userId, table),
+      idLocalPrefix: '${idRegistro}_',
       formatoId: widget.format['id']?.toString() ?? '',
       tablaDestino: table,
-      idRegistro: idRegistro,
+      logicalId: idRegistro,
     );
-    for (final row in _buildPendingRows(userId, table)) {
-      await local.insertPending(row);
-    }
     widget.onLocalChanged?.call();
     return true;
   }
@@ -5922,19 +5981,14 @@ class _PlagasEnfermedadesSpecialPageState
         return;
       }
 
-      await local.deletePendingRecordsByPrefix('${idRegistro}_');
-      await local.deletePendingRecordsByLogicalId(
+      await local.replacePendingRecordsAtomically(
+        rows: _buildPendingRows(userId, table),
+        idLocalPrefix: '${idRegistro}_',
         formatoId: widget.format['id']?.toString() ?? '',
         tablaDestino: table,
-        idRegistro: idRegistro,
+        logicalId: idRegistro,
+        editIdLocal: widget.editIdLocal,
       );
-      if (widget.editIdLocal != null && widget.editIdLocal!.isNotEmpty) {
-        await local.deleteRecord(widget.editIdLocal!);
-      }
-
-      for (final row in _buildPendingRows(userId, table)) {
-        await local.insertPending(row);
-      }
       widget.onLocalChanged?.call();
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -7439,9 +7493,6 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
       if (campo.isEmpty) continue;
       final value = _valueFor(f, id);
       if (value != null) payload[campo] = value;
-    }
-    if (widget.editIdLocal != null && widget.editIdLocal!.isNotEmpty) {
-      await local.deleteRecord(widget.editIdLocal!);
     }
     await local.insertPending({
       'id_local': id,

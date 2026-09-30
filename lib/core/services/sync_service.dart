@@ -3239,9 +3239,9 @@ class SyncService {
     if (_norm(table) == _norm('GT-MATRIZ_MOVILIDADES')) {
       canonicalByNorm.addAll({
         'ID_LOCAL': 'id_local',
-        'PLACA': 'placa',
-        'CONDUCTOR': 'conductor',
-        'DNI_CONDUCTOR': 'dni_conductor',
+        'PLACA': 'PLACA',
+        'CONDUCTOR': 'CONDUCTOR',
+        'DNI_CONDUCTOR': 'DNI_CONDUCTOR',
         'LICENCIA_CONDUCIR': 'licencia_conducir',
         'LICENCIA_VIGENCIA': 'licencia_vigencia',
         'SOAT_VIGENCIA': 'soat_vigencia',
@@ -3358,7 +3358,21 @@ class SyncService {
     }
   }
 
+  static bool _syncPendingRunning = false;
+
   Future<int> syncPending() async {
+    if (_syncPendingRunning) {
+      throw Exception('Ya hay una sincronización en curso.');
+    }
+    _syncPendingRunning = true;
+    try {
+      return await _syncPendingInternal();
+    } finally {
+      _syncPendingRunning = false;
+    }
+  }
+
+  Future<int> _syncPendingInternal() async {
     final online = await hasInternet();
     if (!online)
       throw Exception(
@@ -3371,6 +3385,10 @@ class SyncService {
       throw Exception('No hay un usuario autenticado para sincronizar.');
     }
     final activeEmpresaId = await LocalSession().cachedEmpresaId();
+    await _local.recoverInterruptedSyncRecords(
+      userId: activeUserId,
+      empresaId: activeEmpresaId,
+    );
     final allPending = await _local.pendingRecords(
       userId: activeUserId,
       empresaId: activeEmpresaId,

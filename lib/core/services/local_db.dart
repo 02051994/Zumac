@@ -1689,6 +1689,34 @@ class LocalDb {
     );
   }
 
+  /// Recupera filas que quedaron a mitad de envío si el proceso o el APK se
+  /// cerró. Ningún registro se elimina: vuelve a la cola reintentable.
+  Future<int> recoverInterruptedSyncRecords({
+    String? userId,
+    String? empresaId,
+  }) async {
+    final database = await db;
+    final where = <String>['estado = ?'];
+    final args = <Object?>[OfflineRecordState.syncing.storageValue];
+    if (userId != null && userId.trim().isNotEmpty) {
+      where.add('user_id = ?');
+      args.add(userId.trim());
+    }
+    if (empresaId != null && empresaId.trim().isNotEmpty) {
+      where.add('empresa_id = ?');
+      args.add(empresaId.trim());
+    }
+    return database.update(
+      'pending_records',
+      {
+        'estado': OfflineRecordState.error.storageValue,
+        'error_mensaje': 'Sincronización interrumpida; pendiente de reintento.',
+      },
+      where: where.join(' and '),
+      whereArgs: args,
+    );
+  }
+
   Future<List<Map<String, dynamic>>> allRecords({
     String? estado,
     String? userId,
@@ -1802,6 +1830,115 @@ class LocalDb {
       await database.delete('pending_records',
           where: 'id_local = ?', whereArgs: [idLocal]);
     }
+  }
+
+  /// Sustituye un conjunto relacionado dentro de una sola transacción. Si
+  /// alguna fila nueva falla, SQLite revierte también los borrados previos.
+  Future<void> replacePendingRecordsAtomically({
+    required List<Map<String, dynamic>> rows,
+    String? idLocalPrefix,
+    String? formatoId,
+    String? tablaDestino,
+    String? logicalId,
+    String? editIdLocal,
+  }) async {
+    if (rows.isEmpty) return;
+    final database = await db;
+    await database.transaction((txn) async {
+      final idsToDelete = <String>{};
+      final prefix = idLocalPrefix?.trim() ?? '';
+      if (prefix.isNotEmpty) {
+        final matches = await txn.query(
+          'pending_records',
+          columns: ['id_local'],
+          where: 'estado <> ? and id_local like ?',
+          whereArgs: [OfflineRecordState.synced.storageValue, '$prefix%'],
+        );
+        idsToDelete.addAll(matches
+            .map((row) => row['id_local']?.toString() ?? '')
+            .where((id) => id.isNotEmpty));
+      }
+      final cleanLogicalId = logicalId?.trim() ?? '';
+      if (cleanLogicalId.isNotEmpty &&
+          (formatoId?.trim().isNotEmpty ?? false) &&
+          (tablaDestino?.trim().isNotEmpty ?? false)) {
+        final matches = await txn.query(
+          'pending_records',
+          where: 'estado <> ? and formato_id = ? and tabla_destino = ?',
+          whereArgs: [
+            OfflineRecordState.synced.storageValue,
+            formatoId!.trim(),
+            tablaDestino!.trim(),
+          ],
+        );
+        for (final row in matches) {
+          try {
+            final payload = jsonDecode(row['payload_json']?.toString() ?? '{}')
+                as Map<String, dynamic>;
+            final candidate = _payloadValue(payload, ['ID_REGISTRO', 'ID'])
+                    ?.toString()
+                    .trim() ??
+                '';
+            if (candidate == cleanLogicalId) {
+              final id = row['id_local']?.toString() ?? '';
+              if (id.isNotEmpty) idsToDelete.add(id);
+            }
+          } catch (_) {}
+        }
+      }
+      final cleanEditId = editIdLocal?.trim() ?? '';
+      if (cleanEditId.isNotEmpty) idsToDelete.add(cleanEditId);
+
+      final previousById = <String, Map<String, Object?>>{};
+      for (final row in rows) {
+        final id = row['id_local']?.toString().trim() ?? '';
+        if (id.isEmpty) continue;
+        final existing = await txn.query(
+          'pending_records',
+          columns: ['version_local', 'created_at', 'base_updated_at'],
+          where: 'id_local = ?',
+          whereArgs: [id],
+          limit: 1,
+        );
+        if (existing.isNotEmpty) previousById[id] = existing.first;
+      }
+      for (final id in idsToDelete) {
+        await txn.delete(
+          'pending_records',
+          where: 'id_local = ?',
+          whereArgs: [id],
+        );
+      }
+
+      final now = DateTime.now().toUtc().toIso8601String();
+      for (final row in rows) {
+        final scoped = Map<String, dynamic>.from(row);
+        final id = scoped['id_local']?.toString().trim() ?? '';
+        final previous = previousById[id];
+        scoped['version_local'] =
+            ((previous?['version_local'] as num?)?.toInt() ?? 0) + 1;
+        if (previous != null &&
+            (scoped['created_at']?.toString().trim().isEmpty ?? true)) {
+          scoped['created_at'] = previous['created_at'];
+        }
+        if (previous != null &&
+            (scoped['base_updated_at']?.toString().trim().isEmpty ?? true)) {
+          scoped['base_updated_at'] = previous['base_updated_at'];
+        }
+        scoped.putIfAbsent(
+          'estado',
+          () => OfflineRecordState.pending.storageValue,
+        );
+        scoped['updated_at_local'] = now;
+        scoped.putIfAbsent('created_at', () => now);
+        scoped.putIfAbsent('empresa_id', () => TenantConfig.defaultEmpresaId);
+        await txn.insert(
+          'pending_records',
+          scoped,
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+    });
   }
 
   Future<int> pendingCount() async {

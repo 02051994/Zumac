@@ -227,6 +227,71 @@ void main() {
     expect(row['conflict_json'], isNull);
   });
 
+  test('una sincronizacion interrumpida vuelve a la cola sin perder datos',
+      () async {
+    await local.insertPending({
+      'id_local': 'registro-interrumpido',
+      'user_id': 'usuario-a',
+      'empresa_id': TenantConfig.defaultEmpresaId,
+      'payload_json': jsonEncode({'CONDUCTOR': 'Nombre editado'}),
+    });
+    await local.markSyncing('registro-interrumpido');
+
+    final recovered = await local.recoverInterruptedSyncRecords(
+      userId: 'usuario-a',
+      empresaId: TenantConfig.defaultEmpresaId,
+    );
+    final pending = await local.pendingRecords(
+      userId: 'usuario-a',
+      empresaId: TenantConfig.defaultEmpresaId,
+    );
+
+    expect(recovered, 1);
+    expect(pending, hasLength(1));
+    expect(pending.single['estado'], OfflineRecordState.error.storageValue);
+    expect(pending.single['payload_json'], contains('Nombre editado'));
+  });
+
+  test('un reemplazo relacionado fallido revierte los borrados', () async {
+    await local.insertPending({
+      'id_local': 'grupo_0',
+      'user_id': 'usuario-a',
+      'formato_id': 'formato-a',
+      'tabla_destino': 'REGISTROS',
+      'payload_json': jsonEncode({'ID_REGISTRO': 'grupo', 'valor': 'anterior'}),
+    });
+
+    await expectLater(
+      local.replacePendingRecordsAtomically(
+        idLocalPrefix: 'grupo_',
+        formatoId: 'formato-a',
+        tablaDestino: 'REGISTROS',
+        logicalId: 'grupo',
+        rows: [
+          {
+            'id_local': 'grupo_0',
+            'user_id': 'usuario-a',
+            'payload_json':
+                jsonEncode({'ID_REGISTRO': 'grupo', 'valor': 'nuevo'}),
+          },
+          {
+            'id_local': 'grupo_1',
+            'columna_inexistente': 'fuerza rollback',
+          },
+        ],
+      ),
+      throwsA(anything),
+    );
+
+    final row = (await database.query(
+      'pending_records',
+      where: 'id_local = ?',
+      whereArgs: ['grupo_0'],
+    ))
+        .single;
+    expect(row['payload_json'], contains('anterior'));
+  });
+
   test('la politica optimista detecta cambios remotos posteriores', () {
     expect(
       OfflineConflictPolicy.hasRemoteChange(

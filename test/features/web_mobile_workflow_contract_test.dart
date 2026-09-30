@@ -13,6 +13,14 @@ void main() {
   final desktopRecords = File(
     'lib/features/formats/desktop_format_records_page.dart',
   ).readAsStringSync();
+  final syncService =
+      File('lib/core/services/sync_service.dart').readAsStringSync();
+  final permissions = File(
+    'lib/features/users/governed_permissions_page.dart',
+  ).readAsStringSync();
+  final toolMigration = File(
+    'supabase/migrations/202609300071_workspace_tool_permissions_and_attendance_roster.sql',
+  ).readAsStringSync();
 
   test('la web conserva el layout de escritorio aunque reduzca su ancho', () {
     expect(platform, contains('if (kIsWeb) return true;'));
@@ -58,6 +66,29 @@ void main() {
     expect(specialForms, contains('ScrollbarOrientation.bottom'));
     expect(specialForms, contains("table == 'GT_ASISTENCIA_PERSONAL'"));
     expect(modules, contains('appGtSpecialFormatFallback(format)'));
+    expect(specialForms, contains('appgt_personal_asistencia_v1'));
+    expect(specialForms, contains('_workerName(w)'));
+    expect(specialForms, isNot(contains("substring(2)}'")));
+    expect(specialForms, contains('Widget _attendanceForm()'));
+    expect(specialForms, isNot(contains('Widget _headerCard()')));
+  });
+
+  test('las herramientas de inicio usan permisos gobernados', () {
+    expect(modules, contains('loadCurrentToolAccess()'));
+    expect(modules, contains('_canUseWorkspaceTool'));
+    expect(permissions, contains('Herramientas de la pantalla principal'));
+    expect(permissions, contains('saveToolPermissions'));
+    expect(toolMigration, contains('appgt_guardar_permisos_herramientas_v1'));
+    expect(toolMigration, contains("v_actor_role = 'GESTOR'"));
+  });
+
+  test('la cola conserva ediciones y recupera sincronizaciones interrumpidas',
+      () {
+    expect(syncService, contains("'CONDUCTOR': 'CONDUCTOR'"));
+    expect(syncService, contains("'DNI_CONDUCTOR': 'DNI_CONDUCTOR'"));
+    expect(syncService, contains('recoverInterruptedSyncRecords'));
+    expect(specialForms, contains("'CONDUCTOR',"));
+    expect(modules, contains('Quedan \${outstandingRows.length} pendientes'));
   });
 
   test('el tareo integra horas, observación y trabajadores en una vista', () {

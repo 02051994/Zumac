@@ -4457,12 +4457,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       }
     }
 
-    if (!isOnlineFirstRuntime &&
-        widget.editIdLocal != null &&
-        widget.editIdLocal!.isNotEmpty) {
-      await local.deleteRecord(widget.editIdLocal!);
-    }
-
     setState(() => savingLocal = true);
     try {
       if (isOnlineFirstRuntime) {

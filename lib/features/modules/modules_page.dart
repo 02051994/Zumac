@@ -33,6 +33,7 @@ import '../knowledge_admin/knowledge_admin_page.dart';
 import '../onboarding/onboarding_page.dart';
 import '../alerts_actions/alerts_actions_page.dart';
 import '../metrics/metrics_page.dart';
+import '../users/permission_management_repository.dart';
 import 'generic_section_page.dart';
 import 'dynamic_views_page.dart';
 
@@ -461,6 +462,7 @@ class _ModulesPageState extends State<ModulesPage> {
   bool canUseZumacAlerts = false;
   bool canUseZumacActions = false;
   bool canUseZumacMetrics = false;
+  bool _toolAccessLoaded = false;
   int openAlertEvents = 0;
   int pendingActions = 0;
   bool online = true;
@@ -661,13 +663,14 @@ class _ModulesPageState extends State<ModulesPage> {
     if (kind == 'tool') {
       final candidate = snapshot['tool']?.toString() ?? _toolHome;
       if (const {
-        _toolConsultant,
-        _toolCreatorCreate,
-        _toolCreatorEdit,
-        _toolMetrics,
-        _toolAlerts,
-        _toolActions,
-      }.contains(candidate)) {
+            _toolConsultant,
+            _toolCreatorCreate,
+            _toolCreatorEdit,
+            _toolMetrics,
+            _toolAlerts,
+            _toolActions,
+          }.contains(candidate) &&
+          (!_toolAccessLoaded || _canUseWorkspaceTool(candidate))) {
         restoredTool = candidate;
       }
     } else if (kind == 'section') {
@@ -727,7 +730,16 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Future<void> _loadConfigurationAccess() async {
-    if (Supabase.instance.client.auth.currentUser == null) return;
+    final currentUser = Supabase.instance.client.auth.currentUser;
+    if (currentUser == null) return;
+    final empresaId = (await LocalSession().cachedEmpresaId()).trim();
+    if (empresaId.isNotEmpty) {
+      final cached = await experience.loadToolAccess(
+        userId: currentUser.id,
+        empresaId: empresaId,
+      );
+      if (cached.isNotEmpty && mounted) _applyToolAccess(cached);
+    }
     Future<Map<String, dynamic>> safeMap(Future<dynamic> request) async {
       try {
         final raw = await request.timeout(const Duration(seconds: 4));
@@ -743,26 +755,127 @@ class _ModulesPageState extends State<ModulesPage> {
       safeMap(ConfigurationAdminRepository().loadContext()),
       safeMap(Supabase.instance.client.rpc('appgt_alertas_contexto_v1')),
       safeMap(Supabase.instance.client.rpc('appgt_metrics_contexto_v1')),
+      safeMap(PermissionManagementRepository().loadCurrentToolAccess()),
     ]);
     if (!mounted) return;
     final contextData = contexts[0];
     final alertsContext = contexts[1];
     final metricsContext = contexts[2];
-    setState(() {
-      canUseZumacConsultor = contextData['zumac_consultor_habilitado'] == true;
-      canUseZumacCreator = contextData['zumac_creator_habilitado'] == true;
-      canUseZumacAlerts = alertsContext['alerts_habilitado'] == true;
-      canUseZumacActions = alertsContext['actions_habilitado'] == true;
-      canUseZumacMetrics = metricsContext['metrics_habilitado'] == true;
-      final summary = alertsContext['resumen'];
-      if (summary is Map) {
+    final toolsContext = contexts[3];
+    if (contextData.isEmpty &&
+        alertsContext.isEmpty &&
+        metricsContext.isEmpty &&
+        toolsContext.isEmpty) {
+      return;
+    }
+
+    final toolRows = toolsContext['herramientas'] is List
+        ? (toolsContext['herramientas'] as List)
+            .whereType<Map>()
+            .map((row) => Map<String, dynamic>.from(row))
+            .toList(growable: false)
+        : const <Map<String, dynamic>>[];
+    bool allowed(String code, bool fallback) {
+      for (final row in toolRows) {
+        if (row['codigo']?.toString().toUpperCase() == code) {
+          return row['habilitada'] == true;
+        }
+      }
+      return fallback;
+    }
+
+    final next = <String, dynamic>{
+      'consultor': allowed(
+        'ZUMAC_CONSULTOR',
+        contextData.isEmpty
+            ? canUseZumacConsultor
+            : contextData['zumac_consultor_habilitado'] == true,
+      ),
+      'creator': allowed(
+        'ZUMAC_CREATOR',
+        contextData.isEmpty
+            ? canUseZumacCreator
+            : contextData['zumac_creator_habilitado'] == true,
+      ),
+      'alerts': allowed(
+        'ZUMAC_ALERTS',
+        alertsContext.isEmpty
+            ? canUseZumacAlerts
+            : alertsContext['alerts_habilitado'] == true,
+      ),
+      'actions': allowed(
+        'ZUMAC_ACTIONS',
+        alertsContext.isEmpty
+            ? canUseZumacActions
+            : alertsContext['actions_habilitado'] == true,
+      ),
+      'metrics': allowed(
+        'ZUMAC_METRICS',
+        metricsContext.isEmpty
+            ? canUseZumacMetrics
+            : metricsContext['metrics_habilitado'] == true,
+      ),
+      'can_manage_company': contextData.isEmpty
+          ? canManageCompany
+          : contextData['puede_gestionar_empresa'] == true,
+      'is_company_admin': contextData.isEmpty
+          ? isCompanyAdmin
+          : contextData['es_admin_empresa'] == true,
+    };
+    _applyToolAccess(next);
+    final summary = alertsContext['resumen'];
+    if (summary is Map && mounted) {
+      setState(() {
         openAlertEvents = (summary['eventos_abiertos'] as num?)?.toInt() ?? 0;
         pendingActions = (summary['acciones_pendientes'] as num?)?.toInt() ?? 0;
-      }
-      canManageCompany = contextData['puede_gestionar_empresa'] == true;
-      isCompanyAdmin = contextData['es_admin_empresa'] == true;
+      });
+    }
+    if (empresaId.isNotEmpty) {
+      unawaited(experience.saveToolAccess(
+        userId: currentUser.id,
+        empresaId: empresaId,
+        value: next,
+      ));
+    }
+  }
+
+  void _applyToolAccess(Map<String, dynamic> access) {
+    if (!mounted) return;
+    setState(() {
+      canUseZumacConsultor = access['consultor'] == true;
+      canUseZumacCreator = access['creator'] == true;
+      canUseZumacAlerts = access['alerts'] == true;
+      canUseZumacActions = access['actions'] == true;
+      canUseZumacMetrics = access['metrics'] == true;
+      canManageCompany = access['can_manage_company'] == true;
+      isCompanyAdmin = access['is_company_admin'] == true;
       canManageConfiguration = canManageCompany && canUseZumacCreator;
+      _toolAccessLoaded = true;
+      if (!_canUseWorkspaceTool(_activeWorkspaceTool)) {
+        _activeWorkspaceTool = _toolHome;
+        _consultantOpen = false;
+      }
     });
+  }
+
+  bool _canUseWorkspaceTool(String tool) {
+    switch (tool) {
+      case _toolHome:
+        return true;
+      case _toolConsultant:
+        return canUseZumacConsultor;
+      case _toolCreatorCreate:
+      case _toolCreatorEdit:
+        return canUseZumacCreator && canManageConfiguration;
+      case _toolMetrics:
+        return canUseZumacMetrics;
+      case _toolAlerts:
+        return canUseZumacAlerts;
+      case _toolActions:
+        return canUseZumacActions;
+      default:
+        return false;
+    }
   }
 
   Future<void> _openConfigurationAdmin({
@@ -828,6 +941,16 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   void _activateWorkspaceTool(String tool) {
+    if (!_canUseWorkspaceTool(tool)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Esta herramienta requiere un permiso otorgado por un ADMIN o GESTOR.',
+          ),
+        ),
+      );
+      return;
+    }
     unawaited(_refreshIncrementallyOnEntry());
     _rememberNavigation();
     setState(() {
@@ -1679,6 +1802,11 @@ class _ModulesPageState extends State<ModulesPage> {
         userId: userId,
         empresaId: empresaId,
       );
+      final outstandingRows = await local.allRecords(
+        estado: 'pendiente',
+        userId: userId,
+        empresaId: empresaId,
+      );
       if (!mounted) return;
       final afterTareos = groupTareoQueueRows(afterRows);
       final closedAfterIds = afterTareos
@@ -1705,6 +1833,10 @@ class _ModulesPageState extends State<ModulesPage> {
       } else if (closedBeforeIds.isNotEmpty) {
         message =
             '$sentTareos ${sentTareos == 1 ? 'tareo enviado' : 'tareos enviados'}.';
+      } else if (outstandingRows.isNotEmpty) {
+        message = count == 0
+            ? 'No se enviaron registros. Quedan ${outstandingRows.length} pendientes; revisa el detalle y vuelve a sincronizar.'
+            : 'Registros sincronizados: $count. Quedan ${outstandingRows.length} pendientes por reintentar.';
       } else {
         message = 'Registros sincronizados: $count';
       }
@@ -2526,7 +2658,7 @@ class _ModulesPageState extends State<ModulesPage> {
                   title: 'Consultor',
                   subtitle: canUseZumacConsultor
                       ? 'Pregunta cualquier tema de tu empresa.'
-                      : 'No habilitado para esta empresa.',
+                      : 'Solicite acceso a un ADMIN o GESTOR.',
                   icon: Icons.forum_outlined,
                   color: const Color(0xFF176B87),
                   selected: _consultantOpen && canUseZumacConsultor,
@@ -2549,7 +2681,7 @@ class _ModulesPageState extends State<ModulesPage> {
                   title: 'Metrics',
                   subtitle: canUseZumacMetrics
                       ? 'Dashboards, indicadores y análisis visual.'
-                      : 'No habilitado para esta empresa.',
+                      : 'Solicite acceso a un ADMIN o GESTOR.',
                   icon: Icons.insights_outlined,
                   color: const Color(0xFF6E56CF),
                   onTap: canUseZumacMetrics ? _openMetrics : null,
@@ -2558,7 +2690,7 @@ class _ModulesPageState extends State<ModulesPage> {
                   title: 'Alerts',
                   subtitle: canUseZumacAlerts
                       ? 'Vigilancia de condiciones y anomalías.'
-                      : 'No habilitado para esta empresa.',
+                      : 'Solicite acceso a un ADMIN o GESTOR.',
                   icon: Icons.notifications_active_outlined,
                   color: const Color(0xFFC56A13),
                   badge:
@@ -2569,7 +2701,7 @@ class _ModulesPageState extends State<ModulesPage> {
                   title: 'Actions',
                   subtitle: canUseZumacActions
                       ? 'Tareas, aprobaciones y evidencia.'
-                      : 'No habilitado para esta empresa.',
+                      : 'Solicite acceso a un ADMIN o GESTOR.',
                   icon: Icons.bolt_outlined,
                   color: const Color(0xFFB4425A),
                   badge:
@@ -3920,17 +4052,19 @@ class _ModulesPageState extends State<ModulesPage> {
     final format = desktopSelectedFormat;
     if (module != null && format != null) {
       final moduleId = module['id']?.toString() ?? '';
+      final effectiveSpecial =
+          mobileSelectedSpecial ?? appGtSpecialFormatFallback(format);
       final key = ValueKey(
-        'mobile_${moduleId}_${format['id']}_${mobileSelectedSpecial?['id'] ?? ''}_'
+        'mobile_${moduleId}_${format['id']}_${effectiveSpecial?['id'] ?? ''}_'
         '${_consultantTableName ?? ''}_${_consultantRecordField ?? ''}_'
         '${_consultantRecordValue ?? ''}',
       );
-      if (mobileSelectedSpecial != null) {
+      if (effectiveSpecial != null) {
         return SpecialFormRouterPage(
           key: key,
           moduleId: moduleId,
           format: format,
-          special: mobileSelectedSpecial!,
+          special: effectiveSpecial,
           onLocalChanged: _refreshPendingBadge,
           onSavedAndExit: _closeMobileFormatAfterSpecialSave,
         );
@@ -3982,6 +4116,9 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   Widget? _workspaceToolContent({required bool desktop}) {
+    if (!_toolAccessLoaded || !_canUseWorkspaceTool(_activeWorkspaceTool)) {
+      return null;
+    }
     switch (_activeWorkspaceTool) {
       case _toolConsultant:
         return _consultantWorkspace(desktop: desktop);
