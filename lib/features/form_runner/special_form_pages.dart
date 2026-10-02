@@ -81,6 +81,215 @@ Future<void> _showAppGtAlert(
   );
 }
 
+class _ScannerOutcome {
+  final bool accepted;
+  final String message;
+
+  const _ScannerOutcome.accepted(this.message) : accepted = true;
+  const _ScannerOutcome.rejected(this.message) : accepted = false;
+}
+
+String _workerRuleNorm(String value) => value
+    .trim()
+    .toUpperCase()
+    .replaceAll('Á', 'A')
+    .replaceAll('É', 'E')
+    .replaceAll('Í', 'I')
+    .replaceAll('Ó', 'O')
+    .replaceAll('Ú', 'U')
+    .replaceAll('Ü', 'U')
+    .replaceAll('Ñ', 'N')
+    .replaceAll(RegExp(r'[^A-Z0-9]+'), '');
+
+String _workerRuleDigits(String value) =>
+    value.replaceAll(RegExp(r'[^0-9]'), '');
+
+dynamic _workerRuleValue(Map<String, dynamic> row, Iterable<String> keys) {
+  final wanted = keys.map(_workerRuleNorm).toSet();
+  for (final entry in row.entries) {
+    if (wanted.contains(_workerRuleNorm(entry.key))) return entry.value;
+  }
+  return null;
+}
+
+DateTime? _workerRuleDate(dynamic value) {
+  final text = value?.toString().trim() ?? '';
+  if (text.isEmpty || text.toLowerCase() == 'null') return null;
+  final parsed =
+      DateTime.tryParse(text.length >= 10 ? text.substring(0, 10) : text);
+  if (parsed != null) return DateTime(parsed.year, parsed.month, parsed.day);
+  final parts = text.split('/');
+  if (parts.length != 3) return null;
+  final day = int.tryParse(parts[0]);
+  final month = int.tryParse(parts[1]);
+  final year = int.tryParse(parts[2]);
+  if (day == null || month == null || year == null) return null;
+  return DateTime(year, month, day);
+}
+
+bool _workerRuleBool(dynamic value) {
+  if (value == true || value == 1) return true;
+  return const {'TRUE', 'SI', 'SÍ', 'YES', '1'}
+      .contains(value?.toString().trim().toUpperCase() ?? '');
+}
+
+String _workerRuleDateLabel(DateTime value) =>
+    '${value.day.toString().padLeft(2, '0')}/'
+    '${value.month.toString().padLeft(2, '0')}/${value.year}';
+
+Future<List<Map<String, dynamic>>> _workerRuleLocalPayloads(
+  LocalDb local,
+  String table,
+) async {
+  final out = <Map<String, dynamic>>[];
+  final seen = <String>{};
+  for (final source in {table, table.replaceAll('_', '-')}) {
+    for (final payload in await local.matrixPayloads(source)) {
+      final key = jsonEncode(payload);
+      if (seen.add(key) && !isSoftDeletedAppgtRow(payload)) out.add(payload);
+    }
+  }
+  for (final record in await local.allRecords(table: table)) {
+    try {
+      final decoded = jsonDecode(record['payload_json']?.toString() ?? '{}');
+      if (decoded is! Map) continue;
+      final payload = Map<String, dynamic>.from(decoded);
+      final key = jsonEncode(payload);
+      if (seen.add(key) && !isSoftDeletedAppgtRow(payload)) out.add(payload);
+    } catch (_) {}
+  }
+  return out;
+}
+
+/// Validación local compartida por Asistencia y Tareo. Toda la información se
+/// consulta desde el caché/cola del dispositivo para que también funcione sin
+/// internet.
+Future<String?> _workerAuthorizationBlockReason({
+  required LocalDb local,
+  required Map<String, dynamic> worker,
+  required String dni,
+  required DateTime workDate,
+}) async {
+  final status = _workerRuleNorm(
+    (_workerRuleValue(worker, const ['Status', 'ESTADO', 'ESTADO_PERSONAL']) ??
+            '')
+        .toString(),
+  );
+  final contractStart = _workerRuleDate(_workerRuleValue(worker, const [
+    'Fecha inicio de Contrato',
+    'FECHA_INICIO_CONTRATO',
+    'FECHA INICIO DE CONTRATO',
+  ]));
+  final contractEnd = _workerRuleDate(_workerRuleValue(worker, const [
+    'Fecha fin de Contrato',
+    'FECHA_FIN_CONTRATO',
+    'FECHA FIN DE CONTRATO',
+  ]));
+  if (status.isNotEmpty && status != 'ACTIVO') {
+    return status == 'PENDIENTERENOVACION'
+        ? 'Contrato vencido. Derivar a Gestión Humana para su renovación.'
+        : 'El trabajador no está activo: ${status.replaceAll('_', ' ')}.';
+  }
+  if (contractStart == null) {
+    return 'El trabajador no tiene fecha de inicio de contrato configurada.';
+  }
+  if (contractEnd == null) {
+    return 'El trabajador no tiene fecha de fin de contrato configurada.';
+  }
+  final day = DateTime(workDate.year, workDate.month, workDate.day);
+  if (day.isBefore(contractStart)) {
+    return 'El contrato inicia el ${_workerRuleDateLabel(contractStart)}.';
+  }
+  if (contractEnd.isBefore(day)) {
+    return 'Contrato vencido el ${_workerRuleDateLabel(contractEnd)}.';
+  }
+
+  final permissions =
+      await _workerRuleLocalPayloads(local, 'GH_PERMISOS_LICENCIAS_APPGT');
+  for (final permission in permissions.reversed) {
+    final permissionDni = _workerRuleDigits(
+      (_workerRuleValue(permission, const ['dni', 'DNI', 'DOCUMENTO']) ?? '')
+          .toString(),
+    );
+    if (permissionDni != _workerRuleDigits(dni)) continue;
+    final approval = _workerRuleNorm(
+      (_workerRuleValue(permission,
+                  const ['ESTADO_APROBACION', 'estado_aprobacion']) ??
+              '')
+          .toString(),
+    );
+    final state = _workerRuleNorm(
+      (_workerRuleValue(permission, const ['estado', 'ESTADO']) ?? '')
+          .toString(),
+    );
+    final approved =
+        const {'APROBADO', 'AUTORIZADO', 'VIGENTE'}.contains(approval) ||
+            (approval.isEmpty &&
+                const {'APROBADO', 'AUTORIZADO', 'VIGENTE', 'ACTIVO'}
+                    .contains(state));
+    if (!approved || const {'RECHAZADO', 'ANULADO'}.contains(state)) continue;
+    final start = _workerRuleDate(
+        _workerRuleValue(permission, const ['fecha_inicio', 'FECHA_INICIO']));
+    final end = _workerRuleDate(
+        _workerRuleValue(permission, const ['fecha_fin', 'FECHA_FIN']));
+    if (start == null ||
+        end == null ||
+        day.isBefore(start) ||
+        day.isAfter(end)) {
+      continue;
+    }
+    final type = (_workerRuleValue(permission,
+                const ['tipo_permiso', 'TIPO_PERMISO', 'tipo_ausencia']) ??
+            'permiso o licencia')
+        .toString()
+        .trim();
+    return 'El trabajador tiene ${type.toLowerCase()} vigente del '
+        '${_workerRuleDateLabel(start)} al ${_workerRuleDateLabel(end)}.';
+  }
+
+  final sanctions =
+      await _workerRuleLocalPayloads(local, 'GH_SANCIONES_PERSONAL_APPGT');
+  for (final sanction in sanctions.reversed) {
+    final sanctionDni = _workerRuleDigits(
+      (_workerRuleValue(sanction, const ['dni', 'DNI', 'DOCUMENTO']) ?? '')
+          .toString(),
+    );
+    if (sanctionDni != _workerRuleDigits(dni)) continue;
+    final state = _workerRuleNorm(
+      (_workerRuleValue(sanction, const ['estado', 'ESTADO']) ?? '').toString(),
+    );
+    final approvalValue = _workerRuleValue(
+        sanction, const ['estado_aprobacion', 'ESTADO_APROBACION']);
+    final approval = _workerRuleNorm(approvalValue?.toString() ?? '');
+    final approved =
+        approvalValue == null ? state == 'VIGENTE' : approval == 'APROBADO';
+    if (!approved ||
+        state != 'VIGENTE' ||
+        !_workerRuleBool(_workerRuleValue(
+            sanction, const ['bloquea_asistencia', 'BLOQUEA_ASISTENCIA']))) {
+      continue;
+    }
+    final start = _workerRuleDate(
+        _workerRuleValue(sanction, const ['fecha_inicio', 'FECHA_INICIO']));
+    final end = _workerRuleDate(
+        _workerRuleValue(sanction, const ['fecha_fin', 'FECHA_FIN']));
+    if (start == null ||
+        end == null ||
+        day.isBefore(start) ||
+        day.isAfter(end)) {
+      continue;
+    }
+    final type =
+        (_workerRuleValue(sanction, const ['tipo_sancion', 'TIPO_SANCION']) ??
+                'sanción vigente')
+            .toString()
+            .trim()
+            .toLowerCase();
+    return 'El trabajador cuenta con $type hasta ${_workerRuleDateLabel(end)}.';
+  }
+  return null;
+}
+
 Future<Set<String>?> _showMissingAttendanceAlert(
     BuildContext context, List<Map<String, String>> missing) async {
   await SystemSound.play(SystemSoundType.alert);
@@ -209,6 +418,8 @@ const Color _zumacFormatBlue = Color(0xFF0F5265);
 AppBar _zumacFormatAppBar({
   required Widget title,
   VoidCallback? onBack,
+  IconData leadingIcon = Icons.arrow_back,
+  String leadingTooltip = 'Volver',
   List<Widget>? actions,
 }) {
   return AppBar(
@@ -220,8 +431,8 @@ AppBar _zumacFormatAppBar({
     leading: onBack == null
         ? null
         : IconButton(
-            tooltip: 'Volver',
-            icon: const Icon(Icons.arrow_back),
+            tooltip: leadingTooltip,
+            icon: Icon(leadingIcon),
             onPressed: onBack,
           ),
     title: title,
@@ -272,6 +483,7 @@ class SpecialFormRouterPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tipo = special['tipo_pantalla']?.toString() ?? '';
+    final destination = _specialNorm(format['tabla_destino']?.toString() ?? '');
     if (tipo == 'fenologia_plantas') {
       return PlagasEnfermedadesSpecialPage(
         moduleId: moduleId,
@@ -293,7 +505,8 @@ class SpecialFormRouterPage extends StatelessWidget {
         onSavedAndExit: onSavedAndExit,
       );
     }
-    if (tipo == 'asistencia_personal' ||
+    if (destination == 'GT_ASISTENCIA_PERSONAL' ||
+        tipo == 'asistencia_personal' ||
         tipo == 'asistencia_qr' ||
         tipo == 'asistencia_movilidad') {
       if (!isMobileCaptureRuntime) {
@@ -308,7 +521,8 @@ class SpecialFormRouterPage extends StatelessWidget {
         onSavedAndExit: onSavedAndExit,
       );
     }
-    if (tipo == 'tareo_personal' ||
+    if (destination == 'GT_TAREO_PERSONAL' ||
+        tipo == 'tareo_personal' ||
         tipo == 'tareo_qr' ||
         (format['tabla_destino']?.toString() ?? '') == 'GT-TAREO_PERSONAL') {
       if (initialPayload == null && editIdLocal == null) {
@@ -1302,7 +1516,7 @@ class _AsistenciaPersonalSpecialPageState
 
   Future<void> _loadDailyAttendanceRows() async {
     final fecha = _headerValue(['FECHA'], fallback: fechaCtrl.text.trim());
-    final rows = await local.allRecords();
+    final rows = await local.allRecords(table: 'GT-ASISTENCIA_PERSONAL');
     final dayRows = <Map<String, dynamic>>[];
     for (final r in rows) {
       if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL')
@@ -1346,7 +1560,10 @@ class _AsistenciaPersonalSpecialPageState
         addWorker(payload);
       }
     }
-    final pending = await local.allRecords();
+    final pending = <Map<String, dynamic>>[
+      ...await local.allRecords(table: 'GH-REGISTRO_PERSONAL_PLANILLA'),
+      ...await local.allRecords(table: 'GH_REGISTRO_PERSONAL_PLANILLA'),
+    ];
     for (final r in pending) {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
       if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' &&
@@ -1434,7 +1651,10 @@ class _AsistenciaPersonalSpecialPageState
         } catch (_) {}
       }
     }
-    final pending = await local.allRecords();
+    final pending = <Map<String, dynamic>>[
+      ...await local.allRecords(table: 'GH-REGISTRO_PERSONAL_PLANILLA'),
+      ...await local.allRecords(table: 'GH_REGISTRO_PERSONAL_PLANILLA'),
+    ];
     for (final r in pending) {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
       if (table != 'GH-REGISTRO_PERSONAL_PLANILLA' &&
@@ -1503,7 +1723,7 @@ class _AsistenciaPersonalSpecialPageState
         } catch (_) {}
       }
     }
-    for (final row in await local.allRecords()) {
+    for (final row in await local.allRecords(table: table)) {
       if ((row['tabla_destino']?.toString() ?? '').trim().toUpperCase() !=
           wanted) {
         continue;
@@ -1523,87 +1743,13 @@ class _AsistenciaPersonalSpecialPageState
     Map<String, dynamic> worker,
     String dni,
     DateTime attendanceDate,
-  ) async {
-    final status = _norm(
-      (_rowValue(worker, ['Status', 'ESTADO', 'ESTADO_PERSONAL']) ?? '')
-          .toString(),
-    );
-    final contractStart = _dateValue(_rowValue(worker, [
-      'Fecha inicio de Contrato',
-      'FECHA_INICIO_CONTRATO',
-      'FECHA INICIO DE CONTRATO',
-    ]));
-    final contractEnd = _dateValue(_rowValue(worker, [
-      'Fecha fin de Contrato',
-      'FECHA_FIN_CONTRATO',
-      'FECHA FIN DE CONTRATO',
-    ]));
-    if (status.isNotEmpty && status != 'ACTIVO') {
-      return status == 'PENDIENTERENOVACION'
-          ? 'Contrato vencido. Derivar a Gestión Humana para su renovación.'
-          : 'El trabajador no está activo: ${status.replaceAll('_', ' ')}.';
-    }
-    if (contractStart == null) {
-      return 'El trabajador no tiene fecha de inicio de contrato configurada.';
-    }
-    if (contractEnd == null) {
-      return 'El trabajador no tiene fecha de fin de contrato configurada.';
-    }
-    final day =
-        DateTime(attendanceDate.year, attendanceDate.month, attendanceDate.day);
-    if (day.isBefore(contractStart)) {
-      return 'El contrato inicia el ${contractStart.day.toString().padLeft(2, '0')}/'
-          '${contractStart.month.toString().padLeft(2, '0')}/${contractStart.year}.';
-    }
-    if (contractEnd.isBefore(day)) {
-      return 'Contrato vencido el ${contractEnd.day.toString().padLeft(2, '0')}/'
-          '${contractEnd.month.toString().padLeft(2, '0')}/${contractEnd.year}.';
-    }
-
-    final sanctions =
-        await _localPayloadsForTable('GH_SANCIONES_PERSONAL_APPGT');
-    for (final sanction in sanctions.reversed) {
-      final sanctionDni = _digits(
-        (_rowValue(sanction, ['dni', 'DNI', 'DOCUMENTO']) ?? '').toString(),
+  ) =>
+      _workerAuthorizationBlockReason(
+        local: local,
+        worker: worker,
+        dni: dni,
+        workDate: attendanceDate,
       );
-      if (sanctionDni != _digits(dni)) continue;
-      final state = _norm(
-        (_rowValue(sanction, ['estado', 'ESTADO']) ?? '').toString(),
-      );
-      final approvalValue = _rowValue(
-        sanction,
-        ['estado_aprobacion', 'ESTADO_APROBACION'],
-      );
-      final approvalState = _norm(approvalValue?.toString() ?? '');
-      final approved = approvalValue == null
-          ? state == 'VIGENTE'
-          : approvalState == 'APROBADO';
-      if (!approved ||
-          state != 'VIGENTE' ||
-          !_boolValue(_rowValue(
-              sanction, ['bloquea_asistencia', 'BLOQUEA_ASISTENCIA']))) {
-        continue;
-      }
-      final start =
-          _dateValue(_rowValue(sanction, ['fecha_inicio', 'FECHA_INICIO']));
-      final end = _dateValue(_rowValue(sanction, ['fecha_fin', 'FECHA_FIN']));
-      if (start == null ||
-          end == null ||
-          day.isBefore(start) ||
-          day.isAfter(end)) {
-        continue;
-      }
-      final type = (_rowValue(sanction, ['tipo_sancion', 'TIPO_SANCION']) ??
-              'sanción vigente')
-          .toString()
-          .trim()
-          .toLowerCase();
-      return 'El trabajador cuenta con $type hasta '
-          '${end.day.toString().padLeft(2, '0')}/'
-          '${end.month.toString().padLeft(2, '0')}/${end.year}.';
-    }
-    return null;
-  }
 
   // La asistencia usa la ficha maestra de movilidad. El antiguo formato de
   // ingresos por día ya no forma parte de este flujo.
@@ -2152,7 +2298,7 @@ class _AsistenciaPersonalSpecialPageState
 
   Future<Map<String, dynamic>?> _existingAttendancePayload(String dni) async {
     final fecha = _headerValue(['FECHA'], fallback: fechaCtrl.text.trim());
-    final rows = await local.allRecords();
+    final rows = await local.allRecords(table: 'GT-ASISTENCIA_PERSONAL');
     Map<String, dynamic>? firstSameDay;
     for (final r in rows) {
       if ((r['tabla_destino']?.toString() ?? '') != 'GT-ASISTENCIA_PERSONAL')
@@ -2237,16 +2383,20 @@ class _AsistenciaPersonalSpecialPageState
     return action == 'omit';
   }
 
-  Future<void> _saveAttendancePayload(Map<String, dynamic> payload,
-      String idLocal, Map<String, dynamic>? existing) async {
+  Future<_ScannerOutcome> _saveAttendancePayload(
+      Map<String, dynamic> payload, String idLocal,
+      {bool showMessages = true}) async {
     final userId = Supabase.instance.client.auth.currentUser?.id ??
         await LocalSession().cachedUserId();
     if (userId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('No hay usuario local para guardar asistencia.')));
-      return;
+      const message = 'No hay usuario local para guardar asistencia.';
+      if (showMessages && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text(message)));
+      }
+      return const _ScannerOutcome.rejected(message);
     }
-    setState(() => saving = true);
+    if (mounted) setState(() => saving = true);
     try {
       await local.insertPending({
         'id_local': idLocal,
@@ -2261,29 +2411,56 @@ class _AsistenciaPersonalSpecialPageState
         'created_at': DateTime.now().toIso8601String(),
       });
       final dni = payload['DNI']?.toString() ?? '';
-      setState(() {
-        scannedRows.removeWhere((e) => e['DNI'] == dni);
-        scannedRows.insert(0, payload);
-      });
+      if (mounted) {
+        setState(() {
+          scannedRows.removeWhere((e) => e['DNI'] == dni);
+          scannedRows.insert(0, payload);
+        });
+      }
+      final movement =
+          payload['HORA_SALIDA']?.toString().trim().isNotEmpty == true
+              ? 'Salida'
+              : 'Ingreso';
+      final name = payload['APELLIDOS Y NOMBRES']?.toString().trim() ?? '';
+      return _ScannerOutcome.accepted(
+          '$movement registrado: $dni${name.isEmpty ? '' : ' - $name'}');
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('No se pudo guardar asistencia: $e')));
+      final message = 'No se pudo guardar asistencia: $e';
+      if (showMessages && mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(message)));
+      }
+      return _ScannerOutcome.rejected(message);
     } finally {
       if (mounted) setState(() => saving = false);
     }
   }
 
-  Future<void> _processScan(String raw) async {
+  Future<_ScannerOutcome> _processScan(String raw,
+      {bool cameraMode = false}) async {
     final code = _normalizeScan(raw);
-    if (code.isEmpty || saving) return;
+    if (code.isEmpty) {
+      return const _ScannerOutcome.rejected('El código QR está vacío.');
+    }
+    if (saving) {
+      return const _ScannerOutcome.rejected(
+          'Espera a que termine la marcación anterior.');
+    }
     scannerCtrl.clear();
     scannerFocus.requestFocus();
     final worker = await _findWorker(code);
-    if (!mounted) return;
+    if (!mounted) {
+      return const _ScannerOutcome.rejected('La vista ya no está disponible.');
+    }
     Map<String, dynamic>? resolvedWorker = worker;
     if (resolvedWorker == null) {
+      if (cameraMode) {
+        return _ScannerOutcome.rejected('Trabajador no encontrado: $code');
+      }
       final proceed = await _confirmUnknownWorker(code);
-      if (!proceed || !mounted) return;
+      if (!proceed || !mounted) {
+        return _ScannerOutcome.rejected('Trabajador no encontrado: $code');
+      }
       resolvedWorker = await _findWorker(code);
     }
     final dni = (_rowValue(resolvedWorker ?? const <String, dynamic>{},
@@ -2307,15 +2484,22 @@ class _AsistenciaPersonalSpecialPageState
         attendanceDate,
       );
       if (blockReason != null) {
-        await _showAppGtAlert(context, blockReason, playSound: true);
-        return;
+        if (!cameraMode) {
+          await _showAppGtAlert(context, blockReason, playSound: true);
+        }
+        return _ScannerOutcome.rejected(blockReason);
       }
       final headerPlate = _headerValue(
         ['PLACA', 'MOVILIDAD', 'PLACA_MOVILIDAD'],
         fallback: placaCtrl.text.trim(),
       );
       if (headerPlate.trim().isNotEmpty) {
-        if (!await _ensureMobilityReady(prompt: true)) return;
+        if (!await _ensureMobilityReady(prompt: !cameraMode)) {
+          final issues = _currentMobilityIssues();
+          return _ScannerOutcome.rejected(issues.isEmpty
+              ? 'La movilidad no está autorizada.'
+              : issues.join(' '));
+        }
       }
     }
     final now = DateTime.now();
@@ -2329,9 +2513,11 @@ class _AsistenciaPersonalSpecialPageState
         reclutadorCtrl.text.trim();
     final existing = await _existingAttendancePayload(dni);
     if (tipoMovimiento == 'INGRESO' && existing != null) {
-      await _showAppGtAlert(context, 'Personal ya tiene asistencia',
-          playSound: true);
-      return;
+      const message = 'Personal ya tiene asistencia';
+      if (!cameraMode) {
+        await _showAppGtAlert(context, message, playSound: true);
+      }
+      return const _ScannerOutcome.rejected(message);
     }
     if (tipoMovimiento == 'SALIDA') {
       final ingresoPrevio = existing == null
@@ -2339,8 +2525,9 @@ class _AsistenciaPersonalSpecialPageState
           : ((existing['payload'] as Map)['HORA_INGRESO']?.toString().trim() ??
               '');
       if (ingresoPrevio.isEmpty || ingresoPrevio.toLowerCase() == 'null') {
-        await _showAppGtAlert(context, 'Personal no tiene ingreso');
-        return;
+        const message = 'Personal no tiene ingreso';
+        if (!cameraMode) await _showAppGtAlert(context, message);
+        return const _ScannerOutcome.rejected(message);
       }
     }
     final idLocal = existing?['payload']?['id_local']?.toString() ?? uuid.v4();
@@ -2408,14 +2595,20 @@ class _AsistenciaPersonalSpecialPageState
       'BLOQUEO_MOTIVO',
       'estado_registro'
     ]);
-    await _saveAttendancePayload(
-        _filterPayloadForNorms(payload, allowed), idLocal, existing);
+    return _saveAttendancePayload(
+      _filterPayloadForNorms(payload, allowed),
+      idLocal,
+      showMessages: !cameraMode,
+    );
   }
 
   Future<void> _openCameraScanner() async {
-    final code = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
-    if (code != null && code.trim().isNotEmpty) await _processScan(code);
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => _ContinuousScannerPage(
+        title: 'Escanear asistencia',
+        onScan: (code) => _processScan(code, cameraMode: true),
+      ),
+    ));
   }
 
   Widget _workerSearchBox() {
@@ -3113,15 +3306,23 @@ class _AttendanceWorkersPageState extends State<_AttendanceWorkersPage> {
   }
 }
 
-class _AsistenciaScannerPage extends StatefulWidget {
-  const _AsistenciaScannerPage();
+class _ContinuousScannerPage extends StatefulWidget {
+  final String title;
+  final Future<_ScannerOutcome> Function(String code) onScan;
+
+  const _ContinuousScannerPage({required this.title, required this.onScan});
+
   @override
-  State<_AsistenciaScannerPage> createState() => _AsistenciaScannerPageState();
+  State<_ContinuousScannerPage> createState() => _ContinuousScannerPageState();
 }
 
-class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
+class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
   late final MobileScannerController scannerController;
-  bool returned = false;
+  bool processing = false;
+  _ScannerOutcome? feedback;
+  Timer? feedbackTimer;
+  String lastCode = '';
+  DateTime? lastScanAt;
 
   @override
   void initState() {
@@ -3143,35 +3344,160 @@ class _AsistenciaScannerPageState extends State<_AsistenciaScannerPage> {
 
   @override
   void dispose() {
+    feedbackTimer?.cancel();
     unawaited(scannerController.dispose());
     super.dispose();
   }
 
-  void _returnCode(String raw) {
+  Future<void> _handleCode(String raw) async {
     final code = raw.trim();
-    if (returned || code.isEmpty) return;
-    returned = true;
-    unawaited(scannerController.stop());
-    Navigator.of(context).pop(code);
+    if (processing || code.isEmpty) return;
+    final now = DateTime.now();
+    if (code == lastCode &&
+        lastScanAt != null &&
+        now.difference(lastScanAt!) < const Duration(seconds: 2)) {
+      return;
+    }
+    setState(() => processing = true);
+    lastCode = code;
+    lastScanAt = now;
+    _ScannerOutcome result;
+    try {
+      result = await widget.onScan(code);
+    } catch (error) {
+      result = _ScannerOutcome.rejected('No se pudo procesar el QR: $error');
+    }
+    if (!mounted) return;
+    await SystemSound.play(
+        result.accepted ? SystemSoundType.click : SystemSoundType.alert);
+    if (result.accepted) {
+      unawaited(HapticFeedback.selectionClick());
+    } else {
+      unawaited(HapticFeedback.heavyImpact());
+    }
+    feedbackTimer?.cancel();
+    setState(() {
+      feedback = result;
+      processing = false;
+    });
+    feedbackTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => feedback = null);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: _zumacFormatAppBar(
-        title: const Text('Escanear asistencia'),
+        title: Text(widget.title),
+        onBack: () => Navigator.of(context).pop(),
+        leadingIcon: Icons.close_rounded,
+        leadingTooltip: 'Cerrar escáner',
       ),
-      body: MobileScanner(
-          controller: scannerController,
-          onDetect: (capture) {
-            for (final b in capture.barcodes) {
-              final raw = b.rawValue?.trim() ?? '';
-              if (raw.isNotEmpty) {
-                _returnCode(raw);
-                break;
+      body: Stack(fit: StackFit.expand, children: [
+        MobileScanner(
+            controller: scannerController,
+            onDetect: (capture) {
+              for (final b in capture.barcodes) {
+                final raw = b.rawValue?.trim() ?? '';
+                if (raw.isNotEmpty) {
+                  unawaited(_handleCode(raw));
+                  break;
+                }
               }
-            }
-          }),
+            }),
+        IgnorePointer(
+          child: Container(
+            decoration:
+                BoxDecoration(color: Colors.black.withValues(alpha: .18)),
+            child: Column(
+              children: [
+                const SafeArea(
+                  child: Padding(
+                    padding: EdgeInsets.fromLTRB(24, 22, 24, 12),
+                    child: Text(
+                      'Coloque el QR dentro del recuadro',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        shadows: [Shadow(color: Colors.black87, blurRadius: 5)],
+                      ),
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                Container(
+                  width: 270,
+                  height: 270,
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(color: Colors.white, width: 3),
+                  ),
+                  child: feedback == null
+                      ? processing
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                              ),
+                            )
+                          : null
+                      : Center(
+                          child: Container(
+                            width: 104,
+                            height: 104,
+                            decoration: BoxDecoration(
+                              color: feedback!.accepted
+                                  ? const Color(0xFF1B8D45)
+                                  : const Color(0xFFC62828),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              feedback!.accepted
+                                  ? Icons.check_rounded
+                                  : Icons.close_rounded,
+                              color: Colors.white,
+                              size: 74,
+                            ),
+                          ),
+                        ),
+                ),
+                const Spacer(),
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  child: feedback == null
+                      ? const SizedBox(height: 76)
+                      : Container(
+                          key: ValueKey(
+                              '${feedback!.accepted}-${feedback!.message}'),
+                          margin: const EdgeInsets.fromLTRB(20, 12, 20, 26),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: feedback!.accepted
+                                ? const Color(0xE61B5E20)
+                                : const Color(0xE6A31515),
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Text(
+                            feedback!.message,
+                            textAlign: TextAlign.center,
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ]),
     );
   }
 }
@@ -3223,6 +3549,7 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
     final rows = await local.allRecords(
       userId: userId,
       empresaId: empresaId,
+      table: 'GT-TAREO_PERSONAL',
     );
     final formatId = widget.format['id']?.toString() ?? '';
     final scoped = rows.where((row) {
@@ -3519,6 +3846,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   final trabajadorCtrl = TextEditingController();
   final horaInicioCtrl = TextEditingController();
   final horaFinCtrl = TextEditingController();
+  final refrigerioInicioCtrl = TextEditingController();
+  final refrigerioFinCtrl = TextEditingController();
   final observacionCtrl = TextEditingController();
   late final _SpecialMatrixHeader tareoHeader;
 
@@ -3527,6 +3856,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   List<Map<String, dynamic>> lotesVariedades = [];
   final List<Map<String, dynamic>> selectedWorkers = [];
   bool showHours = false;
+  bool showMealBreak = false;
   bool showObservation = false;
   bool saving = false;
   String draftIdLocal = '';
@@ -3538,6 +3868,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final now = DateTime.now();
     fechaCtrl.text = _dateIso(now);
     horaInicioCtrl.text = _timeHm(now);
+    refrigerioInicioCtrl.text = '12:00';
+    refrigerioFinCtrl.text = '12:45';
     tareoHeader = _SpecialMatrixHeader(local, 'GT-CABECERA_TAREO_PERSONAL');
     final rawDraftId = widget.editIdLocal ??
         widget.initialPayload?['id_local']?.toString() ??
@@ -3557,6 +3889,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     trabajadorCtrl.dispose();
     horaInicioCtrl.dispose();
     horaFinCtrl.dispose();
+    refrigerioInicioCtrl.dispose();
+    refrigerioFinCtrl.dispose();
     observacionCtrl.dispose();
     tareoHeader.dispose();
     super.dispose();
@@ -3610,7 +3944,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim()).trim();
     if (fecha.isEmpty || selectedWorkers.isEmpty) return const [];
     final attended = <String>{};
-    final rows = await local.allRecords();
+    final rows = await local.allRecords(table: 'GT-ASISTENCIA_PERSONAL');
     for (final r in rows) {
       final table = (r['tabla_destino']?.toString() ?? '').toUpperCase();
       if (table != 'GT-ASISTENCIA_PERSONAL') continue;
@@ -3704,6 +4038,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final hf = tareoHeader.valueByCandidates(['HORA_FIN', 'HORA FIN'],
         fallback: horaFinCtrl.text.trim());
     if (hf.isNotEmpty) horaFinCtrl.text = hf;
+    final mealStart = tareoHeader.valueByCandidates(
+        ['REFRIGERIO_INICIO', 'REFRIGERIO INICIO'],
+        fallback: refrigerioInicioCtrl.text.trim());
+    if (mealStart.isNotEmpty) refrigerioInicioCtrl.text = mealStart;
+    final mealEnd = tareoHeader.valueByCandidates(
+        ['REFRIGERIO_FIN', 'REFRIGERIO FIN'],
+        fallback: refrigerioFinCtrl.text.trim());
+    if (mealEnd.isNotEmpty) refrigerioFinCtrl.text = mealEnd;
     final observation = tareoHeader.valueByCandidates(
       ['OBSERVACION', 'OBSERVACIÓN'],
       fallback: observacionCtrl.text.trim(),
@@ -3731,6 +4073,12 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             .toString();
     horaFinCtrl.text =
         (_rowValue(p, ['HORA_FIN', 'HORA FIN']) ?? '').toString();
+    refrigerioInicioCtrl.text =
+        (_rowValue(p, ['REFRIGERIO_INICIO', 'REFRIGERIO INICIO']) ?? '12:00')
+            .toString();
+    refrigerioFinCtrl.text =
+        (_rowValue(p, ['REFRIGERIO_FIN', 'REFRIGERIO FIN']) ?? '12:45')
+            .toString();
     observacionCtrl.text =
         (_rowValue(p, ['OBSERVACION', 'OBSERVACIÓN']) ?? '').toString();
     final raw = p['__TRABAJADORES__'] ?? p['__tareo_rows'];
@@ -3982,6 +4330,36 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
   }
 
+  String _timeFromMinutes(int minutes) {
+    final normalized = minutes % (24 * 60);
+    final hour = normalized ~/ 60;
+    final minute = normalized % 60;
+    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
+  }
+
+  Future<void> _pickMealTime({required bool start}) async {
+    final controller = start ? refrigerioInicioCtrl : refrigerioFinCtrl;
+    final parts = controller.text.trim().split(':');
+    final initial = parts.length >= 2
+        ? TimeOfDay(
+            hour: int.tryParse(parts[0]) ?? 12,
+            minute: int.tryParse(parts[1]) ?? (start ? 0 : 45),
+          )
+        : TimeOfDay(hour: 12, minute: start ? 0 : 45);
+    final picked = await showTimePicker(context: context, initialTime: initial);
+    if (picked == null || !mounted) return;
+    final minutes = picked.hour * 60 + picked.minute;
+    setState(() {
+      if (start) {
+        refrigerioInicioCtrl.text = _timeFromMinutes(minutes);
+        refrigerioFinCtrl.text = _timeFromMinutes(minutes + 45);
+      } else {
+        refrigerioFinCtrl.text = _timeFromMinutes(minutes);
+        refrigerioInicioCtrl.text = _timeFromMinutes(minutes - 45);
+      }
+    });
+  }
+
   Future<String> _activeUserName() async {
     final session = LocalSession();
     final userId = (Supabase.instance.client.auth.currentUser?.id ??
@@ -4043,21 +4421,44 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return null;
   }
 
-  Future<void> _addWorker(Map<String, dynamic> w) async {
+  Future<_ScannerOutcome> _addWorker(Map<String, dynamic> w,
+      {bool cameraMode = false}) async {
     final dni =
         (_rowValue(w, ['DNI', 'Dni', 'DOCUMENTO']) ?? '').toString().trim();
-    if (dni.isEmpty) return;
+    if (dni.isEmpty) {
+      return const _ScannerOutcome.rejected(
+          'El trabajador no tiene un DNI válido.');
+    }
+    final workDate = DateTime.tryParse(tareoHeader
+            .valueByCandidates(['FECHA'], fallback: fechaCtrl.text.trim())) ??
+        DateTime.now();
+    final blockReason = await _workerAuthorizationBlockReason(
+      local: local,
+      worker: w,
+      dni: dni,
+      workDate: workDate,
+    );
+    if (blockReason != null) {
+      if (!cameraMode && mounted) {
+        await _showAppGtAlert(context, blockReason, playSound: true);
+      }
+      return _ScannerOutcome.rejected(blockReason);
+    }
     final normalizedDni = _digits(dni);
     if (selectedWorkers
         .any((e) => _digits(e['DNI']?.toString() ?? '') == normalizedDni)) {
-      await _showAppGtAlert(
-        context,
-        'El trabajador con DNI $dni ya está considerado en este tareo.',
-        title: 'Trabajador ya considerado',
-        icon: Icons.info_outline_rounded,
-        playSound: true,
-      );
-      return;
+      final message =
+          'El trabajador con DNI $dni ya está considerado en este tareo.';
+      if (!cameraMode && mounted) {
+        await _showAppGtAlert(
+          context,
+          message,
+          title: 'Trabajador ya considerado',
+          icon: Icons.info_outline_rounded,
+          playSound: true,
+        );
+      }
+      return _ScannerOutcome.rejected(message);
     }
     final nombre = (_rowValue(w, [
               'APELLIDOS Y NOMBRES',
@@ -4071,39 +4472,37 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       selectedWorkers.add({'DNI': dni, 'APELLIDOS Y NOMBRES': nombre});
       trabajadorCtrl.clear();
     });
+    return _ScannerOutcome.accepted(
+        'Trabajador agregado: $dni${nombre.isEmpty ? '' : ' - $nombre'}');
   }
 
   Future<void> _openQr() async {
-    final code = await Navigator.of(context).push<String>(
-        MaterialPageRoute(builder: (_) => const _AsistenciaScannerPage()));
-    if (code == null || code.trim().isEmpty) return;
-    final w = _findWorker(code) ?? _findWorker(_digits(code));
-    if (w == null) {
-      if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Trabajador no encontrado: $code')));
-      return;
-    }
-    await _addWorker(w);
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+      builder: (_) => _ContinuousScannerPage(
+        title: 'Escanear tareo',
+        onScan: (code) async {
+          final w = _findWorker(code) ?? _findWorker(_digits(code));
+          if (w == null) {
+            return _ScannerOutcome.rejected('Trabajador no encontrado: $code');
+          }
+          return _addWorker(w, cameraMode: true);
+        },
+      ),
+    ));
   }
 
   double? _hoursBetween(String ingreso, String salida) {
-    if (salida.trim().isEmpty) return null;
-    try {
-      final i = ingreso.split(':');
-      final s = salida.split(':');
-      final a = DateTime(2000, 1, 1, int.parse(i[0]), int.parse(i[1]));
-      var b = DateTime(2000, 1, 1, int.parse(s[0]), int.parse(s[1]));
-      if (b.isBefore(a)) b = b.add(const Duration(days: 1));
-      return double.parse((b.difference(a).inMinutes / 60).toStringAsFixed(2));
-    } catch (_) {
-      return null;
-    }
+    return tareoWorkedHours(
+      ingreso,
+      salida,
+      mealStart: refrigerioInicioCtrl.text.trim(),
+      mealEnd: refrigerioFinCtrl.text.trim(),
+    );
   }
 
   Future<double> _existingTareoHours(String dni, String fecha) async {
     var total = 0.0;
-    for (final record in await local.allRecords()) {
+    for (final record in await local.allRecords(table: 'GT-TAREO_PERSONAL')) {
       if ((record['tabla_destino']?.toString() ?? '').toUpperCase() !=
           'GT-TAREO_PERSONAL') {
         continue;
@@ -4341,6 +4740,13 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return campo == 'OBSERVACION';
   }
 
+  bool _isTareoMealField(Map<String, dynamic> field) {
+    final campo = _norm(field['campo']?.toString() ?? '');
+    return campo == 'REFRIGERIO_INICIO' ||
+        campo == 'REFRIGERIO_FIN' ||
+        campo == 'MINUTOS_REFRIGERIO';
+  }
+
   Map<String, dynamic> _tareoHeaderPayload() {
     final payload = tareoHeader.payload();
     final hi = tareoHeader.valueByCandidates(
@@ -4350,6 +4756,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         fallback: horaFinCtrl.text.trim());
     if (hi.isNotEmpty) payload['HORA_INICIO'] = hi;
     if (hf.isNotEmpty) payload['HORA_FIN'] = hf;
+    payload['REFRIGERIO_INICIO'] = refrigerioInicioCtrl.text.trim();
+    payload['REFRIGERIO_FIN'] = refrigerioFinCtrl.text.trim();
+    payload['MINUTOS_REFRIGERIO'] = 45;
     final observation = tareoHeader.valueByCandidates(
       ['OBSERVACION', 'OBSERVACIÓN'],
       fallback: observacionCtrl.text.trim(),
@@ -4399,13 +4808,36 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final headerPayload = _tareoHeaderPayload();
     final horaInicio = headerPayload['HORA_INICIO']?.toString().trim() ?? '';
     final horaFin = headerPayload['HORA_FIN']?.toString().trim() ?? '';
+    final mealStart = refrigerioInicioCtrl.text.trim();
+    final mealEnd = refrigerioFinCtrl.text.trim();
+    if (tareoMealBreakMinutes(mealStart, mealEnd) != 45) {
+      setState(() => showMealBreak = true);
+      await _showAppGtAlert(
+        context,
+        'El refrigerio debe durar exactamente 45 minutos.',
+        title: 'Horario de refrigerio inválido',
+        playSound: true,
+      );
+      return;
+    }
+    if (horaInicio.isNotEmpty &&
+        horaFin.isNotEmpty &&
+        tareoConflictsWithMealBreak(horaInicio, horaFin, mealStart, mealEnd)) {
+      setState(() {
+        showHours = true;
+        showMealBreak = true;
+      });
+      await _showAppGtAlert(
+        context,
+        'En ese horario el personal estuvo en refrigerio',
+        title: 'Horario no permitido',
+        playSound: true,
+      );
+      return;
+    }
     if (!await _confirmOvernightShift(horaInicio, horaFin)) return;
     if (!mounted) return;
-    final horasMatriz =
-        tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
-    final horas = horasMatriz.trim().isNotEmpty
-        ? horasMatriz.trim()
-        : _hoursBetween(horaInicio, horaFin);
+    final horas = _hoursBetween(horaInicio, horaFin);
     if (closeTareo && (horaFin.isEmpty || horas == null)) {
       setState(() => showHours = true);
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
@@ -4458,6 +4890,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'HORA_INICIO': horaInicio,
       'HORA_FIN': horaFin,
       'HORAS_TRABAJADAS': horas,
+      'REFRIGERIO_INICIO': mealStart,
+      'REFRIGERIO_FIN': mealEnd,
+      'MINUTOS_REFRIGERIO': 45,
       'TAREADOR': tareador,
       'estado_registro': closeTareo ? 'COMPLETO' : 'PENDIENTE',
     };
@@ -4471,6 +4906,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'HORA_INICIO',
       'HORA_FIN',
       'HORAS_TRABAJADAS',
+      'REFRIGERIO_INICIO',
+      'REFRIGERIO_FIN',
+      'MINUTOS_REFRIGERIO',
       'TAREADOR',
       'DNI',
       'APELLIDOS Y NOMBRES',
@@ -4530,7 +4968,10 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         try {
           final syncService = SyncService();
           await syncService.syncPending();
-          final storedRows = await local.allRecords(userId: userId);
+          final storedRows = await local.allRecords(
+            userId: userId,
+            table: 'GT-TAREO_PERSONAL',
+          );
           final tareoRows = storedRows.where((row) {
             final id = row['id_local']?.toString() ?? '';
             return id == draftIdLocal || id.startsWith('${draftIdLocal}_');
@@ -4636,9 +5077,6 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   }
 
   String _currentTareoHoursLabel() {
-    final configured =
-        tareoHeader.valueByCandidates(['HORAS_TRABAJADAS', 'HORAS TRABAJADAS']);
-    if (configured.trim().isNotEmpty) return configured.trim();
     final start = tareoHeader.valueByCandidates(
       ['HORA_INICIO', 'HORA INICIO', 'HORA_INCIO'],
       fallback: horaInicioCtrl.text.trim(),
@@ -4715,6 +5153,12 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
                   setState(() => showObservation = !showObservation),
             ),
             _quickAction(
+              tooltip: 'Refrigerio',
+              icon: Icons.restaurant_outlined,
+              selected: showMealBreak,
+              onPressed: () => setState(() => showMealBreak = !showMealBreak),
+            ),
+            _quickAction(
               tooltip: 'Trabajadores agregados',
               icon: Icons.person_outline_rounded,
               selected: false,
@@ -4784,6 +5228,43 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     ];
   }
 
+  List<Widget> _mealBreakEditor() => [
+        Row(children: [
+          Expanded(
+            child: TextField(
+              controller: refrigerioInicioCtrl,
+              readOnly: true,
+              onTap: () => _pickMealTime(start: true),
+              decoration: const InputDecoration(
+                labelText: 'INICIO REFRIGERIO',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.restaurant_outlined),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: refrigerioFinCtrl,
+              readOnly: true,
+              onTap: () => _pickMealTime(start: false),
+              decoration: const InputDecoration(
+                labelText: 'FIN REFRIGERIO',
+                border: OutlineInputBorder(),
+                suffixIcon: Icon(Icons.restaurant_outlined),
+              ),
+            ),
+          ),
+        ]),
+        const Padding(
+          padding: EdgeInsets.fromLTRB(4, 8, 4, 14),
+          child: Text(
+            '45 minutos no computables como horas trabajadas ni para pago.',
+            style: TextStyle(color: Color(0xFF52635A)),
+          ),
+        ),
+      ];
+
   Widget _editorBody() {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -4793,12 +5274,15 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         context,
         setState,
         filter: (field) =>
-            !_isTareoTimeField(field) && !_isTareoObservationField(field),
+            !_isTareoTimeField(field) &&
+            !_isTareoObservationField(field) &&
+            !_isTareoMealField(field),
         firstDate: yesterday,
         lastDate: today,
       ),
       _quickActions(),
       if (showHours) ..._hoursEditor(),
+      if (showMealBreak) ..._mealBreakEditor(),
       if (showObservation) ..._observationEditor(),
       _workersPicker(),
       const SizedBox(height: 22),

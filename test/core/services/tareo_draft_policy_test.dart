@@ -36,6 +36,53 @@ void main() {
     });
   });
 
+  group('refrigerio de tareo', () {
+    test('descuenta los 45 minutos del turno que contiene el refrigerio', () {
+      expect(
+        tareoWorkedHours('09:00', '17:45'),
+        8,
+      );
+      expect(tareoConflictsWithMealBreak('09:00', '17:45', '12:00', '12:45'),
+          isFalse);
+    });
+
+    test('no descuenta refrigerio si el turno termina antes', () {
+      expect(tareoWorkedHours('09:00', '12:00'), 3);
+    });
+
+    test('acepta un turno que contiene el refrigerio hasta su límite', () {
+      expect(tareoWorkedHours('09:00', '12:45'), 3);
+      expect(tareoConflictsWithMealBreak('09:00', '12:45', '12:00', '12:45'),
+          isFalse);
+    });
+
+    test('rechaza un tareo dentro o parcialmente encima del refrigerio', () {
+      expect(tareoConflictsWithMealBreak('12:10', '12:30', '12:00', '12:45'),
+          isTrue);
+      expect(tareoConflictsWithMealBreak('12:30', '16:00', '12:00', '12:45'),
+          isTrue);
+      expect(tareoWorkedHours('12:30', '16:00'), isNull);
+    });
+
+    test('permite cambiar el horario manteniendo 45 minutos', () {
+      expect(tareoMealBreakMinutes('13:00', '13:45'), 45);
+      expect(
+        tareoWorkedHours(
+          '09:00',
+          '17:45',
+          mealStart: '13:00',
+          mealEnd: '13:45',
+        ),
+        8,
+      );
+    });
+
+    test('calcula correctamente un turno nocturno sin refrigerio superpuesto',
+        () {
+      expect(tareoWorkedHours('22:00', '06:00'), 8);
+    });
+  });
+
   group('groupTareoQueueRows', () {
     Map<String, dynamic> row(
       String id,

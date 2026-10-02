@@ -111,7 +111,17 @@ class _LoginPageState extends State<LoginPage> {
   Future<void> _authenticateForDataUpdate() async {
     final client = Supabase.instance.client;
     if (client.auth.currentUser != null && client.auth.currentSession != null) {
-      return;
+      try {
+        await client.auth.refreshSession();
+        if (client.auth.currentUser != null &&
+            client.auth.currentSession != null) {
+          return;
+        }
+      } catch (_) {
+        // La sesión local puede existir aunque su token ya no sea válido. En
+        // ese caso se intenta una autenticación completa con las credenciales
+        // visibles en lugar de informar erróneamente "usuario incorrecto".
+      }
     }
 
     final loginIdentifier = userCtrl.text.trim();

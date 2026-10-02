@@ -26,6 +26,91 @@ double tareoHoursMissingForFullDay(
   return (requiredHours - accumulatedHours).clamp(0, double.infinity);
 }
 
+int? _tareoMinutes(String value) {
+  final parts = value.trim().split(':');
+  if (parts.length < 2) return null;
+  final hour = int.tryParse(parts[0]);
+  final minute = int.tryParse(parts[1]);
+  if (hour == null || minute == null) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+({int start, int end})? _tareoInterval(String start, String end) {
+  final startMinutes = _tareoMinutes(start);
+  var endMinutes = _tareoMinutes(end);
+  if (startMinutes == null || endMinutes == null) return null;
+  if (endMinutes < startMinutes) endMinutes += 24 * 60;
+  return (start: startMinutes, end: endMinutes);
+}
+
+int? tareoMealBreakMinutes(String start, String end) {
+  final interval = _tareoInterval(start, end);
+  if (interval == null) return null;
+  return interval.end - interval.start;
+}
+
+({int start, int end, int overlap})? _bestMealBreakOverlap(
+  String workStart,
+  String workEnd,
+  String mealStart,
+  String mealEnd,
+) {
+  final work = _tareoInterval(workStart, workEnd);
+  final meal = _tareoInterval(mealStart, mealEnd);
+  if (work == null || meal == null) return null;
+
+  ({int start, int end, int overlap})? best;
+  for (final offset in const [-24 * 60, 0, 24 * 60]) {
+    final start = meal.start + offset;
+    final end = meal.end + offset;
+    final overlapStart = work.start > start ? work.start : start;
+    final overlapEnd = work.end < end ? work.end : end;
+    final overlap = (overlapEnd - overlapStart).clamp(0, 24 * 60);
+    if (best == null || overlap > best.overlap) {
+      best = (start: start, end: end, overlap: overlap);
+    }
+  }
+  return best;
+}
+
+/// Indica que el turno intenta comenzar o terminar dentro del refrigerio.
+/// Un turno que contiene el bloque completo sí es válido: los 45 minutos se
+/// descuentan de sus horas trabajadas.
+bool tareoConflictsWithMealBreak(
+  String workStart,
+  String workEnd,
+  String mealStart,
+  String mealEnd,
+) {
+  final work = _tareoInterval(workStart, workEnd);
+  final overlap = _bestMealBreakOverlap(workStart, workEnd, mealStart, mealEnd);
+  if (work == null || overlap == null || overlap.overlap == 0) return false;
+  return !(work.start <= overlap.start && work.end >= overlap.end);
+}
+
+/// Horas efectivamente trabajadas. El refrigerio se descuenta solo cuando el
+/// turno contiene el bloque completo; los solapamientos parciales se rechazan
+/// con [tareoConflictsWithMealBreak].
+double? tareoWorkedHours(
+  String workStart,
+  String workEnd, {
+  String mealStart = '12:00',
+  String mealEnd = '12:45',
+}) {
+  final work = _tareoInterval(workStart, workEnd);
+  final meal = _tareoInterval(mealStart, mealEnd);
+  final overlap = _bestMealBreakOverlap(workStart, workEnd, mealStart, mealEnd);
+  if (work == null || meal == null || overlap == null) return null;
+  if (tareoConflictsWithMealBreak(workStart, workEnd, mealStart, mealEnd))
+    return null;
+
+  final grossMinutes = work.end - work.start;
+  final mealMinutes = meal.end - meal.start;
+  final deducted = overlap.overlap == mealMinutes ? mealMinutes : 0;
+  return double.parse(((grossMinutes - deducted) / 60).toStringAsFixed(2));
+}
+
 String tareoDraftBaseId(String idLocal) =>
     idLocal.trim().replaceFirst(RegExp(r'_[0-9]+$'), '');
 

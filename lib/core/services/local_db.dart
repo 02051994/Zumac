@@ -22,6 +22,8 @@ class LocalDb {
       LocalDb._(database: database);
 
   Database? _db;
+  Future<Database>? _openingDb;
+  final Map<String, Set<String>> _knownColumnsByTable = {};
 
   Future<String> _databasePath() async {
     // En Web no existe un directorio del sistema de archivos. La fábrica
@@ -39,8 +41,21 @@ class LocalDb {
 
   Future<Database> get db async {
     if (_db != null) return _db!;
+    final opening = _openingDb;
+    if (opening != null) return opening;
+    final future = _openLocalDatabase();
+    _openingDb = future;
+    try {
+      _db = await future;
+      return _db!;
+    } finally {
+      _openingDb = null;
+    }
+  }
+
+  Future<Database> _openLocalDatabase() async {
     final path = await _databasePath();
-    _db = await openDatabase(
+    return openDatabase(
       path,
       version: 32,
       onCreate: _onCreate,
@@ -49,7 +64,6 @@ class LocalDb {
         await _ensureRuntimeSchema(database);
       },
     );
-    return _db!;
   }
 
   Future<void> _createLocalFormFields(Database db) async {
@@ -125,10 +139,18 @@ class LocalDb {
     String column,
     String definition,
   ) async {
-    final columns = await db.rawQuery('PRAGMA table_info($table)');
-    final exists = columns.any((c) => c['name']?.toString() == column);
-    if (!exists) {
+    var knownColumns = _knownColumnsByTable[table];
+    if (knownColumns == null) {
+      final columns = await db.rawQuery('PRAGMA table_info($table)');
+      knownColumns = columns
+          .map((entry) => entry['name']?.toString())
+          .whereType<String>()
+          .toSet();
+      _knownColumnsByTable[table] = knownColumns;
+    }
+    if (!knownColumns.contains(column)) {
       await db.execute('alter table $table add column $column $definition');
+      knownColumns.add(column);
     }
   }
 
@@ -398,6 +420,16 @@ class LocalDb {
         'create index if not exists idx_local_dynamic_views_section_table on local_dynamic_views(seccion, tabla_destino, activo)');
     await _safeCreateIndex(db, 'local_permissions',
         'create index if not exists idx_local_permissions_user_format on local_permissions(user_id, formato)');
+    await _safeCreateIndex(db, 'local_permissions',
+        'create index if not exists idx_local_permissions_user_empresa on local_permissions(user_id, empresa_id)');
+    await _safeCreateIndex(db, 'local_section_permissions',
+        'create index if not exists idx_local_section_permissions_user_empresa on local_section_permissions(user_id, empresa_id)');
+    await _safeCreateIndex(db, 'local_formats',
+        'create index if not exists idx_local_formats_module_active_order on local_formats(modulo_id, activo, orden)');
+    await _safeCreateIndex(db, 'local_special_formats',
+        'create index if not exists idx_local_special_formats_format_active on local_special_formats(formato_id, activo)');
+    await _safeCreateIndex(db, 'pending_records',
+        'create index if not exists idx_pending_table_created on pending_records(tabla_destino, created_at)');
     await _safeCreateIndex(db, 'local_table_cache',
         'create index if not exists idx_local_table_cache_updated on local_table_cache(source_table, updated_at)');
   }
@@ -525,6 +557,9 @@ class LocalDb {
   }
 
   Future<void> _ensureRuntimeSchema(Database db) async {
+    // Una sola lectura PRAGMA por tabla es suficiente. Antes cada columna hacía
+    // su propia consulta durante cada arranque, bloqueando especialmente APK.
+    _knownColumnsByTable.clear();
     await _ensureColumn(db, 'local_profile', 'dni', 'text');
     await _ensureColumn(db, 'local_profile', 'email', 'text');
     await _createLocalFormFields(db);
@@ -555,10 +590,10 @@ class LocalDb {
     await _createLocalDynamicViews(db);
     await _createLocalSyncMeta(db);
     await _createLocalIdSequences(db);
-    await _ensureIndexes(db);
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
     await _upgradeNavigationMetadata(db);
+    await _ensureIndexes(db);
   }
 
   Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
@@ -636,10 +671,10 @@ class LocalDb {
     await _createLocalSyncMeta(db);
     await _createLocalIdSequences(db);
     await _createLocalDynamicViews(db);
-    await _ensureIndexes(db);
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
     await _upgradeNavigationMetadata(db);
+    await _ensureIndexes(db);
   }
 
   Future<void> _onCreate(Database db, int version) async {
@@ -779,7 +814,6 @@ class LocalDb {
     await _createLocalTableCache(db);
     await _createLocalDynamicViews(db);
     await _createLocalSyncMeta(db);
-    await _ensureIndexes(db);
     await db.execute('''
       create table pending_records(
         id_local text primary key,
@@ -807,6 +841,7 @@ class LocalDb {
     await _upgradePendingRecords(db);
     await _upgradeTenantColumns(db);
     await _upgradeNavigationMetadata(db);
+    await _ensureIndexes(db);
   }
 
   Map<String, dynamic> _cleanForTable(
@@ -1721,6 +1756,7 @@ class LocalDb {
     String? estado,
     String? userId,
     String? empresaId,
+    String? table,
   }) async {
     final database = await db;
     await _pruneLocalRecords(database);
@@ -1742,6 +1778,10 @@ class LocalDb {
     if (empresaId != null && empresaId.trim().isNotEmpty) {
       where.add('empresa_id = ?');
       args.add(empresaId.trim());
+    }
+    if (table != null && table.trim().isNotEmpty) {
+      where.add('upper(tabla_destino) = ?');
+      args.add(table.trim().toUpperCase());
     }
     return database.query(
       'pending_records',

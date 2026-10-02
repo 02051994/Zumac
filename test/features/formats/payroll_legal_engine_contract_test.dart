@@ -9,11 +9,11 @@ void main() {
   setUpAll(() {
     migration = File(
       'supabase/migrations/202608140045_peru_payroll_legal_engine.sql',
-    ).readAsStringSync();
+    ).readAsStringSync().replaceAll('\r\n', '\n');
     migration063 = File(
       'supabase/migrations/'
       '202609100063_payroll_slip_v2_weekly_rest_and_compensation.sql',
-    ).readAsStringSync();
+    ).readAsStringSync().replaceAll('\r\n', '\n');
   });
 
   test('separa costeo diario, liquidacion, provisiones y desembolso', () {

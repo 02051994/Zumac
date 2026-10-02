@@ -21,6 +21,9 @@ void main() {
   final toolMigration = File(
     'supabase/migrations/202609300071_workspace_tool_permissions_and_attendance_roster.sql',
   ).readAsStringSync();
+  final tareoMigration = File(
+    'supabase/migrations/202610020072_tareo_refrigerio_scanner_and_permission_catalog.sql',
+  ).readAsStringSync();
 
   test('la web conserva el layout de escritorio aunque reduzca su ancho', () {
     expect(platform, contains('if (kIsWeb) return true;'));
@@ -98,6 +101,7 @@ void main() {
     expect(specialForms, isNot(contains("label: const Text('Cerrar tareo')")));
     expect(specialForms, contains("tooltip: 'Horas del tareo'"));
     expect(specialForms, contains("tooltip: 'Observación'"));
+    expect(specialForms, contains("tooltip: 'Refrigerio'"));
     expect(specialForms, contains("tooltip: 'Trabajadores agregados'"));
     expect(specialForms, contains("ValueKey('tareo-save-icon')"));
     expect(specialForms, contains("ValueKey('tareo-workers-fixed-dni')"));
@@ -113,6 +117,21 @@ void main() {
       specialForms,
       contains('Tareo cerrado. Sincronízalo para enviarlo.'),
     );
+    expect(
+      specialForms,
+      contains('En ese horario el personal estuvo en refrigerio'),
+    );
+    expect(tareoMigration,
+        contains("array['DNI','FECHA','LABOR','CENTRO_COSTO']"));
+    expect(tareoMigration, contains('"MINUTOS_REFRIGERIO" = 45'));
+  });
+
+  test('el escáner mantiene la cámara activa y muestra el resultado', () {
+    expect(specialForms, contains('class _ContinuousScannerPage'));
+    expect(specialForms, contains('Coloque el QR dentro del recuadro'));
+    expect(specialForms, contains('feedback!.accepted'));
+    expect(specialForms, contains('Cerrar escáner'));
+    expect(specialForms, isNot(contains('Navigator.of(context).pop(code)')));
   });
 
   test('el formato móvil usa una sola cabecera azul con su título', () {
