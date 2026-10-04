@@ -13,6 +13,7 @@ import 'local_db.dart';
 import 'local_session.dart';
 import 'evidence_storage.dart';
 import 'offline_record_state.dart';
+import 'sync_error_message.dart';
 import 'tareo_draft_policy.dart';
 
 /// Orquesta la sincronización autenticada entre Supabase y la caché local.
@@ -36,78 +37,29 @@ class SyncService {
   }
 
   String friendlyError(Object error) {
-    final raw = error.toString();
-    final msg = raw.toLowerCase();
-    if (msg.contains('sin conexión') ||
-        msg.contains('sin conexion') ||
-        msg.contains('internet') ||
-        msg.contains('socketexception') ||
-        msg.contains('network')) {
-      return 'No hay conexión a internet. El registro quedó pendiente; vuelve a sincronizar cuando tengas señal.';
-    }
-    if (msg.contains('invalid login') ||
-        msg.contains('invalid credentials') ||
-        msg.contains('credenciales') ||
-        msg.contains('password')) {
-      return 'Usuario o contraseña incorrectos.';
-    }
-    if (msg.contains('jwt') ||
-        msg.contains('not authorized') ||
-        msg.contains('unauthorized') ||
-        msg.contains('permission denied') ||
-        msg.contains('row-level security') ||
-        msg.contains('rls')) {
-      return 'No autorizado. La sesión online venció o el usuario no tiene permiso para enviar este registro.';
-    }
-    if (msg.contains('administrator permission required') ||
-        msg.contains('code: 42501')) {
-      return 'Esta acción requiere una cuenta administradora de la empresa activa.';
-    }
-    if (msg.contains('authentication required') ||
-        msg.contains('active company') ||
-        msg.contains('empresa actual')) {
-      return 'El usuario no tiene una empresa activa asociada. Un administrador debe completar su membresía.';
-    }
-    if (msg.contains('could not find the') && msg.contains('column') ||
-        msg.contains('pgrst204') ||
-        msg.contains('schema cache')) {
-      final match = RegExp(
-        r'''could not find the ['"]([^'"]+)['"] column''',
-        caseSensitive: false,
-      ).firstMatch(raw);
-      final field = match?.group(1)?.trim();
-      return field == null || field.isEmpty
-          ? 'La configuración del formulario no coincide con las columnas de la tabla. Actualice o publique nuevamente la configuración.'
-          : 'La tabla no tiene el campo «$field» que el formulario intenta guardar. Actualice o publique nuevamente la configuración.';
-    }
-    if (msg.contains('storage') ||
-        msg.contains('bucket') ||
-        msg.contains('upload')) {
-      return 'No se pudo subir la foto o firma. Revisa internet y permisos del almacenamiento.';
-    }
-    if (msg.contains('duplicate key') || msg.contains('unique constraint')) {
-      return 'El registro ya existe en la base de datos. Revisa si fue sincronizado antes.';
-    }
-    if (msg.contains('violates not-null') || msg.contains('null value')) {
-      return 'Falta completar un campo obligatorio para poder enviar el registro.';
-    }
-    if (msg.contains('invalid input syntax') ||
-        msg.contains('data type') ||
-        msg.contains('cannot cast') ||
-        msg.contains('cast error')) {
-      return 'Un campo tiene un tipo de dato incorrecto. Revisa números, fechas y textos antes de sincronizar.';
-    }
-    return raw.replaceFirst('Exception: ', '').trim().isEmpty
-        ? 'Ocurrió un problema al procesar la operación.'
-        : raw.replaceFirst('Exception: ', '').trim();
+    return friendlySyncError(error);
   }
 
   Future<void> _ensureOnlineAuthSession() async {
-    // Ruta rápida: si la sesión ya existe en memoria, no hacemos login otra vez.
-    // Reautenticar en cada sincronización agregaba segundos incluso para 1 registro.
-    if (_supabase.auth.currentUser != null &&
-        _supabase.auth.currentSession != null) {
-      return;
+    final currentUser = _supabase.auth.currentUser;
+    final currentSession = _supabase.auth.currentSession;
+    if (currentUser != null && currentSession != null) {
+      final expiresAt = currentSession.expiresAt;
+      final nowSeconds = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final stillValid = expiresAt == null || expiresAt > nowSeconds + 30;
+      if (stillValid) return;
+
+      // Al volver a una pestaña suspendida, el access token puede haber vencido
+      // aunque la aplicación siga abierta. Primero renovamos el token; si el
+      // refresh token también venció, usamos la credencial segura local.
+      try {
+        final response = await _supabase.auth.refreshSession();
+        if (response.session != null && _supabase.auth.currentUser != null) {
+          return;
+        }
+      } catch (_) {
+        // Continúa con la reautenticación segura almacenada abajo.
+      }
     }
 
     final localSession = LocalSession();
@@ -122,7 +74,13 @@ class SyncService {
         await _supabase.auth.signInWithPassword(
             email: email.trim().toLowerCase(), password: password);
       } catch (e) {
-        throw Exception(friendlyError(e));
+        final message = friendlySyncError(e);
+        if (message.startsWith('No hay conexión')) {
+          throw Exception(message);
+        }
+        throw Exception(
+          'La sesión online venció y no pudo renovarse. Ingresa nuevamente para continuar.',
+        );
       }
     } else {
       throw Exception(
@@ -888,6 +846,8 @@ class SyncService {
       bool? cacheOperationalRecords,
       void Function(String message)? onProgress}) async {
     void progress(String message) => onProgress?.call(message);
+    progress('Validando sesión...');
+    await _ensureOnlineAuthSession();
     progress('Consultando cambios...');
     await _yieldToUi();
     final syncCheckpoint = DateTime.now().toUtc().toIso8601String();

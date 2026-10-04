@@ -37,6 +37,7 @@ import '../form_runner/special_form_pages.dart';
 import 'hr_record_document_pdf.dart';
 import 'payroll_slip_pdf.dart';
 import 'record_import_utils.dart';
+import 'record_refresh_policy.dart';
 import 'widgets/mobile_records_list.dart';
 
 class _TableCellFormat {
@@ -1387,6 +1388,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final connectivity = await Connectivity().checkConnectivity();
       if (connectivity.contains(ConnectivityResult.none)) return;
 
+      // Una sesión offline puede mantener abierta la aplicación después de
+      // recargar el navegador. En ese estado RLS responde con cero filas; no
+      // debemos interpretar esa respuesta anónima como una tabla vacía.
+      if (supabase.auth.currentUser == null ||
+          supabase.auth.currentSession == null) {
+        return;
+      }
+
       if (!mounted || sourceSerial != _loadSerial || tableName != table) return;
 
       final needsFullDatasetForView =
@@ -1429,24 +1438,30 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                 ((_currentPage + 1) * _pageSize) < data.totalRows!);
       }
 
-      setState(() {
-        records = loadedRows;
-        _knownTotalRows = totalRowsForView;
-        _hasNextPage = hasNextPageForView;
-        _renderRowLimit = loadedRows.length;
-        _invalidateFilteredCache();
-        displayColumns = _matrixColumnsForTable(table, data.columns);
-      });
-      unawaited(local.upsertTableCacheInfo(
-        table,
-        rowCount: totalRowsForView,
-        lastCheckedAt: DateTime.now().toUtc(),
-        lastChangedAt: DateTime.now().toUtc(),
-        lastPage: _currentPage,
-        lastFilterKey: _currentFilterCacheKey(),
-        lastSortColumn: _sortColumn,
-        lastSortAscending: _sortAscending,
-      ));
+      final applyRefresh = shouldApplySilentRecordRefresh(
+        visibleRowCount: records.length,
+        refreshedRowCount: loadedRows.length,
+      );
+      if (applyRefresh) {
+        setState(() {
+          records = loadedRows;
+          _knownTotalRows = totalRowsForView;
+          _hasNextPage = hasNextPageForView;
+          _renderRowLimit = loadedRows.length;
+          _invalidateFilteredCache();
+          displayColumns = _matrixColumnsForTable(table, data.columns);
+        });
+        unawaited(local.upsertTableCacheInfo(
+          table,
+          rowCount: totalRowsForView,
+          lastCheckedAt: DateTime.now().toUtc(),
+          lastChangedAt: DateTime.now().toUtc(),
+          lastPage: _currentPage,
+          lastFilterKey: _currentFilterCacheKey(),
+          lastSortColumn: _sortColumn,
+          lastSortAscending: _sortAscending,
+        ));
+      }
       unawaited(SyncService().refreshFormatTableSilently(table));
     } catch (_) {
       // Refresco silencioso: nunca debe interrumpir la operación normal de la tabla.
