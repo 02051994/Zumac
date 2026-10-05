@@ -163,7 +163,9 @@ class _LoginPageState extends State<LoginPage> {
       final hasCache = await LocalDb.instance.hasOfflineBootstrapCache();
       await SyncService().downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: !hasCache,
+        // "Actualizar datos" debe traer siempre el estado autoritativo de la
+        // configuración, incluso si ya existe una caché local.
+        forceConfigurationRefresh: true,
         onProgress: (message) {
           if (mounted) {
             setState(() {

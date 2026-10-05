@@ -872,6 +872,7 @@ class LocalDb {
         }
       }
       await batch.commit(noResult: true);
+      await _yieldToRenderer();
     }
   }
 
@@ -1136,6 +1137,7 @@ class LocalDb {
               );
             }
             await batch.commit(noResult: true);
+            await _yieldToRenderer();
           }
         });
         await _yieldToRenderer();

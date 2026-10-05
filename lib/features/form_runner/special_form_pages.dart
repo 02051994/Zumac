@@ -445,13 +445,17 @@ AppBar _zumacFormatAppBar({
 /// formulario genérico durante el arranque del APK.
 Map<String, dynamic>? appGtSpecialFormatFallback(Map<String, dynamic> format) {
   final table = _specialNorm(format['tabla_destino']?.toString() ?? '');
-  if (table == 'GT_ASISTENCIA_PERSONAL') {
+  final formatId = _specialNorm(format['id']?.toString() ?? '');
+  if (table == 'GT_ASISTENCIA_PERSONAL' ||
+      table == 'GT_CABECERA_ASISTENCIA' ||
+      formatId == 'GT_ASISTENCIA_PERSONAL' ||
+      formatId == 'GT_CABECERA_ASISTENCIA') {
     return <String, dynamic>{
       'tipo_pantalla': 'asistencia_personal',
       'activo': 1,
     };
   }
-  if (table == 'GT_TAREO_PERSONAL') {
+  if (table == 'GT_TAREO_PERSONAL' || formatId == 'GT_TAREO_PERSONAL') {
     return <String, dynamic>{
       'tipo_pantalla': 'tareo_personal',
       'activo': 1,
@@ -506,6 +510,7 @@ class SpecialFormRouterPage extends StatelessWidget {
       );
     }
     if (destination == 'GT_ASISTENCIA_PERSONAL' ||
+        destination == 'GT_CABECERA_ASISTENCIA' ||
         tipo == 'asistencia_personal' ||
         tipo == 'asistencia_qr' ||
         tipo == 'asistencia_movilidad') {

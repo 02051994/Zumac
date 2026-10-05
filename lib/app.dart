@@ -138,7 +138,9 @@ class _AppGTState extends State<AppGT> {
           suffixIconColor: const Color(0xFF176B87),
         ),
       ),
-      home: session == null ? const LoginPage() : const ModulesPage(),
+      home: session == null
+          ? const LoginPage()
+          : const ModulesPage(refreshOnEntry: false),
     );
   }
 }

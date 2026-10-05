@@ -7,6 +7,9 @@ void main() {
       File('lib/core/platform/app_platform.dart').readAsStringSync();
   final modules =
       File('lib/features/modules/modules_page.dart').readAsStringSync();
+  final app = File('lib/app.dart').readAsStringSync();
+  final login =
+      File('lib/features/auth/login_page.dart').readAsStringSync();
   final specialForms = File(
     'lib/features/form_runner/special_form_pages.dart',
   ).readAsStringSync();
@@ -15,6 +18,7 @@ void main() {
   ).readAsStringSync();
   final syncService =
       File('lib/core/services/sync_service.dart').readAsStringSync();
+  final localDb = File('lib/core/services/local_db.dart').readAsStringSync();
   final permissions = File(
     'lib/features/users/governed_permissions_page.dart',
   ).readAsStringSync();
@@ -68,12 +72,45 @@ void main() {
     expect(specialForms, contains("text: 'DNI'"));
     expect(specialForms, contains('ScrollbarOrientation.bottom'));
     expect(specialForms, contains("table == 'GT_ASISTENCIA_PERSONAL'"));
+    expect(specialForms, contains("table == 'GT_CABECERA_ASISTENCIA'"));
     expect(modules, contains('appGtSpecialFormatFallback(format)'));
     expect(specialForms, contains('appgt_personal_asistencia_v1'));
     expect(specialForms, contains('_workerName(w)'));
     expect(specialForms, isNot(contains("substring(2)}'")));
     expect(specialForms, contains('Widget _attendanceForm()'));
     expect(specialForms, isNot(contains('Widget _headerCard()')));
+  });
+
+  test('el reinicio usa caché y no dispara descargas pesadas al navegar', () {
+    expect(app, contains('const ModulesPage(refreshOnEntry: false)'));
+    expect(modules, contains('this.refreshOnEntry = false'));
+    expect(
+      RegExp(r'unawaited\(_refreshIncrementallyOnEntry')
+          .allMatches(modules)
+          .length,
+      1,
+    );
+  });
+
+  test('Actualizar datos renueva configuración y conserva datos incrementales',
+      () {
+    expect(modules, contains('forceConfigurationRefresh: true'));
+    expect(login, contains('forceConfigurationRefresh: true'));
+    expect(syncService, contains('forceAllTables: !incremental'));
+    expect(syncService, contains('needsInitialSnapshot'));
+    expect(
+      syncService,
+      isNot(contains(
+        'forceAllTables: !incremental || changedTables == null || configChanged',
+      )),
+    );
+    expect(localDb, contains('await _yieldToRenderer();'));
+  });
+
+  test('la navegación conserva el tipo de pantalla especial', () {
+    expect(modules, contains("'special_type':"));
+    expect(modules, contains("snapshot['special_type']"));
+    expect(modules, contains('mobileSelectedSpecial = restoredSpecial'));
   });
 
   test('las herramientas de inicio usan permisos gobernados', () {

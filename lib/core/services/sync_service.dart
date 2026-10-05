@@ -430,10 +430,16 @@ class SyncService {
 
     final output = <String, List<Map<String, dynamic>>>{};
     for (final table in tables) {
-      if (!forceAllTables && !_tableChanged(changedTables, table)) continue;
+      final needsInitialSnapshot =
+          await _local.countMatrixRowsForTable(table) <= 0;
+      if (!forceAllTables &&
+          !needsInitialSnapshot &&
+          !_tableChanged(changedTables, table)) {
+        continue;
+      }
       await _yieldToUi();
       try {
-        output[table] = forceAllTables
+        output[table] = forceAllTables || needsInitialSnapshot
             ? await _selectAllRowsPaged(table)
             : await _selectRowsPagedSince(table, since);
       } catch (_) {}
@@ -459,10 +465,16 @@ class SyncService {
 
     final output = <String, List<Map<String, dynamic>>>{};
     for (final table in tables) {
-      if (!forceAllTables && !_tableChanged(changedTables, table)) continue;
+      final needsInitialSnapshot =
+          await _local.countMatrixRowsForTable(table) <= 0;
+      if (!forceAllTables &&
+          !needsInitialSnapshot &&
+          !_tableChanged(changedTables, table)) {
+        continue;
+      }
       await _yieldToUi();
       try {
-        output[table] = forceAllTables
+        output[table] = forceAllTables || needsInitialSnapshot
             ? await _selectAllRowsPaged(table)
             : await _selectRowsPagedSince(table, since);
       } catch (_) {
@@ -1255,7 +1267,10 @@ class SyncService {
         dynamicViewsForDataTables,
         changedTables: changedTables,
         since: incremental ? previousDataSync : null,
-        forceAllTables: !incremental || changedTables == null || configChanged,
+        // Un cambio de configuración no convierte todas las tablas de datos en
+        // snapshots completos. Después del bootstrap inicial solo se aplican
+        // deltas de las tablas operativas realmente modificadas.
+        forceAllTables: !incremental,
       ));
     }
 
@@ -1276,7 +1291,7 @@ class SyncService {
         formatTablesForDataTables,
         changedTables: changedTables,
         since: incremental ? previousDataSync : null,
-        forceAllTables: !incremental || changedTables == null || configChanged,
+        forceAllTables: !incremental,
       ));
     } else {
       progress('Web listo: los registros se consultarán por páginas...');

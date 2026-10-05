@@ -38,10 +38,10 @@ import 'generic_section_page.dart';
 import 'dynamic_views_page.dart';
 
 class ModulesPage extends StatefulWidget {
-  const ModulesPage({super.key, this.refreshOnEntry = true});
+  const ModulesPage({super.key, this.refreshOnEntry = false});
 
-  /// El login ya actualiza permisos o descarga el primer bootstrap. Esta marca
-  /// evita repetir inmediatamente la misma sincronización al abrir el menú.
+  /// La pantalla siempre abre desde la caché local. El refresco remoto de todo
+  /// el paquete es opt-in para no bloquear el arranque ni la navegación.
   final bool refreshOnEntry;
 
   @override
@@ -617,6 +617,8 @@ class _ModulesPageState extends State<ModulesPage> {
         'kind': 'format',
         'module_id': _txt(desktopSelectedModule!['id']),
         'format_id': _txt(desktopSelectedFormat!['id']),
+        'special_id': _txt(mobileSelectedSpecial?['id']),
+        'special_type': _txt(mobileSelectedSpecial?['tipo_pantalla']),
       };
     }
     if (desktopSelectedSection != null) {
@@ -690,6 +692,19 @@ class _ModulesPageState extends State<ModulesPage> {
             orElse: () => null,
           );
     }
+    Map<String, dynamic>? restoredSpecial;
+    if (selectedFormat != null) {
+      final specialType = _txt(snapshot['special_type']);
+      if (specialType.isNotEmpty) {
+        restoredSpecial = <String, dynamic>{
+          'id': _txt(snapshot['special_id']),
+          'tipo_pantalla': specialType,
+          'activo': 1,
+        };
+      } else {
+        restoredSpecial = appGtSpecialFormatFallback(selectedFormat);
+      }
+    }
     setState(() {
       _clearDesktopContentCache();
       _clearConsultantFocusState();
@@ -701,7 +716,7 @@ class _ModulesPageState extends State<ModulesPage> {
       desktopSelectedReportModule = null;
       desktopSelectedReportView = null;
       desktopSelectedDynamicView = null;
-      mobileSelectedSpecial = null;
+      mobileSelectedSpecial = restoredSpecial;
     });
     if (persist) unawaited(_persistNavigation());
   }
@@ -951,7 +966,6 @@ class _ModulesPageState extends State<ModulesPage> {
       );
       return;
     }
-    unawaited(_refreshIncrementallyOnEntry());
     _rememberNavigation();
     setState(() {
       _clearDesktopContentCache();
@@ -1731,7 +1745,9 @@ class _ModulesPageState extends State<ModulesPage> {
       final hasCache = await local.hasOfflineBootstrapCache();
       await sync.downloadAllForOffline(
         allowFullFallback: !hasCache,
-        forceConfigurationRefresh: !hasCache,
+        // El botón debe reflejar siempre la configuración vigente completa:
+        // campos, dropdowns, fórmulas, validaciones, permisos y formatos.
+        forceConfigurationRefresh: true,
         onProgress: (message) {
           if (mounted) {
             setState(() {
@@ -2177,7 +2193,6 @@ class _ModulesPageState extends State<ModulesPage> {
   }
 
   void _selectDesktopSection(Map<String, dynamic> section) {
-    unawaited(_refreshIncrementallyOnEntry());
     if (desktopSelectedSection?['id']?.toString() ==
             section['id']?.toString() &&
         desktopSelectedModule == null &&
@@ -2213,7 +2228,6 @@ class _ModulesPageState extends State<ModulesPage> {
 
   void _selectDesktopFormat(
       Map<String, dynamic> module, Map<String, dynamic> format) {
-    unawaited(_refreshIncrementallyOnEntry());
     final sameSelection = desktopSelectedModule?['id']?.toString() ==
             module['id']?.toString() &&
         desktopSelectedFormat?['id']?.toString() == format['id']?.toString() &&
@@ -3910,7 +3924,6 @@ class _ModulesPageState extends State<ModulesPage> {
                                 });
                                 _desktopSidebarOpenNotifier.value = true;
                                 unawaited(_persistNavigation());
-                                unawaited(_refreshIncrementallyOnEntry());
                               } else {
                                 _sectionTap(section)();
                               }
