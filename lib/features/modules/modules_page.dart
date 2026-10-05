@@ -1837,7 +1837,7 @@ class _ModulesPageState extends State<ModulesPage> {
         online = true;
       });
       unawaited(experience.saveLastSync(completedAt));
-      final String message;
+      var message = '';
       if (beforeTareos.isNotEmpty &&
           closedBeforeIds.isEmpty &&
           openTareos > 0) {
@@ -1855,6 +1855,24 @@ class _ModulesPageState extends State<ModulesPage> {
             : 'Registros sincronizados: $count. Quedan ${outstandingRows.length} pendientes por reintentar.';
       } else {
         message = 'Registros sincronizados: $count';
+      }
+      final summary = sync.lastSyncSummary;
+      final duplicateMessages = <String>[];
+      if (summary.attendanceIngressDuplicates > 0) {
+        final total = summary.attendanceIngressDuplicates;
+        duplicateMessages.add(total == 1
+            ? '1 persona ya tenía ingreso'
+            : '$total personas ya tenían ingreso');
+      }
+      if (summary.attendanceExitDuplicates > 0) {
+        final total = summary.attendanceExitDuplicates;
+        duplicateMessages.add(total == 1
+            ? '1 persona ya tenía salida'
+            : '$total personas ya tenían salida');
+      }
+      if (duplicateMessages.isNotEmpty) {
+        message = '$message ${duplicateMessages.join(' y ')}; '
+            '${summary.attendanceDuplicates == 1 ? 'esa marcación fue omitida' : 'esas marcaciones fueron omitidas'} porque ya existen en Supabase.';
       }
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(message)));

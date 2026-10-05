@@ -8,13 +8,34 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../config/tenant_config.dart';
+import 'attendance_sync_policy.dart';
 import 'field_definitions.dart';
 import 'local_db.dart';
 import 'local_session.dart';
 import 'evidence_storage.dart';
 import 'offline_record_state.dart';
+import 'soft_delete.dart';
 import 'sync_error_message.dart';
 import 'tareo_draft_policy.dart';
+
+class SyncSummary {
+  final int synced;
+  final int conflicts;
+  final int errors;
+  final int attendanceIngressDuplicates;
+  final int attendanceExitDuplicates;
+
+  const SyncSummary({
+    this.synced = 0,
+    this.conflicts = 0,
+    this.errors = 0,
+    this.attendanceIngressDuplicates = 0,
+    this.attendanceExitDuplicates = 0,
+  });
+
+  int get attendanceDuplicates =>
+      attendanceIngressDuplicates + attendanceExitDuplicates;
+}
 
 /// Orquesta la sincronización autenticada entre Supabase y la caché local.
 ///
@@ -25,6 +46,9 @@ class SyncService {
   final _supabase = Supabase.instance.client;
   final _local = LocalDb.instance;
   final _uuid = const Uuid();
+  SyncSummary _lastSyncSummary = const SyncSummary();
+
+  SyncSummary get lastSyncSummary => _lastSyncSummary;
 
   static const Set<String> _excludedOfflineSourceTables = {
     'appgt_auditoria',
@@ -3335,6 +3359,46 @@ class SyncService {
 
   static bool _syncPendingRunning = false;
 
+  Future<Map<String, dynamic>?> _remoteAttendanceFor(
+    Map<String, dynamic> payload, {
+    required String empresaId,
+  }) async {
+    final dni = (_valueByColumn(payload, const ['DNI', 'DOCUMENTO']) ?? '')
+        .toString()
+        .trim();
+    final rawDate =
+        (_valueByColumn(payload, const ['FECHA', 'FECHA_INGRESO']) ?? '')
+            .toString()
+            .trim();
+    final date = rawDate.length >= 10 ? rawDate.substring(0, 10) : rawDate;
+    if (dni.isEmpty || date.isEmpty) return null;
+
+    try {
+      final rows = empresaId.trim().isEmpty
+          ? await _supabase
+              .from('GT-ASISTENCIA_PERSONAL')
+              .select()
+              .eq('DNI', dni)
+              .eq('FECHA', date)
+              .limit(5)
+          : await _supabase
+              .from('GT-ASISTENCIA_PERSONAL')
+              .select()
+              .eq('empresa_id', empresaId.trim())
+              .eq('DNI', dni)
+              .eq('FECHA', date)
+              .limit(5);
+      for (final row in rows) {
+        final candidate = Map<String, dynamic>.from(row);
+        if (!isSoftDeletedAppgtRow(candidate)) return candidate;
+      }
+    } catch (_) {
+      // La protección SQL sigue siendo la última barrera. Si esta consulta no
+      // está disponible, el registro continúa por el flujo normal de subida.
+    }
+    return null;
+  }
+
   Future<int> syncPending() async {
     if (_syncPendingRunning) {
       throw Exception('Ya hay una sincronización en curso.');
@@ -3348,6 +3412,7 @@ class SyncService {
   }
 
   Future<int> _syncPendingInternal() async {
+    _lastSyncSummary = const SyncSummary();
     final online = await hasInternet();
     if (!online)
       throw Exception(
@@ -3398,6 +3463,8 @@ class SyncService {
     int synced = 0;
     int conflicts = 0;
     int errors = 0;
+    int attendanceIngressDuplicates = 0;
+    int attendanceExitDuplicates = 0;
     final syncRunId = _uuid.v4();
     await _startRemoteSyncRun(
       syncRunId: syncRunId,
@@ -3423,8 +3490,42 @@ class SyncService {
         final withHiddenIds =
             await _ensureHiddenIdsForSync(table: table, payload: payload);
         final cleanedPayload = _cleanPayloadForInsert(withHiddenIds);
-        final knownPayload =
+        var knownPayload =
             await _filterPayloadToKnownFields(table, cleanedPayload);
+        if (table == 'GT-ASISTENCIA_PERSONAL' &&
+            attendanceBusinessKey(knownPayload).isNotEmpty) {
+          final remoteAttendance = await _remoteAttendanceFor(
+            knownPayload,
+            empresaId: activeEmpresaId,
+          );
+          final attendanceResolution = reconcileAttendanceForSync(
+            localPayload: knownPayload,
+            remotePayload: remoteAttendance,
+          );
+          if (!attendanceResolution.shouldUpload) {
+            await _local.deleteRecord(storedIdLocal);
+            if (remoteAttendance != null) {
+              await _local.upsertMatrixRowPayload(
+                table,
+                attendanceResolution.payload,
+              );
+            }
+            if (attendanceResolution.action ==
+                AttendanceSyncAction.skipExistingExit) {
+              attendanceExitDuplicates++;
+            } else {
+              attendanceIngressDuplicates++;
+            }
+            continue;
+          }
+          if (attendanceResolution.action ==
+              AttendanceSyncAction.updateRemoteExit) {
+            knownPayload = await _filterPayloadToKnownFields(
+              table,
+              attendanceResolution.payload,
+            );
+          }
+        }
         final conflict = await _remoteConflictFor(
           table: table,
           payload: knownPayload,
@@ -3514,6 +3615,13 @@ class SyncService {
       synced: synced,
       conflicts: conflicts,
       errors: errors,
+    );
+    _lastSyncSummary = SyncSummary(
+      synced: synced,
+      conflicts: conflicts,
+      errors: errors,
+      attendanceIngressDuplicates: attendanceIngressDuplicates,
+      attendanceExitDuplicates: attendanceExitDuplicates,
     );
     return synced;
   }

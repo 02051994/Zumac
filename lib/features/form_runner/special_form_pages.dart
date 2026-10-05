@@ -5490,6 +5490,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
+        resizeToAvoidBottomInset: false,
         backgroundColor: const Color(0xFFF4F8F7),
         appBar: _zumacFormatAppBar(
           title: const Text(
@@ -7042,6 +7043,7 @@ class _PlagasEnfermedadesSpecialPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: _zumacFormatAppBar(
         title: Text(
             widget.isConteoFruta ? 'Conteo de Fruta' : 'Plagas y Enfermedades',
@@ -7653,6 +7655,7 @@ class _PlantEvaluationSpecialPageState
     final evalFields = fields.where(_isEvaluationField).toList();
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: _zumacFormatAppBar(
         title: Text(title, style: const TextStyle(fontSize: 16)),
         onBack: widget.onSavedAndExit == null
@@ -8187,6 +8190,7 @@ class _MachinerySpecialPageState extends State<MachinerySpecialPage> {
     final signatures = fields.where(_isSignature).toList();
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: _zumacFormatAppBar(
         title: const Text('Horas Maquinaria', style: TextStyle(fontSize: 16)),
         onBack: widget.onSavedAndExit == null

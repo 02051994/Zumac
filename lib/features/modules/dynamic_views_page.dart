@@ -1434,7 +1434,7 @@ class _DynamicViewsPageState extends State<DynamicViewsPage> {
                 children: [
                   TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancelar')),
                   const SizedBox(width: 8),
-                  FilledButton(
+                  IconButton.filled(
                     onPressed: () async {
                       final payload = <String, dynamic>{};
                       for (final e in controllers.entries) {
@@ -1519,7 +1519,8 @@ class _DynamicViewsPageState extends State<DynamicViewsPage> {
                       if (canComplete) payload['__complete__'] = true;
                       Navigator.pop(context, payload);
                     },
-                    child: const Text('Guardar'),
+                    tooltip: 'Guardar',
+                    icon: const Icon(Icons.save),
                   ),
                 ],
               ),

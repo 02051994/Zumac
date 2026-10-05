@@ -12,6 +12,9 @@ void main() {
   final specialForms = File(
     'lib/features/form_runner/special_form_pages.dart',
   ).readAsStringSync();
+  final formRunner = File(
+    'lib/features/form_runner/form_runner_page.dart',
+  ).readAsStringSync();
   final desktopRecords = File(
     'lib/features/formats/desktop_format_records_page.dart',
   ).readAsStringSync();
@@ -29,6 +32,9 @@ void main() {
   ).readAsStringSync();
   final tareoMigration = File(
     'supabase/migrations/202610020072_tareo_refrigerio_scanner_and_permission_catalog.sql',
+  ).readAsStringSync();
+  final attendanceReconciliationMigration = File(
+    'supabase/migrations/202610050073_attendance_tareo_offline_reconciliation.sql',
   ).readAsStringSync();
 
   test('la web conserva el layout de escritorio aunque reduzca su ancho', () {
@@ -160,9 +166,35 @@ void main() {
       specialForms,
       contains('En ese horario el personal estuvo en refrigerio'),
     );
-    expect(tareoMigration,
-        contains("array['DNI','FECHA','LABOR','CENTRO_COSTO']"));
+    expect(
+      attendanceReconciliationMigration,
+      contains("array['DNI','FECHA','HORA_INICIO','HORA_FIN']"),
+    );
     expect(tareoMigration, contains('"MINUTOS_REFRIGERIO" = 45'));
+  });
+
+  test(
+      'permisos y sanciones buscan personal por DNI y autocompletan trabajador',
+      () {
+    expect(formRunner, contains('bool get _usesPersonnelLookup'));
+    expect(formRunner, contains('Widget _personnelDniFieldWidget'));
+    expect(formRunner, contains("const ['TRABAJADOR']"));
+    expect(formRunner,
+        contains("title: Text('\$dni - \${_personnelWorkerName(worker)}')"));
+  });
+
+  test('los formatos mantienen el guardado fijo y muestran solo su icono', () {
+    expect(formRunner, contains('resizeToAvoidBottomInset: false'));
+    expect(formRunner, contains('FloatingActionButton('));
+    expect(formRunner, contains('const Icon(Icons.save_outlined)'));
+    expect(formRunner, isNot(contains("'GUARDAR SOLICITUD'")));
+  });
+
+  test('la sincronización concilia asistencias aunque se haya borrado el caché',
+      () {
+    expect(syncService, contains('reconcileAttendanceForSync'));
+    expect(syncService, contains('attendanceIngressDuplicates'));
+    expect(modules, contains('personas ya tenían ingreso'));
   });
 
   test('el escáner mantiene la cámara activa y muestra el resultado', () {

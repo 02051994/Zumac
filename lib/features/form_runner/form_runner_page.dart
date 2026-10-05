@@ -63,6 +63,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   List<Map<String, dynamic>> internalTables = [];
   List<Map<String, dynamic>> fields = [];
   List<Map<String, dynamic>> lotesVariedades = [];
+  List<Map<String, dynamic>> personnelWorkers = [];
   Map<String, List<String>> catalogValues = {};
   Map<String, Map<String, dynamic>> fieldDefsById = {};
   Map<String, List<Map<String, dynamic>>> matrixRowsByTable = {};
@@ -76,6 +77,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   final Map<String, String> documentFileNames = <String, String>{};
   final ImagePicker _imagePicker = ImagePicker();
   Timer? _formulaRecalcDebounce;
+  String? _selectedPersonnelDni;
   bool capturingPhoto = false;
   bool savingLocal = false;
   bool loadingFields = true;
@@ -765,6 +767,12 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     );
     final rows = rawRows.where(_fieldBelongsToCurrentCapture).toList();
 
+    if (_usesPersonnelLookup) {
+      await _loadPersonnelWorkers();
+    } else {
+      personnelWorkers = <Map<String, dynamic>>[];
+    }
+
     // CRÍTICO: id_campo_dropdown puede apuntar a un campo de OTRA tabla mediante
     // el id de MATRIZ_CAMPOS_FORMATO_APPGT. El formulario solo cargaba los campos
     // de la tabla actual y dejaba fieldDefsById vacío; por eso no podía resolver
@@ -831,6 +839,17 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         _syncMultiSelectController(campo);
       } else {
         controllers[campo] = TextEditingController(text: initialText);
+      }
+    }
+    _selectedPersonnelDni = null;
+    if (_usesPersonnelLookup) {
+      for (final entry in controllers.entries) {
+        final normalized = _normalizarNombreCampo(entry.key);
+        if (normalized == 'DNI' || normalized == 'DOCUMENTO') {
+          final initialDni = _onlyDigits(entry.value.text);
+          if (initialDni.isNotEmpty) _selectedPersonnelDni = initialDni;
+          break;
+        }
       }
     }
 
@@ -3641,6 +3660,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       (tableDestino ?? '').trim().toUpperCase() ==
       'GH_SANCIONES_PERSONAL_APPGT';
 
+  bool get _usesPersonnelLookup => _isPermissionLeaveForm || _isSanctionForm;
+
+  bool _isPersonnelDniField(Map<String, dynamic> field) {
+    if (!_usesPersonnelLookup) return false;
+    final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
+    return campo == 'DNI' || campo == 'DOCUMENTO';
+  }
+
+  bool _isPersonnelWorkerField(Map<String, dynamic> field) {
+    if (!_usesPersonnelLookup) return false;
+    return _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
+        'TRABAJADOR';
+  }
+
   bool _isPermissionDocumentField(Map<String, dynamic> field) {
     return _isPermissionLeaveForm &&
         _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
@@ -5149,9 +5182,229 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     return null;
   }
 
+  String _personnelWorkerName(Map<String, dynamic> worker) {
+    final full = (_rowValueByCandidates(worker, const [
+              'APELLIDOS Y NOMBRES',
+              'APELLIDOS_NOMBRES',
+              'NOMBRE COMPLETO',
+              'NOMBRE_COMPLETO',
+            ]) ??
+            '')
+        .toString()
+        .trim();
+    if (full.isNotEmpty) return full;
+    return [
+      _rowValueByCandidates(
+          worker, const ['APELLIDO_PATERNO', 'APELLIDO PATERNO']),
+      _rowValueByCandidates(
+          worker, const ['APELLIDO_MATERNO', 'APELLIDO MATERNO']),
+      _rowValueByCandidates(worker, const ['NOMBRES', 'NOMBRE']),
+    ]
+        .map((value) => value?.toString().trim() ?? '')
+        .where((value) => value.isNotEmpty)
+        .join(' ');
+  }
+
+  Future<void> _loadPersonnelWorkers() async {
+    final byDni = <String, Map<String, dynamic>>{};
+
+    void addWorker(Map<String, dynamic> payload) {
+      if (isSoftDeletedAppgtRow(payload)) return;
+      final dni = (_rowValueByCandidates(
+                  payload, const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']) ??
+              '')
+          .toString()
+          .trim();
+      final digits = _onlyDigits(dni);
+      if (digits.isEmpty) return;
+      byDni[digits] = payload;
+    }
+
+    for (final source in const [
+      'GH-REGISTRO_PERSONAL_PLANILLA',
+      'GH_REGISTRO_PERSONAL_PLANILLA',
+      'PERSONAL_PLANILLA',
+    ]) {
+      final cached = await local.where(
+        'local_matrix_rows',
+        'source_table = ?',
+        [source],
+      );
+      for (final row in cached) {
+        try {
+          addWorker(jsonDecode(row['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>);
+        } catch (_) {}
+      }
+    }
+
+    for (final source in const [
+      'GH-REGISTRO_PERSONAL_PLANILLA',
+      'GH_REGISTRO_PERSONAL_PLANILLA',
+    ]) {
+      for (final row in await local.allRecords(table: source)) {
+        try {
+          addWorker(jsonDecode(row['payload_json']?.toString() ?? '{}')
+              as Map<String, dynamic>);
+        } catch (_) {}
+      }
+    }
+    personnelWorkers = byDni.values.toList(growable: false)
+      ..sort(
+          (a, b) => _personnelWorkerName(a).compareTo(_personnelWorkerName(b)));
+  }
+
+  List<Map<String, dynamic>> _personnelMatches(String query) {
+    final digits = _onlyDigits(query);
+    if (digits.isEmpty) return const <Map<String, dynamic>>[];
+    if (_selectedPersonnelDni == digits) {
+      return const <Map<String, dynamic>>[];
+    }
+    return personnelWorkers
+        .where((worker) {
+          final dni = (_rowValueByCandidates(
+                      worker, const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']) ??
+                  '')
+              .toString();
+          return _onlyDigits(dni).contains(digits);
+        })
+        .take(8)
+        .toList(growable: false);
+  }
+
+  void _selectPersonnelWorker(Map<String, dynamic> worker) {
+    final dni = _rowValueByCandidates(
+        worker, const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']);
+    final name = _personnelWorkerName(worker);
+    final position = _rowValueByCandidates(worker, const ['PUESTO', 'CARGO']);
+    final area = _rowValueByCandidates(worker, const ['AREA', 'ÁREA']);
+    setState(() {
+      _selectedPersonnelDni = _onlyDigits(dni?.toString() ?? '');
+      _setFirstExistingController(
+          const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO'], dni);
+      _setFirstExistingController(const ['TRABAJADOR'], name);
+      _setFirstExistingController(const ['PUESTO', 'CARGO'], position);
+      _setFirstExistingController(const ['AREA', 'ÁREA'], area);
+    });
+    _recalculateDerivedFields();
+    _recalculateMatrixDrivenFields();
+  }
+
+  Widget _personnelDniFieldWidget(Map<String, dynamic> field) {
+    final campo = field['campo']?.toString() ?? '';
+    final etiqueta = field['etiqueta']?.toString() ?? campo;
+    final requerido = _asBool(field['requerido']);
+    final editable = _isEditable(field);
+    final matches = _personnelMatches(controllers[campo]?.text ?? '');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        TextField(
+          controller: controllers[campo],
+          focusNode: _focusNodeFor(campo),
+          readOnly: !editable,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.done,
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(8),
+          ],
+          decoration: InputDecoration(
+            labelText: requerido ? '$etiqueta *' : etiqueta,
+            helperText: personnelWorkers.isEmpty
+                ? 'Sin personal local. Actualiza datos con internet.'
+                : 'Escribe el DNI y selecciona al trabajador.',
+            border: const OutlineInputBorder(),
+            prefixIcon: const Icon(Icons.badge_outlined),
+          ),
+          onChanged: (value) => setState(() {
+            if (_selectedPersonnelDni != _onlyDigits(value)) {
+              _selectedPersonnelDni = null;
+              for (final entry in controllers.entries) {
+                final normalized = _normalizarNombreCampo(entry.key);
+                if (normalized == 'TRABAJADOR' ||
+                    normalized == 'PUESTO' ||
+                    normalized == 'CARGO' ||
+                    normalized == 'AREA') {
+                  entry.value.clear();
+                }
+              }
+            }
+          }),
+          onSubmitted: (value) {
+            final exact = _onlyDigits(value);
+            for (final worker in personnelWorkers) {
+              final dni = (_rowValueByCandidates(worker,
+                          const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']) ??
+                      '')
+                  .toString();
+              if (_onlyDigits(dni) == exact) {
+                _selectPersonnelWorker(worker);
+                return;
+              }
+            }
+          },
+        ),
+        if (matches.isNotEmpty)
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            constraints: const BoxConstraints(maxHeight: 190),
+            decoration: BoxDecoration(
+              color: const Color(0xFFF9FCFA),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFD8E5DD)),
+            ),
+            child: ListView.separated(
+              shrinkWrap: true,
+              itemCount: matches.length,
+              separatorBuilder: (_, __) => const Divider(height: 1),
+              itemBuilder: (_, index) {
+                final worker = matches[index];
+                final dni = (_rowValueByCandidates(worker,
+                            const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']) ??
+                        '')
+                    .toString();
+                return ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.badge_outlined,
+                      color: Color(0xFF176B87)),
+                  title: Text('$dni - ${_personnelWorkerName(worker)}'),
+                  onTap: () => _selectPersonnelWorker(worker),
+                );
+              },
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _personnelWorkerFieldWidget(Map<String, dynamic> field) {
+    final campo = field['campo']?.toString() ?? '';
+    final etiqueta = field['etiqueta']?.toString() ?? campo;
+    final requerido = _asBool(field['requerido']);
+    return TextField(
+      controller: controllers[campo],
+      focusNode: _focusNodeFor(campo),
+      readOnly: true,
+      decoration: InputDecoration(
+        labelText: requerido ? '$etiqueta *' : etiqueta,
+        border: const OutlineInputBorder(),
+        prefixIcon: const Icon(Icons.person_outline),
+      ),
+    );
+  }
+
   Future<Map<String, dynamic>?> _findWorkerByScan(String scannedRaw) async {
     final code = _normalizeScannedCode(scannedRaw);
     if (code.isEmpty) return null;
+
+    for (final worker in personnelWorkers) {
+      final dni = (_rowValueByCandidates(
+                  worker, const ['DNI', 'DOCUMENTO', 'NRO_DOCUMENTO']) ??
+              '')
+          .toString();
+      if (_onlyDigits(dni) == _onlyDigits(code)) return worker;
+    }
 
     final tableNames = <String>[
       'GH-REGISTRO_PERSONAL_PLANILLA',
@@ -5348,6 +5601,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     if (_isPermissionDocumentField(field) || uiType == 'pdf') {
       return _permissionDocumentWidget(field);
+    }
+
+    if (_isPersonnelDniField(field)) return _personnelDniFieldWidget(field);
+    if (_isPersonnelWorkerField(field)) {
+      return _personnelWorkerFieldWidget(field);
     }
 
     if (_isScannerUi(uiType)) return _scannerFieldWidget(field);
@@ -5816,6 +6074,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final useWizard = _hasMasterDetailConfig;
 
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFFF4F8F7),
       appBar: AppBar(
         toolbarHeight: 52,
@@ -5964,22 +6223,24 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             ),
             const SizedBox(width: 12),
           ],
-          FloatingActionButton.extended(
+          FloatingActionButton(
             heroTag: 'save_${tableDestino ?? ''}',
-            onPressed: saveLocal,
+            onPressed: savingLocal ? null : saveLocal,
             tooltip: _isPermissionLeaveForm
                 ? 'Guardar solicitud para aprobación en la web'
                 : (isOnlineFirstRuntime
                     ? 'Guardar en el sistema'
                     : 'Guardar en el celular'),
-            icon: Icon(
-              _isPermissionLeaveForm
-                  ? Icons.send_outlined
-                  : Icons.save_outlined,
-            ),
-            label: Text(
-              _isPermissionLeaveForm ? 'GUARDAR SOLICITUD' : 'Guardar',
-            ),
+            child: savingLocal
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_outlined),
           ),
         ],
       ),
@@ -6383,10 +6644,10 @@ class _SignatureDialogState extends State<SignatureDialog> {
                 child: const Text('Cancelar'),
               ),
               const SizedBox(width: 8),
-              FilledButton.icon(
+              IconButton.filled(
                 onPressed: _accept,
-                icon: const Icon(Icons.check, size: 18),
-                label: const Text('Guardar firma'),
+                tooltip: 'Guardar firma',
+                icon: const Icon(Icons.save, size: 20),
               ),
             ],
           ),
