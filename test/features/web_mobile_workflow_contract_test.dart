@@ -8,8 +8,7 @@ void main() {
   final modules =
       File('lib/features/modules/modules_page.dart').readAsStringSync();
   final app = File('lib/app.dart').readAsStringSync();
-  final login =
-      File('lib/features/auth/login_page.dart').readAsStringSync();
+  final login = File('lib/features/auth/login_page.dart').readAsStringSync();
   final specialForms = File(
     'lib/features/form_runner/special_form_pages.dart',
   ).readAsStringSync();
@@ -19,6 +18,9 @@ void main() {
   final syncService =
       File('lib/core/services/sync_service.dart').readAsStringSync();
   final localDb = File('lib/core/services/local_db.dart').readAsStringSync();
+  final androidMainActivity = File(
+    'android/app/src/main/kotlin/com/example/appgt_offline_subtables/MainActivity.kt',
+  ).readAsStringSync();
   final permissions = File(
     'lib/features/users/governed_permissions_page.dart',
   ).readAsStringSync();
@@ -166,7 +168,16 @@ void main() {
   test('el escáner mantiene la cámara activa y muestra el resultado', () {
     expect(specialForms, contains('class _ContinuousScannerPage'));
     expect(specialForms, contains('Coloque el QR dentro del recuadro'));
-    expect(specialForms, contains('feedback!.accepted'));
+    expect(specialForms, contains('class _ScannerFeedbackCard'));
+    expect(specialForms, contains('bool get isClear'));
+    expect(specialForms, contains('Duration(milliseconds: 3600)'));
+    expect(specialForms, contains('resizeToAvoidBottomInset: false'));
+    expect(specialForms, contains('TextInputType.none'));
+    expect(specialForms, contains('scannerSoftKeyboardEnabled'));
+    expect(specialForms, contains("'TextInput.hide'"));
+    expect(androidMainActivity, contains('playScannerTone'));
+    expect(androidMainActivity, contains('ToneGenerator.TONE_PROP_ACK'));
+    expect(androidMainActivity, contains('ToneGenerator.TONE_SUP_ERROR'));
     expect(specialForms, contains('Cerrar escáner'));
     expect(specialForms, isNot(contains('Navigator.of(context).pop(code)')));
   });

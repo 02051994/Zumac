@@ -19,6 +19,34 @@ import '../../core/services/sync_service.dart';
 import '../../core/services/tareo_draft_policy.dart';
 import 'form_runner_page.dart';
 
+const MethodChannel _scannerFeedbackChannel =
+    MethodChannel('zumac/scanner_feedback');
+
+Future<void> _playScannerFeedback({required bool accepted}) async {
+  var playedByAndroid = false;
+  try {
+    playedByAndroid =
+        await _scannerFeedbackChannel.invokeMethod<bool>('playScannerTone', {
+              'accepted': accepted,
+            }) ??
+            false;
+  } catch (_) {
+    // Otras plataformas usan el sonido estándar como respaldo.
+  }
+  if (!playedByAndroid) {
+    try {
+      await SystemSound.play(
+        accepted ? SystemSoundType.click : SystemSoundType.alert,
+      );
+    } catch (_) {}
+  }
+  if (accepted) {
+    unawaited(HapticFeedback.selectionClick());
+  } else {
+    unawaited(HapticFeedback.heavyImpact());
+  }
+}
+
 Future<void> _showAppGtAlert(
   BuildContext context,
   String message, {
@@ -27,7 +55,7 @@ Future<void> _showAppGtAlert(
   bool playSound = false,
 }) async {
   if (playSound) {
-    await SystemSound.play(SystemSoundType.alert);
+    await _playScannerFeedback(accepted: false);
   }
   if (!context.mounted) return;
   final theme = Theme.of(context);
@@ -83,10 +111,89 @@ Future<void> _showAppGtAlert(
 
 class _ScannerOutcome {
   final bool accepted;
+  final bool hasWarning;
   final String message;
 
-  const _ScannerOutcome.accepted(this.message) : accepted = true;
-  const _ScannerOutcome.rejected(this.message) : accepted = false;
+  const _ScannerOutcome.accepted(this.message, {this.hasWarning = false})
+      : accepted = true;
+  const _ScannerOutcome.rejected(this.message)
+      : accepted = false,
+        hasWarning = true;
+
+  bool get isClear => accepted && !hasWarning;
+}
+
+class _ScannerFeedbackCard extends StatelessWidget {
+  final _ScannerOutcome feedback;
+  final double maxWidth;
+  final bool compact;
+
+  const _ScannerFeedbackCard({
+    required this.feedback,
+    this.maxWidth = 320,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final clear = feedback.isClear;
+    return Semantics(
+      liveRegion: true,
+      label: feedback.message,
+      child: Container(
+        constraints: BoxConstraints(maxWidth: maxWidth),
+        padding: EdgeInsets.fromLTRB(
+          compact ? 14 : 20,
+          compact ? 14 : 20,
+          compact ? 14 : 20,
+          compact ? 13 : 18,
+        ),
+        decoration: BoxDecoration(
+          color: clear ? const Color(0xF21B7F3C) : const Color(0xF2B71C1C),
+          borderRadius: BorderRadius.circular(compact ? 18 : 22),
+          border: Border.all(color: Colors.white, width: 2),
+          boxShadow: const [
+            BoxShadow(
+              color: Colors.black38,
+              blurRadius: 18,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: compact ? 76 : 96,
+              height: compact ? 76 : 96,
+              decoration: const BoxDecoration(
+                color: Color(0x33FFFFFF),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                clear ? Icons.check_rounded : Icons.close_rounded,
+                color: Colors.white,
+                size: compact ? 58 : 72,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              feedback.message,
+              textAlign: TextAlign.center,
+              maxLines: compact ? 4 : 6,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: compact ? 13 : 16,
+                height: 1.2,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 String _workerRuleNorm(String value) => value
@@ -1307,6 +1414,9 @@ class _AsistenciaPersonalSpecialPageState
   bool validatingMobility = false;
   bool loadingMobilities = true;
   String? acceptedMobilityWarningKey;
+  bool scannerSoftKeyboardEnabled = false;
+  _ScannerOutcome? attendanceFeedback;
+  Timer? attendanceFeedbackTimer;
 
   @override
   void initState() {
@@ -1324,6 +1434,7 @@ class _AsistenciaPersonalSpecialPageState
 
   @override
   void dispose() {
+    attendanceFeedbackTimer?.cancel();
     fechaCtrl.dispose();
     placaCtrl.dispose();
     reclutadorCtrl.dispose();
@@ -2427,8 +2538,13 @@ class _AsistenciaPersonalSpecialPageState
               ? 'Salida'
               : 'Ingreso';
       final name = payload['APELLIDOS Y NOMBRES']?.toString().trim() ?? '';
+      final warningAccepted = _mobilityWarningAccepted;
       return _ScannerOutcome.accepted(
-          '$movement registrado: $dni${name.isEmpty ? '' : ' - $name'}');
+        warningAccepted
+            ? '$movement registrado con advertencia: $dni${name.isEmpty ? '' : ' - $name'}'
+            : '$movement registrado: $dni${name.isEmpty ? '' : ' - $name'}',
+        hasWarning: warningAccepted,
+      );
     } catch (e) {
       final message = 'No se pudo guardar asistencia: $e';
       if (showMessages && mounted) {
@@ -2452,7 +2568,6 @@ class _AsistenciaPersonalSpecialPageState
           'Espera a que termine la marcación anterior.');
     }
     scannerCtrl.clear();
-    scannerFocus.requestFocus();
     final worker = await _findWorker(code);
     if (!mounted) {
       return const _ScannerOutcome.rejected('La vista ya no está disponible.');
@@ -2489,9 +2604,6 @@ class _AsistenciaPersonalSpecialPageState
         attendanceDate,
       );
       if (blockReason != null) {
-        if (!cameraMode) {
-          await _showAppGtAlert(context, blockReason, playSound: true);
-        }
         return _ScannerOutcome.rejected(blockReason);
       }
       final headerPlate = _headerValue(
@@ -2519,9 +2631,6 @@ class _AsistenciaPersonalSpecialPageState
     final existing = await _existingAttendancePayload(dni);
     if (tipoMovimiento == 'INGRESO' && existing != null) {
       const message = 'Personal ya tiene asistencia';
-      if (!cameraMode) {
-        await _showAppGtAlert(context, message, playSound: true);
-      }
       return const _ScannerOutcome.rejected(message);
     }
     if (tipoMovimiento == 'SALIDA') {
@@ -2531,7 +2640,6 @@ class _AsistenciaPersonalSpecialPageState
               '');
       if (ingresoPrevio.isEmpty || ingresoPrevio.toLowerCase() == 'null') {
         const message = 'Personal no tiene ingreso';
-        if (!cameraMode) await _showAppGtAlert(context, message);
         return const _ScannerOutcome.rejected(message);
       }
     }
@@ -2607,13 +2715,66 @@ class _AsistenciaPersonalSpecialPageState
     );
   }
 
+  void _showAttendanceFeedback(_ScannerOutcome result) {
+    if (!mounted) return;
+    attendanceFeedbackTimer?.cancel();
+    setState(() => attendanceFeedback = result);
+    unawaited(_playScannerFeedback(accepted: result.isClear));
+    attendanceFeedbackTimer = Timer(
+      result.isClear
+          ? const Duration(milliseconds: 1300)
+          : const Duration(milliseconds: 3600),
+      () {
+        if (mounted) {
+          setState(() => attendanceFeedback = null);
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) scannerFocus.requestFocus();
+          });
+        }
+      },
+    );
+  }
+
+  Future<void> _submitAttendanceCode(String raw) async {
+    if (attendanceFeedback != null) return;
+    if (scannerSoftKeyboardEnabled && mounted) {
+      setState(() => scannerSoftKeyboardEnabled = false);
+    }
+    scannerFocus.unfocus();
+    await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    final result = await _processScan(raw);
+    if (!mounted) return;
+    _showAttendanceFeedback(result);
+  }
+
   Future<void> _openCameraScanner() async {
+    if (scannerSoftKeyboardEnabled && mounted) {
+      setState(() => scannerSoftKeyboardEnabled = false);
+    }
+    scannerFocus.unfocus();
+    await SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    if (!mounted) return;
     await Navigator.of(context).push<void>(MaterialPageRoute(
       builder: (_) => _ContinuousScannerPage(
         title: 'Escanear asistencia',
         onScan: (code) => _processScan(code, cameraMode: true),
       ),
     ));
+    if (mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) scannerFocus.requestFocus();
+      });
+    }
+  }
+
+  void _enableScannerSoftKeyboard() {
+    if (!mounted) return;
+    setState(() => scannerSoftKeyboardEnabled = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      scannerFocus.requestFocus();
+      unawaited(SystemChannels.textInput.invokeMethod<void>('TextInput.show'));
+    });
   }
 
   Widget _workerSearchBox() {
@@ -2634,21 +2795,38 @@ class _AsistenciaPersonalSpecialPageState
             .toList();
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextField(
+        key: ValueKey(
+          'attendance-scanner-${scannerSoftKeyboardEnabled ? 'soft' : 'pda'}',
+        ),
         controller: scannerCtrl,
         focusNode: scannerFocus,
-        autofocus: false,
+        autofocus: true,
+        keyboardType: scannerSoftKeyboardEnabled
+            ? TextInputType.text
+            : TextInputType.none,
         decoration: InputDecoration(
           labelText: 'Escanear DNI / QR / código de barras',
           helperText: 'Escribe DNI o nombre, o usa lector físico/cámara.',
           border: const OutlineInputBorder(),
-          suffixIcon: IconButton(
-              onPressed: _openCameraScanner,
-              icon: const Icon(Icons.qr_code_scanner),
-              tooltip: 'Abrir cámara'),
+          suffixIcon: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                onPressed: _enableScannerSoftKeyboard,
+                icon: const Icon(Icons.keyboard_alt_outlined),
+                tooltip: 'Escribir manualmente',
+              ),
+              IconButton(
+                onPressed: _openCameraScanner,
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: 'Abrir cámara',
+              ),
+            ],
+          ),
         ),
         textInputAction: TextInputAction.done,
         onChanged: (_) => setState(() {}),
-        onSubmitted: _processScan,
+        onSubmitted: _submitAttendanceCode,
       ),
       if (options.isNotEmpty)
         Container(
@@ -2673,7 +2851,7 @@ class _AsistenciaPersonalSpecialPageState
                 leading:
                     const Icon(Icons.badge_outlined, color: Color(0xFF2E6B37)),
                 title: Text('$dni - $nombre'),
-                onTap: () => _processScan(dni),
+                onTap: () => _submitAttendanceCode(dni),
               );
             },
           ),
@@ -2997,6 +3175,7 @@ class _AsistenciaPersonalSpecialPageState
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: const Color(0xFFF4F8F7),
       appBar: _zumacFormatAppBar(
         title: const Text(
@@ -3011,21 +3190,41 @@ class _AsistenciaPersonalSpecialPageState
           }
         },
       ),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 980),
-          child: Scrollbar(
-            controller: _asistenciaVerticalCtrl,
-            thumbVisibility: true,
-            child: ListView(
+      body: Stack(
+        children: [
+          Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 980),
+              child: Scrollbar(
                 controller: _asistenciaVerticalCtrl,
-                padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
-                children: [
-                  _attendanceForm(),
-                  _workersButton(),
-                ]),
+                thumbVisibility: true,
+                child: ListView(
+                    controller: _asistenciaVerticalCtrl,
+                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 16),
+                    children: [
+                      _attendanceForm(),
+                      _workersButton(),
+                    ]),
+              ),
+            ),
           ),
-        ),
+          if (attendanceFeedback != null)
+            Positioned.fill(
+              child: AbsorbPointer(
+                child: ColoredBox(
+                  color: Colors.black26,
+                  child: Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: _ScannerFeedbackCard(
+                        feedback: attendanceFeedback!,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -3373,26 +3572,30 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
       result = _ScannerOutcome.rejected('No se pudo procesar el QR: $error');
     }
     if (!mounted) return;
-    await SystemSound.play(
-        result.accepted ? SystemSoundType.click : SystemSoundType.alert);
-    if (result.accepted) {
-      unawaited(HapticFeedback.selectionClick());
-    } else {
-      unawaited(HapticFeedback.heavyImpact());
-    }
+    unawaited(_playScannerFeedback(accepted: result.isClear));
     feedbackTimer?.cancel();
     setState(() {
       feedback = result;
-      processing = false;
     });
-    feedbackTimer = Timer(const Duration(milliseconds: 1400), () {
-      if (mounted) setState(() => feedback = null);
-    });
+    feedbackTimer = Timer(
+      result.isClear
+          ? const Duration(milliseconds: 1300)
+          : const Duration(milliseconds: 3600),
+      () {
+        if (mounted) {
+          setState(() {
+            feedback = null;
+            processing = false;
+          });
+        }
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       appBar: _zumacFormatAppBar(
         title: Text(widget.title),
         onBack: () => Navigator.of(context).pop(),
@@ -3450,53 +3653,20 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
                             )
                           : null
                       : Center(
-                          child: Container(
-                            width: 104,
-                            height: 104,
-                            decoration: BoxDecoration(
-                              color: feedback!.accepted
-                                  ? const Color(0xFF1B8D45)
-                                  : const Color(0xFFC62828),
-                              shape: BoxShape.circle,
-                            ),
-                            child: Icon(
-                              feedback!.accepted
-                                  ? Icons.check_rounded
-                                  : Icons.close_rounded,
-                              color: Colors.white,
-                              size: 74,
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: _ScannerFeedbackCard(
+                              feedback: feedback!,
+                              maxWidth: 244,
+                              compact: true,
                             ),
                           ),
                         ),
                 ),
                 const Spacer(),
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  child: feedback == null
-                      ? const SizedBox(height: 76)
-                      : Container(
-                          key: ValueKey(
-                              '${feedback!.accepted}-${feedback!.message}'),
-                          margin: const EdgeInsets.fromLTRB(20, 12, 20, 26),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: feedback!.accepted
-                                ? const Color(0xE61B5E20)
-                                : const Color(0xE6A31515),
-                            borderRadius: BorderRadius.circular(14),
-                          ),
-                          child: Text(
-                            feedback!.message,
-                            textAlign: TextAlign.center,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
+                const SafeArea(
+                  top: false,
+                  child: SizedBox(height: 24),
                 ),
               ],
             ),
