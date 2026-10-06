@@ -211,7 +211,23 @@ void main() {
     expect(androidMainActivity, contains('ToneGenerator.TONE_PROP_ACK'));
     expect(androidMainActivity, contains('ToneGenerator.TONE_SUP_ERROR'));
     expect(specialForms, contains('Cerrar escáner'));
+    expect(specialForms, contains('Duration(milliseconds: 600)'));
+    expect(specialForms, contains('_resetAttendanceTripFieldsAfterScanner'));
     expect(specialForms, isNot(contains('Navigator.of(context).pop(code)')));
+  });
+
+  test('permisos muestra la fecha trabajada solo para compensacion', () {
+    expect(formRunner, contains('_selectedPermissionIsCompensation'));
+    expect(formRunner, contains('_isCompensationWorkedDateField'));
+    expect(formRunner, contains('_clearCompensationDateWhenNotApplicable'));
+  });
+
+  test('la tabla de tareo reserva espacio debajo de la ultima fila', () {
+    expect(specialForms, contains('_horizontalScrollbarClearance'));
+    expect(
+      specialForms,
+      contains('height: _horizontalScrollbarClearance'),
+    );
   });
 
   test('el formato móvil usa una sola cabecera azul con su título', () {

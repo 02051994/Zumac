@@ -28,6 +28,9 @@ bool permissionRequiresSupportingDocument(Object? permissionType) =>
     permissionTypesRequiringDocument
         .contains(normalizeHumanResourcesValue(permissionType));
 
+bool permissionIsCompensation(Object? permissionType) =>
+    normalizeHumanResourcesValue(permissionType) == 'COMPENSACION';
+
 DateTime? parseHumanResourcesDate(Object? value) {
   final text = value?.toString().trim() ?? '';
   if (text.isEmpty) return null;

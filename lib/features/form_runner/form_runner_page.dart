@@ -857,6 +857,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (!mounted) return;
     restrictedFields = restricted;
     fields = rows;
+    _clearCompensationDateWhenNotApplicable();
     _applyMasterDefaultsToDetail();
     _recalculateDerivedFields();
     _recalculateMatrixDrivenFields();
@@ -3631,6 +3632,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final tipo = _normalizeTipo(f['tipo']?.toString());
       final uiType = _uiType(f);
       final isPhoto = tipo == 'photo' || uiType == 'photo';
+      if (_isCompensationWorkedDateField(f) &&
+          !_selectedPermissionIsCompensation) {
+        continue;
+      }
       if (!_isVisible(f) && !isPhoto) continue;
       if (tipo == 'hidden_id' || tipo == 'hidden') continue;
       final isSignature = tipo == 'signature' || uiType == 'signature';
@@ -3700,6 +3705,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         permissionRequiresSupportingDocument(_permissionTypeValue());
   }
 
+  bool get _selectedPermissionIsCompensation =>
+      _isPermissionLeaveForm &&
+      permissionIsCompensation(_permissionTypeValue());
+
+  bool _isCompensationWorkedDateField(Map<String, dynamic> field) {
+    if (!_isPermissionLeaveForm) return false;
+    final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
+    final etiqueta =
+        _normalizarNombreCampo(field['etiqueta']?.toString() ?? '');
+    return campo == 'FECHA_ORIGEN_COMPENSACION' ||
+        campo == 'FECHA_TRABAJADA_A_COMPENSAR' ||
+        etiqueta == 'FECHA_TRABAJADA_A_COMPENSAR';
+  }
+
   void _clearPermissionDocumentWhenNotRequired() {
     if (!_isPermissionLeaveForm || _selectedAbsenceRequiresDocument) return;
     for (final field in fields) {
@@ -3708,6 +3727,20 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       controllers[campo]?.clear();
       documentFileNames.remove(campo);
     }
+  }
+
+  void _clearCompensationDateWhenNotApplicable() {
+    if (!_isPermissionLeaveForm || _selectedPermissionIsCompensation) return;
+    for (final field in fields) {
+      if (!_isCompensationWorkedDateField(field)) continue;
+      final campo = field['campo']?.toString() ?? '';
+      controllers[campo]?.clear();
+    }
+  }
+
+  void _handlePermissionTypeChanged() {
+    _clearPermissionDocumentWhenNotRequired();
+    _clearCompensationDateWhenNotApplicable();
   }
 
   Future<void> _setPdfDocument(
@@ -4366,6 +4399,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       final uiType = _uiType(f);
       final campo = f['campo']?.toString() ?? '';
       final isPhotoRequiredField = tipo == 'photo' || uiType == 'photo';
+      if (_isCompensationWorkedDateField(f) &&
+          !_selectedPermissionIsCompensation) {
+        continue;
+      }
 
       // Para fotos, requerido=true debe cumplirse aunque el campo no se pinte como
       // TextField normal. En APPGT las fotos suelen mostrarse por el botón/cámara
@@ -4414,7 +4451,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
     for (final f in fields) {
       final campo = f['campo']?.toString() ?? '';
-      if (campo.isEmpty || !_isVisible(f) || _isRestrictedField(f)) continue;
+      if (campo.isEmpty || !_shouldRenderField(f) || _isRestrictedField(f)) {
+        continue;
+      }
       final tipo = _normalizeTipo(f['tipo']?.toString());
       final uiType = _uiType(f);
       if (tipo == 'photo' || uiType == 'photo') continue;
@@ -4455,6 +4494,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     for (final field in fields) {
       final campo = field['campo']?.toString();
       if (campo == null || campo.isEmpty || _isRestrictedField(field)) continue;
+      if (_isCompensationWorkedDateField(field) &&
+          !_selectedPermissionIsCompensation) {
+        payload[campo] = null;
+        continue;
+      }
       final value = _valueForField(field, idLocal);
       if (value != null) payload[campo] = value;
     }
@@ -4799,7 +4843,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               setState(() {
                 controllers[campo]?.text = selected;
                 if (_normalizarNombreCampo(campo) == 'TIPO_PERMISO') {
-                  _clearPermissionDocumentWhenNotRequired();
+                  _handlePermissionTypeChanged();
                 }
                 _recalculateDerivedFields();
                 _recalculateMatrixDrivenFields();
@@ -5021,6 +5065,10 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (_isSanctionDocumentField(field)) return false;
     if (_isPermissionDocumentField(field) &&
         !_selectedAbsenceRequiresDocument) {
+      return false;
+    }
+    if (_isCompensationWorkedDateField(field) &&
+        !_selectedPermissionIsCompensation) {
       return false;
     }
     return _isVisible(field) &&
@@ -5662,7 +5710,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
           onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
-              ? (_) => setState(_clearPermissionDocumentWhenNotRequired)
+              ? (_) => setState(_handlePermissionTypeChanged)
               : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
@@ -5685,7 +5733,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
           onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
-              ? (_) => setState(_clearPermissionDocumentWhenNotRequired)
+              ? (_) => setState(_handlePermissionTypeChanged)
               : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,

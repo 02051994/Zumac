@@ -942,6 +942,13 @@ class _SpecialMatrixHeader {
     return controllers.keys.any((key) => wanted.contains(_specialNorm(key)));
   }
 
+  void clearByCandidates(Iterable<String> candidates) {
+    final wanted = candidates.map(_specialNorm).toSet();
+    for (final entry in controllers.entries) {
+      if (wanted.contains(_specialNorm(entry.key))) entry.value.clear();
+    }
+  }
+
   List<Map<String, dynamic>> fieldsWhere(
           bool Function(Map<String, dynamic>) test) =>
       fields.where(test).toList();
@@ -2761,10 +2768,31 @@ class _AsistenciaPersonalSpecialPageState
       ),
     ));
     if (mounted) {
+      _resetAttendanceTripFieldsAfterScanner();
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) scannerFocus.requestFocus();
       });
     }
+  }
+
+  void _resetAttendanceTripFieldsAfterScanner() {
+    placaCtrl.clear();
+    reclutadorCtrl.clear();
+    asistenciaHeader.clearByCandidates(const [
+      'PLACA',
+      'MOVILIDAD',
+      'PLACA_MOVILIDAD',
+      'RECLUTADOR',
+      'RECLUTADOR_NOMBRE',
+      'OBSERVACION',
+      'OBSERVACIÓN',
+      'OBSERVACIONES',
+    ]);
+    setState(() {
+      selectedMobility = null;
+      mobilityValidationMessage = '';
+      acceptedMobilityWarningKey = null;
+    });
   }
 
   void _enableScannerSoftKeyboard() {
@@ -3521,10 +3549,12 @@ class _ContinuousScannerPage extends StatefulWidget {
 }
 
 class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
+  static const Duration _interScanDelay = Duration(milliseconds: 600);
   late final MobileScannerController scannerController;
   bool processing = false;
   _ScannerOutcome? feedback;
   Timer? feedbackTimer;
+  Timer? scanCooldownTimer;
   String lastCode = '';
   DateTime? lastScanAt;
 
@@ -3549,6 +3579,7 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
   @override
   void dispose() {
     feedbackTimer?.cancel();
+    scanCooldownTimer?.cancel();
     unawaited(scannerController.dispose());
     super.dispose();
   }
@@ -3577,6 +3608,10 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
     setState(() {
       feedback = result;
     });
+    scanCooldownTimer?.cancel();
+    scanCooldownTimer = Timer(_interScanDelay, () {
+      if (mounted) setState(() => processing = false);
+    });
     feedbackTimer = Timer(
       result.isClear
           ? const Duration(milliseconds: 1300)
@@ -3585,7 +3620,6 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
         if (mounted) {
           setState(() {
             feedback = null;
-            processing = false;
           });
         }
       },
@@ -5521,6 +5555,7 @@ class _TareoWorkersPageState extends State<_TareoWorkersPage> {
   static const double _headerHeight = 52;
   static const double _rowHeight = 58;
   static const double _dniWidth = 124;
+  static const double _horizontalScrollbarClearance = 18;
   final ScrollController _verticalController = ScrollController();
   final ScrollController _horizontalController = ScrollController();
 
@@ -5615,6 +5650,9 @@ class _TareoWorkersPageState extends State<_TareoWorkersPage> {
                                 header: false,
                                 alternate: index.isOdd,
                               ),
+                            const SizedBox(
+                              height: _horizontalScrollbarClearance,
+                            ),
                           ],
                         ),
                         Expanded(
@@ -5628,7 +5666,9 @@ class _TareoWorkersPageState extends State<_TareoWorkersPage> {
                             child: SingleChildScrollView(
                               controller: _horizontalController,
                               scrollDirection: Axis.horizontal,
-                              padding: const EdgeInsets.only(bottom: 12),
+                              padding: const EdgeInsets.only(
+                                bottom: _horizontalScrollbarClearance,
+                              ),
                               child: SizedBox(
                                 width: 470,
                                 child: Column(

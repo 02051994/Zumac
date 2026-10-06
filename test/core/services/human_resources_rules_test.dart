@@ -35,6 +35,15 @@ void main() {
     });
   });
 
+  group('permissionIsCompensation', () {
+    test('solo reconoce el tipo compensacion normalizado', () {
+      expect(permissionIsCompensation('COMPENSACION'), isTrue);
+      expect(permissionIsCompensation(' compensación '), isTrue);
+      expect(permissionIsCompensation('PERMISO SIN GOCE'), isFalse);
+      expect(permissionIsCompensation(null), isFalse);
+    });
+  });
+
   group('mobilityIsAuthorized', () {
     final day = DateTime(2026, 9, 29);
 
