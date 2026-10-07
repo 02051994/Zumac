@@ -4888,7 +4888,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               title: Text('Exportar CSV'),
             ),
           ),
-        if (_approvalsEnabled && canReview && !_isHumanResourcesApprovalTable)
+        if (_approvalsEnabled && canReview)
           PopupMenuItem(
             value: 'review',
             enabled: _selectedDeleteRows.isNotEmpty,
@@ -7859,7 +7859,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   Future<void> _setSelectedApprovalState(String nextState) async {
     final table = tableName;
     final desired = nextState.trim().toUpperCase();
-    if (_isHumanResourcesApprovalTable && desired == 'REVISADO') return;
     final allowed = desired == 'REVISADO' ? canReview : canApprove;
     if (!_approvalsEnabled ||
         !allowed ||
@@ -7874,14 +7873,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final column = _approvalColumnForRow(row);
       final current = row[column]?.toString().trim().toUpperCase() ?? '';
       if (desired == 'APROBADO') {
-        if (_isHumanResourcesApprovalTable) {
-          if (!const {'APROBADO', 'RECHAZADO', 'ANULADO'}.contains(current)) {
-            eligible.add(row);
-          }
-        } else if (current == 'REVISADO') {
+        if (current == 'REVISADO') {
           eligible.add(row);
         }
-      } else if (current != 'APROBADO') {
+      } else if (current == 'PENDIENTE') {
         eligible.add(row);
       }
     }
@@ -7889,10 +7884,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
         content: Text(desired == 'APROBADO'
-            ? (_isHumanResourcesApprovalTable
-                ? 'Seleccione solicitudes pendientes de aprobación.'
-                : 'Para aprobar, seleccione registros que ya estén REVISADOS.')
-            : 'Los registros seleccionados ya tienen una aprobación posterior.'),
+            ? 'Para aprobar, seleccione registros que ya estén REVISADOS.'
+            : 'Para revisar, seleccione registros en estado PENDIENTE.'),
       ));
       return;
     }
@@ -9245,9 +9238,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   ),
                   const SizedBox(width: 10),
                 ],
-                if (_approvalsEnabled &&
-                    canReview &&
-                    !_isHumanResourcesApprovalTable) ...[
+                if (_approvalsEnabled && canReview) ...[
                   _approvalToolbarButton(
                     state: 'REVISADO',
                     icon: Icons.fact_check_outlined,

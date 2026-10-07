@@ -825,8 +825,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           uiType == 'boolean_int' ||
           uiType == 'checkbox' ||
           uiType == 'switch') {
-        dropdownValues[campo] =
-            initialValue == null ? null : (_asBool(initialValue) ? 1 : 0);
+        dropdownValues[campo] = initialValue == null
+            ? (_isAttendanceBlockingField(f) ? 0 : null)
+            : (_asBool(initialValue) ? 1 : 0);
       } else if (uiType == 'signature' || tipo == 'signature') {
         signatureValues[campo] = null;
       } else if (uiType == 'photo' || tipo == 'photo') {
@@ -3636,10 +3637,13 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           !_selectedPermissionIsCompensation) {
         continue;
       }
+      if (_isPermissionHourField(f) && !_selectedPermissionIsHourly) continue;
+      if (_isSanctionPeriodField(f) && _selectedSanctionIsDismissal) continue;
+      if (_isDismissalDateField(f) && !_selectedSanctionIsDismissal) continue;
       if (!_isVisible(f) && !isPhoto) continue;
       if (tipo == 'hidden_id' || tipo == 'hidden') continue;
       final isSignature = tipo == 'signature' || uiType == 'signature';
-      final required = _asBool(f['requerido']);
+      final required = _isEffectivelyRequiredField(f);
       if (required && !_valuePresentForCampo(payload, campo))
         hasRequiredMissing = true;
       if (isSignature) {
@@ -3709,6 +3713,60 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       _isPermissionLeaveForm &&
       permissionIsCompensation(_permissionTypeValue());
 
+  bool get _selectedPermissionIsHourly =>
+      _isPermissionLeaveForm && permissionIsHourly(_permissionTypeValue());
+
+  bool _isPermissionHourField(Map<String, dynamic> field) {
+    if (!_isPermissionLeaveForm) return false;
+    final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
+    return campo == 'HORA_INICIO' || campo == 'HORA_FIN';
+  }
+
+  String _sanctionTypeValue() {
+    for (final entry in controllers.entries) {
+      if (_normalizarNombreCampo(entry.key) == 'TIPO_SANCION') {
+        return entry.value.text.trim();
+      }
+    }
+    return '';
+  }
+
+  bool get _selectedSanctionIsDismissal =>
+      _isSanctionForm && sanctionIsDismissal(_sanctionTypeValue());
+
+  bool _isSanctionPeriodField(Map<String, dynamic> field) {
+    if (!_isSanctionForm) return false;
+    final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
+    return campo == 'FECHA_INICIO' || campo == 'FECHA_FIN';
+  }
+
+  bool _isDismissalDateField(Map<String, dynamic> field) =>
+      _isSanctionForm &&
+      _normalizarNombreCampo(field['campo']?.toString() ?? '') ==
+          'FECHA_DESPIDO';
+
+  bool _isAttendanceBlockingField(Map<String, dynamic> field) {
+    if (!_usesPersonnelLookup) return false;
+    final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
+    final etiqueta =
+        _normalizarNombreCampo(field['etiqueta']?.toString() ?? '');
+    return campo == 'BLOQUEA_ASISTENCIA' ||
+        campo == 'BLOQUEAR_ASISTENCIA' ||
+        etiqueta == 'BLOQUEA_ASISTENCIA' ||
+        etiqueta == 'BLOQUEAR_ASISTENCIA';
+  }
+
+  bool _isEffectivelyRequiredField(Map<String, dynamic> field) {
+    if (_isAttendanceBlockingField(field)) return false;
+    if (_isPermissionDocumentField(field)) {
+      return _selectedAbsenceRequiresDocument;
+    }
+    if (_isPermissionHourField(field)) return _selectedPermissionIsHourly;
+    if (_isSanctionPeriodField(field)) return !_selectedSanctionIsDismissal;
+    if (_isDismissalDateField(field)) return _selectedSanctionIsDismissal;
+    return _asBool(field['requerido']);
+  }
+
   bool _isCompensationWorkedDateField(Map<String, dynamic> field) {
     if (!_isPermissionLeaveForm) return false;
     final campo = _normalizarNombreCampo(field['campo']?.toString() ?? '');
@@ -3738,9 +3796,34 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
   }
 
+  void _clearPermissionHoursWhenNotApplicable() {
+    if (!_isPermissionLeaveForm || _selectedPermissionIsHourly) return;
+    for (final field in fields) {
+      if (!_isPermissionHourField(field)) continue;
+      controllers[field['campo']?.toString() ?? '']?.clear();
+    }
+  }
+
+  void _clearSanctionDatesForType() {
+    if (!_isSanctionForm) return;
+    for (final field in fields) {
+      final shouldClear = _selectedSanctionIsDismissal
+          ? _isSanctionPeriodField(field)
+          : _isDismissalDateField(field);
+      if (shouldClear) controllers[field['campo']?.toString() ?? '']?.clear();
+    }
+  }
+
   void _handlePermissionTypeChanged() {
     _clearPermissionDocumentWhenNotRequired();
     _clearCompensationDateWhenNotApplicable();
+    _clearPermissionHoursWhenNotApplicable();
+  }
+
+  void _handleHumanResourcesTypeChanged(String campo) {
+    final normalized = _normalizarNombreCampo(campo);
+    if (normalized == 'TIPO_PERMISO') _handlePermissionTypeChanged();
+    if (normalized == 'TIPO_SANCION') _clearSanctionDatesForType();
   }
 
   Future<void> _setPdfDocument(
@@ -4393,8 +4476,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
 
     for (final f in fields) {
-      final requerido = _asBool(f['requerido']) ||
-          (_isPermissionDocumentField(f) && _selectedAbsenceRequiresDocument);
+      final requerido = _isEffectivelyRequiredField(f);
       final tipo = _normalizeTipo(f['tipo']?.toString());
       final uiType = _uiType(f);
       final campo = f['campo']?.toString() ?? '';
@@ -4403,6 +4485,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           !_selectedPermissionIsCompensation) {
         continue;
       }
+      if (_isPermissionHourField(f) && !_selectedPermissionIsHourly) continue;
+      if (_isSanctionPeriodField(f) && _selectedSanctionIsDismissal) continue;
+      if (_isDismissalDateField(f) && !_selectedSanctionIsDismissal) continue;
 
       // Para fotos, requerido=true debe cumplirse aunque el campo no se pinte como
       // TextField normal. En APPGT las fotos suelen mostrarse por el botón/cámara
@@ -4496,6 +4581,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       if (campo == null || campo.isEmpty || _isRestrictedField(field)) continue;
       if (_isCompensationWorkedDateField(field) &&
           !_selectedPermissionIsCompensation) {
+        payload[campo] = null;
+        continue;
+      }
+      if (_isPermissionHourField(field) && !_selectedPermissionIsHourly) {
+        payload[campo] = null;
+        continue;
+      }
+      if ((_isSanctionPeriodField(field) && _selectedSanctionIsDismissal) ||
+          (_isDismissalDateField(field) && !_selectedSanctionIsDismissal)) {
         payload[campo] = null;
         continue;
       }
@@ -4826,7 +4920,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? campo;
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     final editable = _isEditable(field);
     final current = controllers[campo]?.text.trim() ?? '';
     final hasValidValue = current.isNotEmpty && options.contains(current);
@@ -4842,9 +4936,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               if (selected == null) return;
               setState(() {
                 controllers[campo]?.text = selected;
-                if (_normalizarNombreCampo(campo) == 'TIPO_PERMISO') {
-                  _handlePermissionTypeChanged();
-                }
+                _handleHumanResourcesTypeChanged(campo);
                 _recalculateDerivedFields();
                 _recalculateMatrixDrivenFields();
               });
@@ -4890,7 +4982,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   }) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? campo;
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     final editable = _isEditable(field);
 
     final selected = multiSelectValues.putIfAbsent(campo, () {
@@ -5069,6 +5161,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     }
     if (_isCompensationWorkedDateField(field) &&
         !_selectedPermissionIsCompensation) {
+      return false;
+    }
+    if (_isPermissionHourField(field) && !_selectedPermissionIsHourly) {
+      return false;
+    }
+    if (_isSanctionPeriodField(field) && _selectedSanctionIsDismissal) {
+      return false;
+    }
+    if (_isDismissalDateField(field) && !_selectedSanctionIsDismissal) {
       return false;
     }
     return _isVisible(field) &&
@@ -5341,7 +5442,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   Widget _personnelDniFieldWidget(Map<String, dynamic> field) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? campo;
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     final editable = _isEditable(field);
     final matches = _personnelMatches(controllers[campo]?.text ?? '');
     return Column(
@@ -5429,7 +5530,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   Widget _personnelWorkerFieldWidget(Map<String, dynamic> field) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? campo;
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     return TextField(
       controller: controllers[campo],
       focusNode: _focusNodeFor(campo),
@@ -5602,7 +5703,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
   Widget _scannerFieldWidget(Map<String, dynamic> field) {
     final campo = field['campo']?.toString() ?? '';
     final etiqueta = field['etiqueta']?.toString() ?? campo;
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     final editable = _isEditable(field);
     final controller = controllers[campo];
 
@@ -5639,7 +5740,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     final etiqueta = field['etiqueta']?.toString() ?? campo;
     final tipo = _normalizeTipo(field['tipo']?.toString());
     final uiType = _uiType(field);
-    final requerido = _asBool(field['requerido']);
+    final requerido = _isEffectivelyRequiredField(field);
     final editable = _isEditable(field);
 
     if (!_isVisible(field) ||
@@ -5709,8 +5810,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           controller: controllers[campo],
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
-          onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
-              ? (_) => setState(_handlePermissionTypeChanged)
+          onChanged: const {'TIPO_PERMISO', 'TIPO_SANCION'}
+                  .contains(_normalizarNombreCampo(campo))
+              ? (_) => setState(() => _handleHumanResourcesTypeChanged(campo))
               : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,
@@ -5732,8 +5834,9 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           controller: controllers[campo],
           focusNode: _focusNodeFor(campo),
           readOnly: !editable,
-          onChanged: _normalizarNombreCampo(campo) == 'TIPO_PERMISO'
-              ? (_) => setState(_handlePermissionTypeChanged)
+          onChanged: const {'TIPO_PERMISO', 'TIPO_SANCION'}
+                  .contains(_normalizarNombreCampo(campo))
+              ? (_) => setState(() => _handleHumanResourcesTypeChanged(campo))
               : null,
           decoration: InputDecoration(
             labelText: requerido ? '$etiqueta *' : etiqueta,

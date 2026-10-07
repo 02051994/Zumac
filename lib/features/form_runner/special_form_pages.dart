@@ -1172,13 +1172,14 @@ class _SpecialMatrixHeader {
 
   Widget buildField(BuildContext context, Map<String, dynamic> field,
       void Function(void Function()) setState,
-      {DateTime? firstDate, DateTime? lastDate}) {
+      {DateTime? firstDate, DateTime? lastDate, bool forceReadOnly = false}) {
     final campo = field['campo']?.toString() ?? '';
     final ctrl = controllers[campo];
     if (ctrl == null) return const SizedBox.shrink();
     final tipo = field['tipo']?.toString().trim().toLowerCase() ?? '';
     final ui = field['tipo_ui']?.toString().trim().toLowerCase() ?? '';
-    final editable = _specialAsBool(field['editable'], defaultValue: true);
+    final editable =
+        !forceReadOnly && _specialAsBool(field['editable'], defaultValue: true);
     final label = _label(field);
     final rawDropdown = field['id_campo_dropdown']?.toString().trim() ?? '';
     final literal = (ui == 'dropdown' || ui == 'multiselect')
@@ -1334,7 +1335,8 @@ class _SpecialMatrixHeader {
       BuildContext context, void Function(void Function()) setState,
       {bool Function(Map<String, dynamic>)? filter,
       DateTime? firstDate,
-      DateTime? lastDate}) {
+      DateTime? lastDate,
+      bool readOnly = false}) {
     final visibleFields =
         filter == null ? fields : fields.where(filter).toList();
     if (loading) return const [LinearProgressIndicator()];
@@ -1363,7 +1365,9 @@ class _SpecialMatrixHeader {
       final columns = rowFields
           .map((field) => Expanded(
               child: buildField(context, field, setState,
-                  firstDate: firstDate, lastDate: lastDate)))
+                  firstDate: firstDate,
+                  lastDate: lastDate,
+                  forceReadOnly: readOnly)))
           .toList();
       widgets.add(Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
         for (var i = 0; i < columns.length; i++) ...[
@@ -3549,7 +3553,7 @@ class _ContinuousScannerPage extends StatefulWidget {
 }
 
 class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
-  static const Duration _interScanDelay = Duration(milliseconds: 600);
+  static const Duration _interScanDelay = Duration(seconds: 1);
   late final MobileScannerController scannerController;
   bool processing = false;
   _ScannerOutcome? feedback;
@@ -3734,6 +3738,7 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
   late DateTime selectedDate;
   List<TareoDayGroup> groups = const [];
   bool loading = true;
+  bool closing = false;
 
   @override
   void initState() {
@@ -3791,7 +3796,10 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
     await _load();
   }
 
-  Future<void> _openForm({TareoDayGroup? group, bool close = false}) async {
+  Future<void> _openForm({
+    TareoDayGroup? group,
+    bool readOnly = false,
+  }) async {
     final initialPayload = group == null
         ? <String, dynamic>{'FECHA': _dateIso(selectedDate)}
         : group.editPayload;
@@ -3801,7 +3809,7 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
         format: widget.format,
         initialPayload: initialPayload,
         editIdLocal: group?.idLocal,
-        closeOnSave: close,
+        readOnly: readOnly,
         onLocalChanged: () {
           widget.onLocalChanged?.call();
           _load();
@@ -3810,6 +3818,99 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
       ),
     ));
     await _load();
+  }
+
+  Future<void> _closeTareo(TareoDayGroup group) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Cerrar tareo'),
+        content: const Text('¿Seguro que deseas cerrar tareo?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || closing) return;
+
+    final rowsToClose =
+        <({Map<String, dynamic> row, Map<String, dynamic> payload})>[];
+    for (final row in group.queueRows) {
+      final payload = tareoPayloadFromQueueRow(row);
+      if (payload == null) continue;
+      final end =
+          (payload['HORA_FIN'] ?? payload['HORA FIN'] ?? '').toString().trim();
+      if (end.isEmpty || end.toLowerCase() == 'null') {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text(
+              'El tareo no tiene hora fin. Edítalo antes de intentar cerrarlo.'),
+        ));
+        return;
+      }
+      payload['ESTADO_APROBACION'] = 'CERRADO';
+      payload['estado_registro'] = 'COMPLETO';
+      rowsToClose.add((row: row, payload: payload));
+    }
+    if (rowsToClose.isEmpty) return;
+
+    setState(() => closing = true);
+    var sent = false;
+    String? sendFailure;
+    try {
+      for (final item in rowsToClose) {
+        final updated = Map<String, dynamic>.from(item.row)
+          ..['payload_json'] = jsonEncode(item.payload)
+          ..['estado'] = 'pendiente'
+          ..['intentos'] = 0
+          ..['error_mensaje'] = null
+          ..['synced_at'] = null
+          ..['conflict_json'] = null;
+        await local.insertPending(updated);
+      }
+      if (isOnlineFirstRuntime) {
+        try {
+          await SyncService().syncPending();
+          final refreshed = await local.allRecords(table: 'GT-TAREO_PERSONAL');
+          final ids = rowsToClose
+              .map((item) => item.row['id_local']?.toString() ?? '')
+              .where((id) => id.isNotEmpty)
+              .toSet();
+          final matching = refreshed
+              .where((row) => ids.contains(row['id_local']?.toString() ?? ''))
+              .toList(growable: false);
+          sent = matching.length == ids.length &&
+              matching.every((row) => row['estado'] == 'sincronizado');
+          if (!sent) sendFailure = 'el servidor no confirmó el envío';
+        } catch (error) {
+          sendFailure = SyncService().friendlyError(error);
+        }
+      }
+      widget.onLocalChanged?.call();
+      await _load();
+      if (!mounted) return;
+      final message = isOnlineFirstRuntime
+          ? (sent
+              ? 'Tareo cerrado y enviado.'
+              : 'Tareo cerrado, pero no se pudo enviar: ${sendFailure ?? 'inténtalo nuevamente'}.')
+          : 'Tareo cerrado. Sincronízalo para enviarlo.';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('No se pudo cerrar el tareo: $error'),
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => closing = false);
+    }
   }
 
   Future<void> _showActions(TareoDayGroup group) async {
@@ -3851,16 +3952,22 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
           padding: const EdgeInsets.only(bottom: 12),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             ListTile(
+              leading: const Icon(Icons.fact_check_outlined),
+              title: const Text('Revisar'),
+              subtitle: const Text('Ver campos y trabajadores sin editar'),
+              onTap: () => Navigator.pop(sheetContext, 'review'),
+            ),
+            ListTile(
               leading: const Icon(Icons.edit_outlined),
-              title: const Text('Editar tareo'),
+              title: const Text('Editar'),
               subtitle: const Text('Modificar labor, personal u horas'),
               onTap: () => Navigator.pop(sheetContext, 'edit'),
             ),
             ListTile(
               leading: const Icon(Icons.lock_clock_outlined,
                   color: Color(0xFF31552F)),
-              title: const Text('Cerrar tareo'),
-              subtitle: const Text('Revisar horas y confirmar el cierre'),
+              title: const Text('Cerrar'),
+              subtitle: const Text('Confirmar el cierre del tareo'),
               onTap: () => Navigator.pop(sheetContext, 'close'),
             ),
           ]),
@@ -3868,8 +3975,9 @@ class _TareoPersonalDayPageState extends State<TareoPersonalDayPage> {
       ),
     );
     if (!mounted) return;
+    if (action == 'review') await _openForm(group: group, readOnly: true);
     if (action == 'edit') await _openForm(group: group);
-    if (action == 'close') await _openForm(group: group, close: true);
+    if (action == 'close') await _closeTareo(group);
   }
 
   String _statusLabel(TareoDayGroup group) => group.synchronized
@@ -4024,6 +4132,7 @@ class TareoPersonalSpecialPage extends StatefulWidget {
   final Map<String, dynamic>? initialPayload;
   final String? editIdLocal;
   final bool closeOnSave;
+  final bool readOnly;
   final VoidCallback? onLocalChanged;
   final VoidCallback? onSavedAndExit;
 
@@ -4034,6 +4143,7 @@ class TareoPersonalSpecialPage extends StatefulWidget {
     this.initialPayload,
     this.editIdLocal,
     this.closeOnSave = false,
+    this.readOnly = false,
     this.onLocalChanged,
     this.onSavedAndExit,
   });
@@ -4073,7 +4183,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
   @override
   void initState() {
     super.initState();
-    showHours = widget.closeOnSave;
+    showHours = widget.closeOnSave || widget.readOnly;
+    showMealBreak = widget.readOnly;
+    showObservation = widget.readOnly;
     final now = DateTime.now();
     fechaCtrl.text = _dateIso(now);
     horaInicioCtrl.text = _timeHm(now);
@@ -4539,14 +4651,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     }
   }
 
-  String _timeFromMinutes(int minutes) {
-    final normalized = minutes % (24 * 60);
-    final hour = normalized ~/ 60;
-    final minute = normalized % 60;
-    return '${hour.toString().padLeft(2, '0')}:${minute.toString().padLeft(2, '0')}';
-  }
-
   Future<void> _pickMealTime({required bool start}) async {
+    if (widget.readOnly) return;
     final controller = start ? refrigerioInicioCtrl : refrigerioFinCtrl;
     final parts = controller.text.trim().split(':');
     final initial = parts.length >= 2
@@ -4557,16 +4663,8 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         : TimeOfDay(hour: 12, minute: start ? 0 : 45);
     final picked = await showTimePicker(context: context, initialTime: initial);
     if (picked == null || !mounted) return;
-    final minutes = picked.hour * 60 + picked.minute;
-    setState(() {
-      if (start) {
-        refrigerioInicioCtrl.text = _timeFromMinutes(minutes);
-        refrigerioFinCtrl.text = _timeFromMinutes(minutes + 45);
-      } else {
-        refrigerioFinCtrl.text = _timeFromMinutes(minutes);
-        refrigerioInicioCtrl.text = _timeFromMinutes(minutes - 45);
-      }
-    });
+    setState(() => controller.text =
+        '${picked.hour.toString().padLeft(2, '0')}:${picked.minute.toString().padLeft(2, '0')}');
   }
 
   Future<String> _activeUserName() async {
@@ -4967,7 +5065,9 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     if (hf.isNotEmpty) payload['HORA_FIN'] = hf;
     payload['REFRIGERIO_INICIO'] = refrigerioInicioCtrl.text.trim();
     payload['REFRIGERIO_FIN'] = refrigerioFinCtrl.text.trim();
-    payload['MINUTOS_REFRIGERIO'] = 45;
+    payload['MINUTOS_REFRIGERIO'] = tareoMealBreakMinutes(
+            refrigerioInicioCtrl.text.trim(), refrigerioFinCtrl.text.trim()) ??
+        45;
     final observation = tareoHeader.valueByCandidates(
       ['OBSERVACION', 'OBSERVACIÓN'],
       fallback: observacionCtrl.text.trim(),
@@ -5019,11 +5119,12 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     final horaFin = headerPayload['HORA_FIN']?.toString().trim() ?? '';
     final mealStart = refrigerioInicioCtrl.text.trim();
     final mealEnd = refrigerioFinCtrl.text.trim();
-    if (tareoMealBreakMinutes(mealStart, mealEnd) != 45) {
+    final mealMinutes = tareoMealBreakMinutes(mealStart, mealEnd);
+    if (mealMinutes == null || mealMinutes <= 0 || mealMinutes > 60) {
       setState(() => showMealBreak = true);
       await _showAppGtAlert(
         context,
-        'El refrigerio debe durar exactamente 45 minutos.',
+        'El refrigerio debe durar entre 1 y 60 minutos. El valor predeterminado es 45 minutos.',
         title: 'Horario de refrigerio inválido',
         playSound: true,
       );
@@ -5101,7 +5202,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       'HORAS_TRABAJADAS': horas,
       'REFRIGERIO_INICIO': mealStart,
       'REFRIGERIO_FIN': mealEnd,
-      'MINUTOS_REFRIGERIO': 45,
+      'MINUTOS_REFRIGERIO': mealMinutes,
       'TAREADOR': tareador,
       'estado_registro': closeTareo ? 'COMPLETO' : 'PENDIENTE',
     };
@@ -5246,20 +5347,28 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       TextField(
         controller: trabajadorCtrl,
+        readOnly: widget.readOnly,
         decoration: InputDecoration(
             labelText: 'TRABAJADORES',
-            helperText: 'Busca por DNI o nombre. Cámara/QR disponible.',
+            helperText: widget.readOnly
+                ? '${selectedWorkers.length} trabajador(es) registrados.'
+                : 'Busca por DNI o nombre. Cámara/QR disponible.',
             border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-                icon: const Icon(Icons.qr_code_scanner), onPressed: _openQr)),
-        onChanged: (_) => setState(() {}),
-        onSubmitted: (v) async {
-          final w = _findWorker(v);
-          if (w != null) await _addWorker(w);
-        },
+            suffixIcon: widget.readOnly
+                ? const Icon(Icons.lock_outline)
+                : IconButton(
+                    icon: const Icon(Icons.qr_code_scanner),
+                    onPressed: _openQr)),
+        onChanged: widget.readOnly ? null : (_) => setState(() {}),
+        onSubmitted: widget.readOnly
+            ? null
+            : (v) async {
+                final w = _findWorker(v);
+                if (w != null) await _addWorker(w);
+              },
       ),
       const SizedBox(height: 8),
-      if (trabajadorCtrl.text.trim().isNotEmpty)
+      if (!widget.readOnly && trabajadorCtrl.text.trim().isNotEmpty)
         SizedBox(
           height: 150,
           child: ListView.builder(
@@ -5307,6 +5416,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         builder: (_) => _TareoWorkersPage(
           workers: selectedWorkers,
           hoursLabel: _currentTareoHoursLabel(),
+          readOnly: widget.readOnly,
           onRemove: (worker) {
             if (!mounted) return;
             setState(() => selectedWorkers.remove(worker));
@@ -5385,13 +5495,14 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         context,
         setState,
         filter: _isTareoTimeField,
+        readOnly: widget.readOnly,
       );
     }
     return [
       TextField(
         controller: horaInicioCtrl,
         readOnly: true,
-        onTap: () => _pickTime(horaInicioCtrl),
+        onTap: widget.readOnly ? null : () => _pickTime(horaInicioCtrl),
         decoration: const InputDecoration(
           labelText: 'HORA_INICIO',
           border: OutlineInputBorder(),
@@ -5402,7 +5513,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       TextField(
         controller: horaFinCtrl,
         readOnly: true,
-        onTap: () => _pickTime(horaFinCtrl),
+        onTap: widget.readOnly ? null : () => _pickTime(horaFinCtrl),
         decoration: const InputDecoration(
           labelText: 'HORA_FIN',
           border: OutlineInputBorder(),
@@ -5420,11 +5531,13 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         context,
         setState,
         filter: _isTareoObservationField,
+        readOnly: widget.readOnly,
       );
     }
     return [
       TextField(
         controller: observacionCtrl,
+        readOnly: widget.readOnly,
         minLines: 2,
         maxLines: 4,
         textCapitalization: TextCapitalization.sentences,
@@ -5443,7 +5556,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             child: TextField(
               controller: refrigerioInicioCtrl,
               readOnly: true,
-              onTap: () => _pickMealTime(start: true),
+              onTap: widget.readOnly ? null : () => _pickMealTime(start: true),
               decoration: const InputDecoration(
                 labelText: 'INICIO REFRIGERIO',
                 border: OutlineInputBorder(),
@@ -5456,7 +5569,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             child: TextField(
               controller: refrigerioFinCtrl,
               readOnly: true,
-              onTap: () => _pickMealTime(start: false),
+              onTap: widget.readOnly ? null : () => _pickMealTime(start: false),
               decoration: const InputDecoration(
                 labelText: 'FIN REFRIGERIO',
                 border: OutlineInputBorder(),
@@ -5468,7 +5581,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
         const Padding(
           padding: EdgeInsets.fromLTRB(4, 8, 4, 14),
           child: Text(
-            '45 minutos no computables como horas trabajadas ni para pago.',
+            '45 minutos por defecto; editable hasta un máximo de 60 minutos.',
             style: TextStyle(color: Color(0xFF52635A)),
           ),
         ),
@@ -5488,6 +5601,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
             !_isTareoMealField(field),
         firstDate: yesterday,
         lastDate: today,
+        readOnly: widget.readOnly,
       ),
       _quickActions(),
       if (showHours) ..._hoursEditor(),
@@ -5495,29 +5609,31 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
       if (showObservation) ..._observationEditor(),
       _workersPicker(),
       const SizedBox(height: 22),
-      Center(
-        child: IconButton.filled(
-          key: const ValueKey('tareo-save-icon'),
-          tooltip: widget.closeOnSave ? 'Guardar y cerrar tareo' : 'Guardar',
-          onPressed:
-              saving ? null : () => _saveDraft(closeTareo: widget.closeOnSave),
-          style: IconButton.styleFrom(
-            minimumSize: const Size(58, 58),
-            backgroundColor: _zumacFormatBlue,
-            foregroundColor: Colors.white,
+      if (!widget.readOnly)
+        Center(
+          child: IconButton.filled(
+            key: const ValueKey('tareo-save-icon'),
+            tooltip: widget.closeOnSave ? 'Guardar y cerrar tareo' : 'Guardar',
+            onPressed: saving
+                ? null
+                : () => _saveDraft(closeTareo: widget.closeOnSave),
+            style: IconButton.styleFrom(
+              minimumSize: const Size(58, 58),
+              backgroundColor: _zumacFormatBlue,
+              foregroundColor: Colors.white,
+            ),
+            icon: saving
+                ? const SizedBox(
+                    width: 22,
+                    height: 22,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      color: Colors.white,
+                    ),
+                  )
+                : const Icon(Icons.save_outlined, size: 28),
           ),
-          icon: saving
-              ? const SizedBox(
-                  width: 22,
-                  height: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Colors.white,
-                  ),
-                )
-              : const Icon(Icons.save_outlined, size: 28),
         ),
-      ),
       const SizedBox(height: 24),
     ]);
   }
@@ -5539,11 +5655,13 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
 class _TareoWorkersPage extends StatefulWidget {
   final List<Map<String, dynamic>> workers;
   final String hoursLabel;
+  final bool readOnly;
   final ValueChanged<Map<String, dynamic>> onRemove;
 
   const _TareoWorkersPage({
     required this.workers,
     required this.hoursLabel,
+    this.readOnly = false,
     required this.onRemove,
   });
 
@@ -5729,11 +5847,14 @@ class _TareoWorkersPageState extends State<_TareoWorkersPage> {
                                               icon: const Icon(
                                                   Icons.delete_outline,
                                                   size: 20),
-                                              onPressed: () {
-                                                final worker = workers[index];
-                                                widget.onRemove(worker);
-                                                setState(() {});
-                                              },
+                                              onPressed: widget.readOnly
+                                                  ? null
+                                                  : () {
+                                                      final worker =
+                                                          workers[index];
+                                                      widget.onRemove(worker);
+                                                      setState(() {});
+                                                    },
                                             ),
                                             header: false,
                                             alternate: index.isOdd,

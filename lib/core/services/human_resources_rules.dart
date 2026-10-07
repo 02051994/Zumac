@@ -31,6 +31,14 @@ bool permissionRequiresSupportingDocument(Object? permissionType) =>
 bool permissionIsCompensation(Object? permissionType) =>
     normalizeHumanResourcesValue(permissionType) == 'COMPENSACION';
 
+bool permissionIsHourly(Object? permissionType) => const {
+      'PERMISO_POR_HORAS',
+      'PERMISOS_POR_HORAS',
+    }.contains(normalizeHumanResourcesValue(permissionType));
+
+bool sanctionIsDismissal(Object? sanctionType) =>
+    normalizeHumanResourcesValue(sanctionType) == 'DESPIDO';
+
 DateTime? parseHumanResourcesDate(Object? value) {
   final text = value?.toString().trim() ?? '';
   if (text.isEmpty) return null;

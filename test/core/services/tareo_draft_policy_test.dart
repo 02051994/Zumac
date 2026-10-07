@@ -77,6 +77,19 @@ void main() {
       );
     });
 
+    test('calcula un refrigerio editable de hasta una hora', () {
+      expect(tareoMealBreakMinutes('13:00', '14:00'), 60);
+      expect(
+        tareoWorkedHours(
+          '09:00',
+          '18:00',
+          mealStart: '13:00',
+          mealEnd: '14:00',
+        ),
+        8,
+      );
+    });
+
     test('calcula correctamente un turno nocturno sin refrigerio superpuesto',
         () {
       expect(tareoWorkedHours('22:00', '06:00'), 8);

@@ -45,4 +45,17 @@ void main() {
       'sancion_87654321_sancion-1.pdf',
     );
   });
+
+  test('genera comunicacion PDF para un despido aprobado', () async {
+    final bytes = await HumanResourcesRecordPdf.buildSanction({
+      'id_local': 'despido-1',
+      'dni': '87654321',
+      'trabajador': 'Persona de prueba',
+      'tipo_sancion': 'DESPIDO',
+      'fecha_despido': '2026-10-07',
+      'ESTADO_APROBACION': 'APROBADO',
+    });
+
+    expect(ascii.decode(bytes.take(5).toList()), '%PDF-');
+  });
 }

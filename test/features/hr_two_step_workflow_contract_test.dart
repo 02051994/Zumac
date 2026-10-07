@@ -44,4 +44,20 @@ void main() {
     );
     expect(sql, contains('coalesce(q.con_goce_haber, false)'));
   });
+
+  test('el flujo nuevo exige revision y aplica el despido al contrato', () {
+    final sql = File(
+      'supabase/migrations/'
+      '202610070074_hr_tareo_scanner_workflow.sql',
+    ).readAsStringSync();
+
+    expect(sql, contains("old.\"ESTADO_APROBACION\" <> 'PENDIENTE'"));
+    expect(sql, contains("old.\"ESTADO_APROBACION\" <> 'REVISADO'"));
+    expect(sql, contains("'REVISAR'"));
+    expect(sql, contains("'APROBAR'"));
+    expect(sql, contains('Sanciones/Despido de Personal'));
+    expect(sql, contains('"Fecha fin de contrato" = new.fecha_despido'));
+    expect(sql, contains('cel_representante_legal'));
+    expect(sql, contains('domicilio_fiscal'));
+  });
 }

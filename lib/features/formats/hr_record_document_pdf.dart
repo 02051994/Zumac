@@ -48,9 +48,14 @@ class HumanResourcesRecordPdf {
   }
 
   static Future<Uint8List> buildSanction(Map<String, dynamic> row) async {
+    final dismissal = _norm(_value(row, ['tipo_sancion'])) == 'DESPIDO';
     return _build(
-      title: 'COMUNICACIÓN DE SANCIÓN DE PERSONAL',
-      subtitle: 'Documento emitido después de la aprobación de la sanción',
+      title: dismissal
+          ? 'COMUNICACIÓN DE DESPIDO DE PERSONAL'
+          : 'COMUNICACIÓN DE SANCIÓN DE PERSONAL',
+      subtitle: dismissal
+          ? 'Documento emitido después de la aprobación del despido'
+          : 'Documento emitido después de la aprobación de la sanción',
       rows: [
         (
           'N.° de registro',
@@ -67,9 +72,13 @@ class HumanResourcesRecordPdf {
         ),
         ('DNI', _value(row, ['dni', 'documento', 'numero_documento'])),
         ('Cargo / puesto', _value(row, ['cargo', 'puesto'])),
-        ('Tipo de sanción', _value(row, ['tipo_sancion'])),
-        ('Fecha de inicio', _value(row, ['fecha_inicio'])),
-        ('Fecha de fin', _value(row, ['fecha_fin'])),
+        ('Sanción/Despido', _value(row, ['tipo_sancion'])),
+        if (dismissal)
+          ('Fecha de despido', _value(row, ['fecha_despido']))
+        else ...[
+          ('Fecha de inicio', _value(row, ['fecha_inicio'])),
+          ('Fecha de fin', _value(row, ['fecha_fin'])),
+        ],
         ('Motivo', _value(row, ['motivo', 'detalle', 'descripcion'])),
         ('Bloqueo de asistencia', _yesNo(_raw(row, ['bloquea_asistencia']))),
         ('Estado', _value(row, ['estado_aprobacion'], fallback: 'APROBADO')),

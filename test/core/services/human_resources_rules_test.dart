@@ -44,6 +44,14 @@ void main() {
     });
   });
 
+  test('reconoce permisos por horas y despidos normalizados', () {
+    expect(permissionIsHourly('Permisos por horas'), isTrue);
+    expect(permissionIsHourly('PERMISO POR HORAS'), isTrue);
+    expect(permissionIsHourly('VACACIONES'), isFalse);
+    expect(sanctionIsDismissal('Despido'), isTrue);
+    expect(sanctionIsDismissal('SUSPENSION DE LABORES'), isFalse);
+  });
+
   group('mobilityIsAuthorized', () {
     final day = DateTime(2026, 9, 29);
 

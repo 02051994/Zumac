@@ -36,6 +36,9 @@ void main() {
   final attendanceReconciliationMigration = File(
     'supabase/migrations/202610050073_attendance_tareo_offline_reconciliation.sql',
   ).readAsStringSync();
+  final hrTareoWorkflowMigration = File(
+    'supabase/migrations/202610070074_hr_tareo_scanner_workflow.sql',
+  ).readAsStringSync();
 
   test('la web conserva el layout de escritorio aunque reduzca su ancho', () {
     expect(platform, contains('if (kIsWeb) return true;'));
@@ -171,6 +174,11 @@ void main() {
       contains("array['DNI','FECHA','HORA_INICIO','HORA_FIN']"),
     );
     expect(tareoMigration, contains('"MINUTOS_REFRIGERIO" = 45'));
+    expect(hrTareoWorkflowMigration,
+        contains('"MINUTOS_REFRIGERIO" between 1 and 60'));
+    expect(specialForms, contains('¿Seguro que deseas cerrar tareo?'));
+    expect(specialForms, contains("title: const Text('Revisar')"));
+    expect(specialForms, contains('readOnly: widget.readOnly'));
   });
 
   test(
@@ -211,7 +219,7 @@ void main() {
     expect(androidMainActivity, contains('ToneGenerator.TONE_PROP_ACK'));
     expect(androidMainActivity, contains('ToneGenerator.TONE_SUP_ERROR'));
     expect(specialForms, contains('Cerrar escáner'));
-    expect(specialForms, contains('Duration(milliseconds: 600)'));
+    expect(specialForms, contains('Duration(seconds: 1)'));
     expect(specialForms, contains('_resetAttendanceTripFieldsAfterScanner'));
     expect(specialForms, isNot(contains('Navigator.of(context).pop(code)')));
   });
@@ -220,6 +228,16 @@ void main() {
     expect(formRunner, contains('_selectedPermissionIsCompensation'));
     expect(formRunner, contains('_isCompensationWorkedDateField'));
     expect(formRunner, contains('_clearCompensationDateWhenNotApplicable'));
+  });
+
+  test('permisos por horas y despido muestran solo sus fechas aplicables', () {
+    expect(formRunner, contains('_selectedPermissionIsHourly'));
+    expect(formRunner, contains('_isPermissionHourField'));
+    expect(formRunner, contains('_selectedSanctionIsDismissal'));
+    expect(formRunner, contains('_isDismissalDateField'));
+    expect(hrTareoWorkflowMigration, contains("'PERMISOS POR HORAS'"));
+    expect(hrTareoWorkflowMigration, contains("'DESPIDO'"));
+    expect(hrTareoWorkflowMigration, contains('fecha_despido'));
   });
 
   test('la tabla de tareo reserva espacio debajo de la ultima fila', () {
