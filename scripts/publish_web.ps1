@@ -110,6 +110,104 @@ function Assert-WebBuild {
     }
 }
 
+function New-VersionedWebAssets {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Revision
+    )
+
+    if ($Revision -notmatch '^[0-9a-f]{12}$') {
+        throw "La revisión web '$Revision' no tiene el formato esperado."
+    }
+
+    $mainFileName = "main.$Revision.dart.js"
+    $bootstrapFileName = "flutter_bootstrap.$Revision.js"
+    $mainPath = Join-Path -Path $buildDirectory -ChildPath "main.dart.js"
+    $bootstrapPath = Join-Path -Path $buildDirectory -ChildPath "flutter_bootstrap.js"
+    $indexPath = Join-Path -Path $buildDirectory -ChildPath "index.html"
+
+    Get-ChildItem -LiteralPath $buildDirectory -File |
+        Where-Object {
+            $_.Name -match '^main\.[0-9a-f]{12}\.dart\.js$' -or
+            $_.Name -match '^flutter_bootstrap\.[0-9a-f]{12}\.js$'
+        } |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName -Force }
+
+    Copy-Item `
+        -LiteralPath $mainPath `
+        -Destination (Join-Path -Path $buildDirectory -ChildPath $mainFileName) `
+        -Force
+
+    $bootstrapContent = Get-Content -LiteralPath $bootstrapPath -Raw
+    $defaultMainReference = '"mainJsPath":"main.dart.js"'
+    if (-not $bootstrapContent.Contains($defaultMainReference)) {
+        throw "No se encontró la referencia estándar a main.dart.js en el bootstrap."
+    }
+    $bootstrapContent = $bootstrapContent.Replace(
+        $defaultMainReference,
+        ('"mainJsPath":"{0}"' -f $mainFileName)
+    )
+
+    $versionedBootstrapPath = Join-Path `
+        -Path $buildDirectory `
+        -ChildPath $bootstrapFileName
+    [System.IO.File]::WriteAllText(
+        $versionedBootstrapPath,
+        $bootstrapContent,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
+    $indexContent = Get-Content -LiteralPath $indexPath -Raw
+    $bootstrapPattern = 'flutter_bootstrap(?:\.[0-9a-f]{12})?\.js'
+    if ($indexContent -notmatch $bootstrapPattern) {
+        throw "No se encontró la referencia al bootstrap en index.html."
+    }
+    $indexContent = [System.Text.RegularExpressions.Regex]::Replace(
+        $indexContent,
+        $bootstrapPattern,
+        $bootstrapFileName
+    )
+    [System.IO.File]::WriteAllText(
+        $indexPath,
+        $indexContent,
+        [System.Text.UTF8Encoding]::new($false)
+    )
+
+    return [PSCustomObject]@{
+        MainFileName = $mainFileName
+        BootstrapFileName = $bootstrapFileName
+    }
+}
+
+function Assert-VersionedWebBuild {
+    param(
+        [Parameter(Mandatory = $true)]
+        [PSCustomObject]$Assets
+    )
+
+    $mainPath = Join-Path -Path $buildDirectory -ChildPath $Assets.MainFileName
+    $bootstrapPath = Join-Path `
+        -Path $buildDirectory `
+        -ChildPath $Assets.BootstrapFileName
+    $indexPath = Join-Path -Path $buildDirectory -ChildPath "index.html"
+
+    foreach ($requiredPath in @($mainPath, $bootstrapPath)) {
+        if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+            throw "No se generó el recurso web versionado: $requiredPath"
+        }
+    }
+
+    $bootstrapContent = Get-Content -LiteralPath $bootstrapPath -Raw
+    if ($bootstrapContent -notmatch [regex]::Escape($Assets.MainFileName)) {
+        throw "El bootstrap versionado no referencia $($Assets.MainFileName)."
+    }
+
+    $indexContent = Get-Content -LiteralPath $indexPath -Raw
+    if ($indexContent -notmatch [regex]::Escape($Assets.BootstrapFileName)) {
+        throw "index.html no referencia $($Assets.BootstrapFileName)."
+    }
+}
+
 Push-Location -LiteralPath $projectRoot
 $locationDepth++
 
@@ -122,6 +220,10 @@ try {
     }
 
     Assert-WebBuild
+    $sourceRevision = Get-NativeText git rev-parse --short=12 HEAD
+    $versionedAssets = New-VersionedWebAssets -Revision $sourceRevision
+    Assert-VersionedWebBuild -Assets $versionedAssets
+    Write-Host "Recursos web versionados para evitar cachés antiguas: $sourceRevision."
 
     if ($DryRun) {
         Write-Host "Validación correcta. No se publicaron cambios."
@@ -167,6 +269,16 @@ try {
             -Destination $temporaryDirectory `
             -Recurse `
             -Force
+    }
+
+    foreach ($unversionedEntry in @(
+        (Join-Path -Path $temporaryDirectory -ChildPath "main.dart.js"),
+        (Join-Path -Path $temporaryDirectory -ChildPath "flutter_bootstrap.js"),
+        (Join-Path -Path $temporaryDirectory -ChildPath "flutter_service_worker.js")
+    )) {
+        if (Test-Path -LiteralPath $unversionedEntry -PathType Leaf) {
+            Remove-Item -LiteralPath $unversionedEntry -Force
+        }
     }
 
     Copy-Item `
