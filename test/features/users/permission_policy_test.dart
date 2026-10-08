@@ -55,4 +55,44 @@ void main() {
     expect(result.update, isFalse);
     expect(result.export, isFalse);
   });
+
+  test('serializa y recupera acciones independientes por estado', () {
+    final permissions = PermissionActions.fromMap({
+      'permisos_estado': '''{
+        "PENDIENTE":{"view":true,"create":true,"update":true,"delete":false},
+        "DESPACHADO":{"view":true,"create":false,"update":false,"delete":false}
+      }''',
+    });
+
+    expect(permissions.workflowStates['PENDIENTE']!.create, isTrue);
+    expect(permissions.workflowStates['PENDIENTE']!.delete, isFalse);
+    expect(permissions.workflowStates['DESPACHADO']!.view, isTrue);
+
+    final payload = permissions.toMap(formatId: 'vale_despacho');
+    expect(payload['can_insert'], isTrue);
+    expect(
+      (payload['permisos_estado'] as Map)['DESPACHADO']['update'],
+      isFalse,
+    );
+  });
+
+  test('el techo global limita cada acción de los estados', () {
+    const requested = PermissionActions(
+      workflowStates: {
+        'APROBADO': WorkflowStateActions(
+          view: true,
+          create: true,
+          update: true,
+          delete: true,
+        ),
+      },
+    );
+    const ceiling = PermissionActions(view: true, update: true);
+
+    final result = requested.boundedBy(ceiling).workflowStates['APROBADO']!;
+    expect(result.view, isTrue);
+    expect(result.update, isTrue);
+    expect(result.create, isFalse);
+    expect(result.delete, isFalse);
+  });
 }

@@ -1494,6 +1494,9 @@ class SyncService {
                 'permisos_flujo': e['permisos_flujo'] is List
                     ? jsonEncode(e['permisos_flujo'])
                     : (e['permisos_flujo']?.toString() ?? '[]'),
+                'permisos_estado': e['permisos_estado'] is Map
+                    ? jsonEncode(e['permisos_estado'])
+                    : (e['permisos_estado']?.toString() ?? '{}'),
               })
           .toList(),
       snapshot: permissionsSnapshot,
@@ -2078,6 +2081,9 @@ class SyncService {
                 'permisos_flujo': e['permisos_flujo'] is List
                     ? jsonEncode(e['permisos_flujo'])
                     : (e['permisos_flujo']?.toString() ?? '[]'),
+                'permisos_estado': e['permisos_estado'] is Map
+                    ? jsonEncode(e['permisos_estado'])
+                    : (e['permisos_estado']?.toString() ?? '{}'),
               })
           .where((e) => e['id'] != null)
           .toList(),
@@ -2411,6 +2417,9 @@ class SyncService {
                 'permisos_flujo': e['permisos_flujo'] is List
                     ? jsonEncode(e['permisos_flujo'])
                     : (e['permisos_flujo']?.toString() ?? '[]'),
+                'permisos_estado': e['permisos_estado'] is Map
+                    ? jsonEncode(e['permisos_estado'])
+                    : (e['permisos_estado']?.toString() ?? '{}'),
               })
           .toList(),
     );
@@ -3307,6 +3316,8 @@ class SyncService {
     required String moduleId,
     required String formatId,
     String? formatTableId,
+    String? editPrimaryKeyColumn,
+    dynamic editPrimaryKeyValue,
   }) async {
     if (!await hasInternet()) {
       throw Exception(
@@ -3348,10 +3359,30 @@ class SyncService {
     final finalPayload =
         await _uploadEvidenceFiles(payload: known, queueRow: queueRow);
     try {
-      await _supabase.from(table).upsert(finalPayload, onConflict: 'id_local');
-      await _local.upsertMatrixRowPayload(table, finalPayload);
+      Map<String, dynamic> persisted = finalPayload;
+      final editColumn = editPrimaryKeyColumn?.trim() ?? '';
+      if (editColumn.isNotEmpty && editPrimaryKeyValue != null) {
+        if (!await _remoteTableHasColumn(table, 'id_local')) {
+          finalPayload.removeWhere((key, _) => _norm(key) == 'ID_LOCAL');
+        }
+        final updated = await _supabase
+            .from(table)
+            .update(finalPayload)
+            .eq(editColumn, editPrimaryKeyValue)
+            .select()
+            .maybeSingle();
+        if (updated == null) {
+          throw Exception('El registro que intentas editar ya no existe.');
+        }
+        persisted = Map<String, dynamic>.from(updated);
+      } else {
+        await _supabase
+            .from(table)
+            .upsert(finalPayload, onConflict: 'id_local');
+      }
+      await _local.upsertMatrixRowPayload(table, persisted);
       await _markEvidenceLinked([idLocal], empresaId);
-      return finalPayload;
+      return persisted;
     } catch (error) {
       throw Exception(friendlyError(error));
     }

@@ -66,11 +66,22 @@ class PermissionManagementRepository {
   Future<Map<String, dynamic>> saveFormatPermissions({
     required String userId,
     required List<Map<String, dynamic>> permissions,
-  }) async =>
-      _map(await _client.rpc(
-        'appgt_guardar_permisos_formatos_v1',
-        params: {'p_user_id': userId, 'p_permisos': permissions},
-      ));
+  }) async {
+    final result = _map(await _client.rpc(
+      'appgt_guardar_permisos_formatos_v1',
+      params: {'p_user_id': userId, 'p_permisos': permissions},
+    ));
+    final withStates = permissions
+        .where((item) => item['permisos_estado'] is Map)
+        .toList(growable: false);
+    if (withStates.isNotEmpty) {
+      await _client.rpc(
+        'appgt_guardar_permisos_estado_formatos_v1',
+        params: {'p_user_id': userId, 'p_permisos': withStates},
+      );
+    }
+    return result;
+  }
 
   Future<Map<String, dynamic>> revokeFormats({
     required String userId,

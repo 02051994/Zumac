@@ -128,6 +128,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   bool canDelete = false;
   bool canReview = false;
   bool canApprove = false;
+  Map<String, Map<String, bool>> _workflowStatePermissions =
+      <String, Map<String, bool>>{};
   bool _importingFile = false;
   final Set<String> _selectedDeleteRowKeys = <String>{};
   final Map<String, Map<String, dynamic>> _selectedDeleteRows =
@@ -498,7 +500,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return rows.where((row) => !_isDeletedRecord(row)).toList();
   }
 
-  Future<Map<String, bool>> _currentUserPermissionsForFormat(
+  Future<Map<String, dynamic>> _currentUserPermissionsForFormat(
       String formatId) async {
     final authUserId = supabase.auth.currentUser?.id.trim() ?? '';
     final cachedUserId = (await LocalSession().cachedUserId())?.trim() ?? '';
@@ -527,6 +529,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     var delete = false;
     var review = false;
     var approve = false;
+    final statePermissions = <String, Map<String, bool>>{};
     for (final row in rows) {
       export =
           export || _boolValue(row['can_export']) || row['can_export'] == 1;
@@ -542,6 +545,29 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           review || _boolValue(row['can_review']) || row['can_review'] == 1;
       approve =
           approve || _boolValue(row['can_approve']) || row['can_approve'] == 1;
+      dynamic rawStates = row['permisos_estado'];
+      if (rawStates is String && rawStates.trim().isNotEmpty) {
+        try {
+          rawStates = jsonDecode(rawStates);
+        } catch (_) {
+          rawStates = null;
+        }
+      }
+      if (rawStates is Map) {
+        for (final entry in rawStates.entries) {
+          if (entry.value is! Map) continue;
+          final state = entry.key.toString().trim().toUpperCase();
+          final actions = Map<String, dynamic>.from(entry.value as Map);
+          final current =
+              statePermissions.putIfAbsent(state, () => <String, bool>{});
+          for (final action in const ['view', 'create', 'update', 'delete']) {
+            current[action] = (current[action] ?? false) ||
+                _boolValue(actions[action]) ||
+                (action == 'create' && _boolValue(actions['insert'])) ||
+                (action == 'update' && _boolValue(actions['edit']));
+          }
+        }
+      }
     }
     // Los administradores de empresa conservan las herramientas operativas
     // aunque todavía no exista una fila de permiso granular para el formato.
@@ -566,7 +592,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         import = true;
       }
     }
-    return {
+    return <String, dynamic>{
       'export': export,
       'import': import,
       'insert': insert,
@@ -574,6 +600,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'delete': delete,
       'review': review,
       'approve': approve,
+      'state_permissions': statePermissions,
     };
   }
 
@@ -1497,8 +1524,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final insertAllowed = permissions['insert'] ?? false;
       final updateAllowed = permissions['update'] ?? false;
       final deleteAllowed = permissions['delete'] ?? false;
-      final reviewAllowed = permissions['review'] ?? false;
-      final approveAllowed = permissions['approve'] ?? false;
+      var reviewAllowed = permissions['review'] ?? false;
+      var approveAllowed = permissions['approve'] ?? false;
+      _workflowStatePermissions = Map<String, Map<String, bool>>.from(
+        permissions['state_permissions'] as Map? ??
+            const <String, Map<String, bool>>{},
+      );
+      reviewAllowed = reviewAllowed ||
+          (_workflowStatePermissions['PENDIENTE']?['update'] ?? false);
+      approveAllowed = approveAllowed ||
+          (_workflowStatePermissions['REVISADO']?['update'] ?? false);
       _setLoadingMessage('Leyendo configuración del formato...');
       await Future<void>.delayed(Duration.zero);
       final internalTables = await local.where(
@@ -7587,6 +7622,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       );
       return;
     }
+    if (!_workflowStateAllows(row, 'update')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'No tienes permiso para editar registros en estado ${_workflowStateForRow(row)}.',
+          ),
+        ),
+      );
+      return;
+    }
     if (table == null || table.trim().isEmpty) return;
 
     final pkColumn = _primaryKeyColumn(row);
@@ -7600,153 +7645,85 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
     final pkValue = row[pkColumn];
 
-    final editFields = await _editFieldRows(table, row);
-    final columns = editFields
-        .map((field) => field['campo']?.toString().trim() ?? '')
-        .where((c) => c.isNotEmpty)
-        .toList();
-    final fieldByColumn = <String, Map<String, dynamic>>{
-      for (final field in editFields)
-        if ((field['campo']?.toString().trim() ?? '').isNotEmpty)
-          field['campo'].toString(): field,
-    };
-    final controllers = <String, TextEditingController>{
-      for (final column in columns)
-        column: TextEditingController(
-            text: _editInitialValue(row, column, fieldByColumn[column])),
-    };
-    _editRecalculateFormulas(fields: editFields, controllers: controllers);
-    final newSignatures = <String, Uint8List>{};
+    String? editIdLocal;
+    for (final entry in row.entries) {
+      if (_norm(entry.key) == 'ID_LOCAL') {
+        editIdLocal = entry.value?.toString().trim();
+        break;
+      }
+    }
+    if (editIdLocal?.isEmpty == true) editIdLocal = null;
 
-    final saved = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return AlertDialog(
-              title: const Text('Editar registro'),
-              content: SizedBox(
-                width: 720,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: _buildEditDialogRows(
-                      dialogContext: dialogContext,
-                      editFields: editFields,
-                      controllers: controllers,
-                      newSignatures: newSignatures,
-                      setDialogState: setDialogState,
+    String? formatTableId;
+    for (final config in internalTableRows) {
+      if (_norm(config['tabla_destino']?.toString() ?? '') == _norm(table)) {
+        formatTableId = config['id']?.toString();
+        break;
+      }
+    }
+
+    final initialPayload = Map<String, dynamic>.from(row);
+    final Widget page = special.isNotEmpty
+        ? SpecialFormRouterPage(
+            moduleId: widget.module['id'] as String,
+            format: widget.format,
+            special: special.first,
+            initialPayload: initialPayload,
+            editIdLocal: editIdLocal,
+          )
+        : FormRunnerPage(
+            moduleId: widget.module['id'] as String,
+            format: widget.format,
+            initialPayload: initialPayload,
+            editIdLocal: editIdLocal,
+            initialFormatTableId: formatTableId,
+            editPrimaryKeyColumn: pkColumn,
+            editPrimaryKeyValue: pkValue,
+          );
+
+    final compact = widget.mobileMode || MediaQuery.sizeOf(context).width < 760;
+    if (compact) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) => page,
+        ),
+      );
+    } else {
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => LayoutBuilder(
+          builder: (context, constraints) {
+            final width = math.min(
+              ZumacResponsiveLimits.formDialog,
+              constraints.maxWidth - 32.0,
+            );
+            return Dialog(
+              insetPadding: const EdgeInsets.all(16),
+              backgroundColor: Colors.transparent,
+              child: Center(
+                child: SizedBox(
+                  width: width,
+                  height: constraints.maxHeight * 0.94,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(18),
+                    child: Material(
+                      elevation: 10,
+                      color: Colors.white,
+                      child: page,
                     ),
                   ),
                 ),
               ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(dialogContext, false),
-                  child: const Text('Cancelar'),
-                ),
-                FilledButton(
-                  onPressed: () => Navigator.pop(dialogContext, true),
-                  child: const Text('Actualizar'),
-                ),
-              ],
             );
           },
-        );
-      },
-    );
-
-    if (saved != true) {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-      return;
-    }
-
-    if (_isPersonalPlanillaTable &&
-        !await _confirmPersonalStatusTransition(row, controllers)) {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-      return;
-    }
-
-    final payload = <String, dynamic>{};
-    for (final entry in controllers.entries) {
-      final column = entry.key;
-      if (_isSignatureColumn(column) && newSignatures.containsKey(column))
-        continue;
-      final raw = entry.value.text.trim();
-      final field = fieldByColumn[column];
-      final label = _editFieldLabel(field, column);
-      if (field != null &&
-          _editBool(field['requerido'], defaultValue: false) &&
-          raw.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Llene el campo obligatorio "$label".')));
-        return;
-      }
-      if (field != null) {
-        final validationError = _editNumberValidationError(field, raw, label);
-        if (validationError != null) {
-          ScaffoldMessenger.of(context)
-              .showSnackBar(SnackBar(content: Text(validationError)));
-          return;
-        }
-        if (_editIsNumberField(field) && raw.isNotEmpty) {
-          final parsed = num.tryParse(raw.replaceAll(',', '.'));
-          payload[column] = parsed;
-          continue;
-        }
-      }
-      payload[column] = raw.isEmpty ? null : raw;
-    }
-
-    try {
-      for (final entry in newSignatures.entries) {
-        payload[entry.key] = await _uploadDesktopSignature(
-          table: table,
-          pkValue: pkValue,
-          column: entry.key,
-          bytes: entry.value,
-        );
-      }
-
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-
-      final updated = await supabase
-          .from(table)
-          .update(payload)
-          .eq(pkColumn, pkValue)
-          .select()
-          .maybeSingle();
-      if (updated != null) {
-        await local.upsertMatrixRowPayload(
-          table,
-          Map<String, dynamic>.from(updated),
-        );
-      }
-      await _load();
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Registro actualizado.')),
+        ),
       );
-    } catch (e) {
-      for (final c in controllers.values) {
-        c.dispose();
-      }
-      if (!mounted) return;
-      final rawError = e.toString().toLowerCase();
-      final message = rawError.contains('statement timeout') ||
-              rawError.contains('code: 57014')
-          ? 'La actualización tardó más de lo permitido y no se completó. Inténtelo nuevamente.'
-          : 'No se pudo actualizar el registro: $e';
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(message)));
     }
+
+    if (!mounted) return;
+    await _load();
   }
 
   void _notifyDeleteSelectionChanged() {
@@ -7756,6 +7733,26 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   void _notifyTableRenderChanged({bool filtersChanged = false}) {
     _tableRenderVersion.value++;
     if (filtersChanged) _filterControlsVersion.value++;
+  }
+
+  String _workflowStateForRow(Map<String, dynamic> row) {
+    for (final preferred in const ['ESTADO_APROBACION', 'ESTADO']) {
+      for (final entry in row.entries) {
+        if (_norm(entry.key) == preferred) {
+          return entry.value?.toString().trim().toUpperCase() ?? '';
+        }
+      }
+    }
+    return '';
+  }
+
+  bool _workflowStateAllows(Map<String, dynamic> row, String action) {
+    if (_workflowStatePermissions.isEmpty) return true;
+    final state = _workflowStateForRow(row);
+    if (state.isEmpty) return true;
+    final permissions = _workflowStatePermissions[state];
+    if (permissions == null) return false;
+    return permissions[action] ?? false;
   }
 
   void _toggleDeleteSelection(
@@ -7796,6 +7793,19 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         table == null ||
         table.trim().isEmpty ||
         _selectedDeleteRows.isEmpty) return;
+    final unauthorized = _selectedDeleteRows.values
+        .where((row) => !_workflowStateAllows(row, 'delete'))
+        .toList(growable: false);
+    if (unauthorized.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'La selección incluye registros cuyo estado no permite eliminar.',
+          ),
+        ),
+      );
+      return;
+    }
     final count = _selectedDeleteRows.length;
     final ok = await showDialog<bool>(
       context: context,
@@ -7845,6 +7855,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final key in row.keys) {
       if (_norm(key) == 'ESTADO_APROBACION') return key;
     }
+    for (final key in row.keys) {
+      if (_norm(key) == 'ESTADO') return key;
+    }
     final currentTable = _norm(tableName ?? '');
     for (final field in allLocalFormFields) {
       if (_norm(field['tabla_destino']?.toString() ?? '') != currentTable) {
@@ -7852,6 +7865,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       }
       final campo = field['campo']?.toString().trim() ?? '';
       if (_norm(campo) == 'ESTADO_APROBACION') return campo;
+    }
+    for (final field in allLocalFormFields) {
+      if (_norm(field['tabla_destino']?.toString() ?? '') != currentTable) {
+        continue;
+      }
+      final campo = field['campo']?.toString().trim() ?? '';
+      if (_norm(campo) == 'ESTADO') return campo;
     }
     return 'ESTADO_APROBACION';
   }
@@ -7873,10 +7893,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final column = _approvalColumnForRow(row);
       final current = row[column]?.toString().trim().toUpperCase() ?? '';
       if (desired == 'APROBADO') {
-        if (current == 'REVISADO') {
+        if (current == 'REVISADO' && _workflowStateAllows(row, 'update')) {
           eligible.add(row);
         }
-      } else if (current == 'PENDIENTE') {
+      } else if (current == 'PENDIENTE' &&
+          _workflowStateAllows(row, 'update')) {
         eligible.add(row);
       }
     }
@@ -8003,12 +8024,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   DataCell _editCell(Map<String, dynamic> row) {
+    final allowed = canUpdate && _workflowStateAllows(row, 'update');
     return DataCell(
       IconButton(
-        tooltip: canUpdate ? 'Editar registro' : 'Actualización no permitida',
+        tooltip: allowed ? 'Editar registro' : 'Actualización no permitida',
         icon: Icon(Icons.edit,
-            size: 18, color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
-        onPressed: canUpdate ? () => _editRemoteRecord(row) : null,
+            size: 18, color: allowed ? const Color(0xFF176B87) : Colors.grey),
+        onPressed: allowed ? () => _editRemoteRecord(row) : null,
       ),
     );
   }
@@ -8276,6 +8298,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     }
 
     Widget editCell(Map<String, dynamic> row) {
+      final allowed = canUpdate && _workflowStateAllows(row, 'update');
       return Container(
         width: 72,
         height: 46,
@@ -8286,11 +8309,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           bottom: BorderSide(color: Color(0xFFD7E1E9), width: 0.8),
         )),
         child: IconButton(
-          tooltip: canUpdate ? 'Editar registro' : 'Actualización no permitida',
+          tooltip: allowed ? 'Editar registro' : 'Actualización no permitida',
           icon: Icon(Icons.edit,
-              size: 18,
-              color: canUpdate ? const Color(0xFF176B87) : Colors.grey),
-          onPressed: canUpdate ? () => _editRemoteRecord(row) : null,
+              size: 18, color: allowed ? const Color(0xFF176B87) : Colors.grey),
+          onPressed: allowed ? () => _editRemoteRecord(row) : null,
           splashRadius: 18,
         ),
       );

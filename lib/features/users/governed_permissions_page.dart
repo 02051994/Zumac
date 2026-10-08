@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart' hide ScaffoldMessenger;
 
 import '../../core/widgets/responsive_layout.dart';
@@ -265,6 +267,25 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
       PermissionActions.fromMap(Map<String, dynamic>.from(
           format['acciones_delegables'] as Map? ?? {}));
 
+  List<String> workflowStates(Map<String, dynamic> format) {
+    dynamic raw = format['flujo_estados'];
+    if (raw is String && raw.trim().isNotEmpty) {
+      try {
+        raw = jsonDecode(raw);
+      } catch (_) {
+        raw = null;
+      }
+    }
+    if (raw is! List) return const <String>[];
+    return raw
+        .map((value) => value is Map
+            ? text(value['codigo'] ?? value['nombre']).toUpperCase()
+            : text(value).toUpperCase())
+        .where((value) => value.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+  }
+
   Future<void> editFormat(Map<String, dynamic> format) async {
     if (selectedId == null || targetRole.isEmpty || saving) return;
     final id = text(format['id']);
@@ -274,7 +295,8 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
             name: name(format, 'Formato'),
             role: targetRole,
             initial: permissions[id] ?? const PermissionActions(),
-            ceiling: ceiling(format)));
+            ceiling: ceiling(format),
+            workflowStates: workflowStates(format)));
     if (result == null) return;
     setState(() => saving = true);
     try {
@@ -362,7 +384,8 @@ class _GovernedPermissionsPageState extends State<GovernedPermissionsPage> {
                   export: old.export,
                   import: old.import,
                   review: old.review,
-                  approve: old.approve)
+                  approve: old.approve,
+                  workflowStates: old.workflowStates)
               .normalizedForRole(targetRole)
               .boundedBy(ceiling(f))
               .toMap(formatId: id);
@@ -865,9 +888,11 @@ class _PermissionDialog extends StatefulWidget {
       {required this.name,
       required this.role,
       required this.initial,
-      required this.ceiling});
+      required this.ceiling,
+      required this.workflowStates});
   final String name, role;
   final PermissionActions initial, ceiling;
+  final List<String> workflowStates;
   @override
   State<_PermissionDialog> createState() => _PermissionDialogState();
 }
@@ -890,7 +915,8 @@ class _PermissionDialogState extends State<_PermissionDialog> {
         export: action == 'export' ? enabled : value.export,
         import: action == 'import' ? enabled : value.import,
         review: action == 'review' ? enabled : value.review,
-        approve: action == 'approve' ? enabled : value.approve);
+        approve: action == 'approve' ? enabled : value.approve,
+        workflowStates: value.workflowStates);
     if (action == 'view' && !enabled) next = const PermissionActions();
     setState(() =>
         value = next.normalizedForRole(widget.role).boundedBy(widget.ceiling));
@@ -906,6 +932,110 @@ class _PermissionDialogState extends State<_PermissionDialog> {
               : 'No puede delegar una acción que usted no posee.'),
           value: enabled,
           onChanged: available ? (v) => setAction(action, v) : null);
+
+  WorkflowStateActions _stateValue(String state) {
+    final existing = value.workflowStates[state];
+    if (existing != null) return existing;
+    final terminal = const {'DESPACHADO', 'ANULADO', 'CERRADO'}
+        .contains(state.toUpperCase());
+    return WorkflowStateActions(
+      view: value.view,
+      create: !terminal && state.toUpperCase() == 'PENDIENTE' && value.insert,
+      update: !terminal && value.update,
+      delete: !terminal && value.delete,
+    );
+  }
+
+  void _setStateAction(String state, String action, bool enabled) {
+    final current = _stateValue(state);
+    final next = current.copyWith(
+      view: action == 'view' ? enabled : null,
+      create: action == 'create' ? enabled : null,
+      update: action == 'update' ? enabled : null,
+      delete: action == 'delete' ? enabled : null,
+    );
+    final updated = Map<String, WorkflowStateActions>.from(value.workflowStates)
+      ..[state] = next;
+    setState(() {
+      value = PermissionActions(
+        view: value.view || next.view,
+        insert: value.insert || next.create,
+        update: value.update || next.update,
+        delete: value.delete || next.delete,
+        export: value.export,
+        import: value.import,
+        review: value.review,
+        approve: value.approve,
+        workflowStates: updated,
+      ).normalizedForRole(widget.role).boundedBy(widget.ceiling);
+    });
+  }
+
+  Widget _stateCheck(String state, String action, String label, bool checked,
+          bool available) =>
+      SizedBox(
+        width: 112,
+        child: CheckboxListTile(
+          dense: true,
+          contentPadding: EdgeInsets.zero,
+          controlAffinity: ListTileControlAffinity.leading,
+          value: checked,
+          title: Text(label),
+          onChanged: available
+              ? (next) => _setStateAction(state, action, next == true)
+              : null,
+        ),
+      );
+
+  Widget _workflowPermissions() {
+    if (widget.workflowStates.isEmpty) return const SizedBox.shrink();
+    final visualizer = widget.role == 'VISUALIZADOR';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 28),
+        Text('Permisos por estado',
+            style: Theme.of(context).textTheme.titleMedium),
+        const SizedBox(height: 4),
+        const Text(
+          'Define exactamente qué registros puede ver, crear, editar o eliminar en cada etapa.',
+        ),
+        const SizedBox(height: 10),
+        for (final state in widget.workflowStates)
+          Card.outlined(
+            margin: const EdgeInsets.only(bottom: 8),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(state,
+                      style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Wrap(
+                    spacing: 4,
+                    runSpacing: 0,
+                    children: [
+                      _stateCheck(state, 'view', 'Ver', _stateValue(state).view,
+                          widget.ceiling.view),
+                      if (!visualizer)
+                        _stateCheck(state, 'create', 'Crear',
+                            _stateValue(state).create, widget.ceiling.insert),
+                      if (!visualizer)
+                        _stateCheck(state, 'update', 'Editar',
+                            _stateValue(state).update, widget.ceiling.update),
+                      if (!visualizer)
+                        _stateCheck(state, 'delete', 'Eliminar',
+                            _stateValue(state).delete, widget.ceiling.delete),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final visualizer = widget.role == 'VISUALIZADOR',
@@ -941,6 +1071,7 @@ class _PermissionDialogState extends State<_PermissionDialog> {
                     toggle('Aprobar', 'Aprobar información.', 'approve',
                         value.approve, widget.ceiling.approve),
                   ],
+                  _workflowPermissions(),
                 ]))),
         actions: [
           TextButton(

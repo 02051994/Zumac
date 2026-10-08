@@ -233,6 +233,7 @@ class LocalDb {
     await _ensureColumn(db, 'local_modules', 'color', 'text');
     await _ensureColumn(db, 'local_formats', 'rubro_id', 'text');
     await _ensureColumn(db, 'local_format_tables', 'rubro_id', 'text');
+    await _ensureColumn(db, 'local_permissions', 'permisos_estado', 'text');
   }
 
   Future<bool> _tableExists(Database db, String table) async {
@@ -779,7 +780,8 @@ class LocalDb {
         can_complete_pending integer,
         seccion text,
         campos_restringidos text,
-        permisos_flujo text
+        permisos_flujo text,
+        permisos_estado text
       )
     ''');
     await db.execute('''

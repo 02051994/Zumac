@@ -17,6 +17,7 @@ import '../../core/services/human_resources_rules.dart';
 import '../../core/services/soft_delete.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/services/tareo_draft_policy.dart';
+import 'erp_workflow_pages.dart';
 import 'form_runner_page.dart';
 
 const MethodChannel _scannerFeedbackChannel =
@@ -661,6 +662,24 @@ class SpecialFormRouterPage extends StatelessWidget {
         initialPayload: initialPayload,
         editIdLocal: editIdLocal,
         onLocalChanged: onLocalChanged,
+        onSavedAndExit: onSavedAndExit,
+      );
+    }
+    if (tipo == 'erp_solicitud_pedido') {
+      return ErpPurchaseRequestPage(
+        initialPayload: initialPayload,
+        onSavedAndExit: onSavedAndExit,
+      );
+    }
+    if (tipo == 'erp_ingreso_compra') {
+      return ErpPurchaseReceiptPage(
+        initialPayload: initialPayload,
+        onSavedAndExit: onSavedAndExit,
+      );
+    }
+    if (tipo == 'erp_vale_despacho') {
+      return ErpDispatchVoucherPage(
+        initialPayload: initialPayload,
         onSavedAndExit: onSavedAndExit,
       );
     }

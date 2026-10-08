@@ -40,6 +40,8 @@ class FormRunnerPage extends StatefulWidget {
   final Map<String, dynamic>? initialPayload;
   final String? editIdLocal;
   final String? initialFormatTableId;
+  final String? editPrimaryKeyColumn;
+  final dynamic editPrimaryKeyValue;
   final VoidCallback? onBack;
 
   const FormRunnerPage({
@@ -49,6 +51,8 @@ class FormRunnerPage extends StatefulWidget {
     this.initialPayload,
     this.editIdLocal,
     this.initialFormatTableId,
+    this.editPrimaryKeyColumn,
+    this.editPrimaryKeyValue,
     this.onBack,
   });
 
@@ -4637,6 +4641,8 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
           moduleId: widget.moduleId,
           formatId: widget.format['id']?.toString() ?? '',
           formatTableId: selectedInternalTableId,
+          editPrimaryKeyColumn: widget.editPrimaryKeyColumn,
+          editPrimaryKeyValue: widget.editPrimaryKeyValue,
         );
         payload
           ..clear()

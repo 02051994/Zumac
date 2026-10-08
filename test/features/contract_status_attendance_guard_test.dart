@@ -11,6 +11,11 @@ void main() {
   final recordsUi = File(
     'lib/features/formats/desktop_format_records_page.dart',
   ).readAsStringSync();
+  final formRunner = File(
+    'lib/features/form_runner/form_runner_page.dart',
+  ).readAsStringSync();
+  final syncService =
+      File('lib/core/services/sync_service.dart').readAsStringSync();
 
   test('deriva Activo o pendiente y preserva el Cese manual', () {
     expect(migration, contains("v_status = 'CESE'"));
@@ -39,8 +44,10 @@ void main() {
   });
 
   test('la edición refresca inmediatamente la caché local', () {
-    expect(recordsUi, contains('.select()'));
-    expect(recordsUi, contains('.maybeSingle()'));
-    expect(recordsUi, contains('upsertMatrixRowPayload'));
+    expect(recordsUi, contains('FormRunnerPage'));
+    expect(formRunner, contains('editPrimaryKeyColumn'));
+    expect(syncService, contains('.select()'));
+    expect(syncService, contains('.maybeSingle()'));
+    expect(syncService, contains('upsertMatrixRowPayload'));
   });
 }
