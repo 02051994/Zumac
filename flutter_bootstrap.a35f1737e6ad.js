@@ -33,10 +33,28 @@ addEventListener("message", eventListener);
 if (!window._flutter) {
   window._flutter = {};
 }
-_flutter.buildConfig = {"engineRevision":"42d3d75a56efe1a2e9902f52dc8006099c45d937","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.dart.js"},{}]};
+_flutter.buildConfig = {"engineRevision":"42d3d75a56efe1a2e9902f52dc8006099c45d937","builds":[{"compileTarget":"dart2js","renderer":"canvaskit","mainJsPath":"main.a35f1737e6ad.dart.js"},{}]};
 
-_flutter.loader.load({
-  serviceWorkerSettings: {
-    serviceWorkerVersion: "31351599" /* Flutter's service worker is deprecated and will be removed in a future Flutter release. */
-  }
-});
+
+(() => {
+  const showError = (error) => {
+    if (window.zumacShowBootstrapError) {
+      window.zumacShowBootstrapError(error);
+      return;
+    }
+    console.error('Error al iniciar Zumac:', error);
+  };
+
+  _flutter.loader.load({
+    onEntrypointLoaded: async (engineInitializer) => {
+      try {
+        const appRunner = await engineInitializer.initializeEngine();
+        await appRunner.runApp();
+        window.__zumacFlutterStarted = true;
+        if (window.zumacBootstrapReady) window.zumacBootstrapReady();
+      } catch (error) {
+        showError(error);
+      }
+    },
+  }).catch(showError);
+})();

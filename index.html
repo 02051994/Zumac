@@ -32,16 +32,150 @@
 
   <title>Zumac</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      background: #f7faf7;
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    #zumac-bootstrap-status {
+      box-sizing: border-box;
+      display: flex;
+      min-height: 100%;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      color: #17351f;
+      text-align: center;
+    }
+
+    .zumac-bootstrap-card {
+      width: min(420px, 100%);
+      padding: 32px 28px;
+      border: 1px solid #dce9de;
+      border-radius: 18px;
+      background: #ffffff;
+      box-shadow: 0 14px 40px rgba(23, 53, 31, 0.10);
+    }
+
+    .zumac-bootstrap-spinner {
+      width: 42px;
+      height: 42px;
+      margin: 0 auto 20px;
+      border: 4px solid #dbe9dd;
+      border-top-color: #2f7d44;
+      border-radius: 50%;
+      animation: zumac-spin 0.9s linear infinite;
+    }
+
+    #zumac-bootstrap-title {
+      margin: 0 0 8px;
+      font-size: 22px;
+      font-weight: 700;
+    }
+
+    #zumac-bootstrap-message {
+      margin: 0;
+      color: #57705e;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    #zumac-bootstrap-retry {
+      margin-top: 20px;
+      padding: 11px 20px;
+      border: 0;
+      border-radius: 10px;
+      background: #2f7d44;
+      color: #ffffff;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    @keyframes zumac-spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
 </head>
 <body>
-  <!--
-    You can customize the "flutter_bootstrap.js" script.
-    This is useful to provide a custom configuration to the Flutter loader
-    or to give the user feedback during the initialization process.
+  <div id="zumac-bootstrap-status" role="status" aria-live="polite">
+    <div class="zumac-bootstrap-card">
+      <div id="zumac-bootstrap-spinner" class="zumac-bootstrap-spinner"></div>
+      <h1 id="zumac-bootstrap-title">Cargando Zumac</h1>
+      <p id="zumac-bootstrap-message">Preparando el sistema...</p>
+      <button id="zumac-bootstrap-retry" type="button" hidden>
+        Volver a intentar
+      </button>
+    </div>
+  </div>
 
-    For more details:
-    * https://docs.flutter.dev/platform-integration/web/initialization
-  -->
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    (() => {
+      const resetKey = 'zumac-service-worker-reset-v1';
+      const status = document.getElementById('zumac-bootstrap-status');
+      const spinner = document.getElementById('zumac-bootstrap-spinner');
+      const title = document.getElementById('zumac-bootstrap-title');
+      const message = document.getElementById('zumac-bootstrap-message');
+      const retry = document.getElementById('zumac-bootstrap-retry');
+
+      const showError = (error) => {
+        if (window.__zumacFlutterStarted) return;
+        clearTimeout(window.__zumacBootstrapTimeout);
+        spinner.hidden = true;
+        title.textContent = 'No se pudo iniciar Zumac';
+        message.textContent =
+          'Comprueba tu conexión y vuelve a intentarlo. Si el problema continúa, actualiza la página con Ctrl+F5.';
+        retry.hidden = false;
+        if (error) console.error('Error al iniciar Zumac:', error);
+      };
+
+      window.zumacShowBootstrapError = showError;
+      window.zumacBootstrapReady = () => {
+        clearTimeout(window.__zumacBootstrapTimeout);
+        status.remove();
+      };
+
+      retry.addEventListener('click', () => window.location.reload());
+      window.addEventListener('error', (event) => showError(event.error));
+      window.addEventListener(
+        'unhandledrejection',
+        (event) => showError(event.reason),
+      );
+
+      window.__zumacBootstrapTimeout = window.setTimeout(() => {
+        showError(new Error('Tiempo de espera agotado al descargar la aplicación.'));
+      }, 45000);
+
+      const start = async () => {
+        if ('serviceWorker' in navigator) {
+          const wasControlled = Boolean(navigator.serviceWorker.controller);
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((item) => item.unregister()));
+
+          if (wasControlled && !sessionStorage.getItem(resetKey)) {
+            sessionStorage.setItem(resetKey, '1');
+            window.location.reload();
+            return;
+          }
+
+          sessionStorage.removeItem(resetKey);
+        }
+
+        const script = document.createElement('script');
+        script.src = 'flutter_bootstrap.a35f1737e6ad.js';
+        script.async = true;
+        script.addEventListener('error', () => {
+          showError(new Error('No se pudo descargar el inicializador web.'));
+        });
+        document.body.appendChild(script);
+      };
+
+      start().catch(showError);
+    })();
+  </script>
 </body>
 </html>
