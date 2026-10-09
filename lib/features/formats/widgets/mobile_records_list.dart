@@ -24,6 +24,7 @@ class MobileRecordsList extends StatefulWidget {
   final MobileRecordTextBuilder textFor;
   final MobileRecordCellBuilder cellBuilder;
   final void Function(Map<String, dynamic> record)? onEdit;
+  final void Function(Map<String, dynamic> record)? onOpen;
   final bool selectionEnabled;
   final bool Function(Map<String, dynamic> record, int index)? isSelected;
   final void Function(Map<String, dynamic> record, int index, bool selected)?
@@ -39,6 +40,7 @@ class MobileRecordsList extends StatefulWidget {
     required this.textFor,
     required this.cellBuilder,
     this.onEdit,
+    this.onOpen,
     this.selectionEnabled = false,
     this.isSelected,
     this.onSelected,
@@ -152,7 +154,7 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
               decoration: BoxDecoration(
                 color: const Color(0xFFE8F3F5),
-                borderRadius: BorderRadius.circular(9),
+                borderRadius: BorderRadius.zero,
               ),
               child: const Row(
                 children: [
@@ -246,55 +248,59 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
         return Card(
           margin: const EdgeInsets.only(bottom: 10),
           color: selected ? const Color(0xFFE6F5EE) : null,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    CircleAvatar(
-                      radius: 16,
-                      child: Text('${widget.rowNumberOffset + index + 1}'),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        _primaryText(record),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
+          child: InkWell(
+            onTap: widget.onOpen == null ? null : () => widget.onOpen!(record),
+            child: Padding(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        child: Text('${widget.rowNumberOffset + index + 1}'),
                       ),
-                    ),
-                    if (widget.selectionEnabled)
-                      Checkbox(
-                        value: selected,
-                        onChanged: (value) => widget.onSelected
-                            ?.call(record, index, value == true),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _primaryText(record),
+                          style: const TextStyle(fontWeight: FontWeight.w800),
+                        ),
                       ),
-                    if (widget.onEdit != null)
-                      IconButton(
-                        tooltip: 'Editar',
-                        onPressed: () => widget.onEdit!(record),
-                        icon: const Icon(Icons.edit_outlined),
-                      ),
-                  ],
-                ),
-                const Divider(),
-                for (final column in widget.columns.take(8))
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 5),
-                    child: Text.rich(
-                      TextSpan(
-                        children: [
-                          TextSpan(
-                            text: '${widget.labelFor(column)}: ',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          TextSpan(text: widget.textFor(record, column)),
-                        ],
-                      ),
-                    ),
+                      if (widget.selectionEnabled)
+                        Checkbox(
+                          value: selected,
+                          onChanged: (value) => widget.onSelected
+                              ?.call(record, index, value == true),
+                        ),
+                      if (widget.onEdit != null)
+                        IconButton(
+                          tooltip: 'Editar',
+                          onPressed: () => widget.onEdit!(record),
+                          icon: const Icon(Icons.edit_outlined),
+                        ),
+                    ],
                   ),
-              ],
+                  const Divider(),
+                  for (final column in widget.columns.take(8))
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 5),
+                      child: Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${widget.labelFor(column)}: ',
+                              style:
+                                  const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            TextSpan(text: widget.textFor(record, column)),
+                          ],
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         );
@@ -322,7 +328,11 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
           ),
           title: Text(_primaryText(record)),
           subtitle: secondary.isEmpty ? null : Text(secondary),
-          onTap: widget.onEdit == null ? null : () => widget.onEdit!(record),
+          onTap: widget.onOpen != null
+              ? () => widget.onOpen!(record)
+              : widget.onEdit == null
+                  ? null
+                  : () => widget.onEdit!(record),
           trailing: widget.selectionEnabled
               ? Checkbox(
                   value: selected,
@@ -346,10 +356,7 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
   Widget _numberHeader() {
     return Container(
       height: _headerHeight,
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F5265),
-        borderRadius: BorderRadius.only(topLeft: Radius.circular(12)),
-      ),
+      color: const Color(0xFF0F5265),
       child: _headerCell('N°', _numberWidth, alignment: Alignment.center),
     );
   }
@@ -358,10 +365,7 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
     return Container(
       key: const Key('mobile-table-header'),
       height: _headerHeight,
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F5265),
-        borderRadius: BorderRadius.only(topRight: Radius.circular(12)),
-      ),
+      color: const Color(0xFF0F5265),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
@@ -449,49 +453,52 @@ class _MobileRecordsListState extends State<MobileRecordsList> {
     final record = widget.records[index];
     final number = widget.rowNumberOffset + index + 1;
     final selected = widget.isSelected?.call(record, index) ?? false;
-    return Container(
-      key: ValueKey('mobile-record-$number'),
-      height: _rowHeight,
-      color: _rowColor(index, selected),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (widget.selectionEnabled)
-            _dataCell(
-              Checkbox(
-                value: selected,
-                activeColor: const Color(0xFF0D5F78),
-                onChanged: widget.onSelected == null
-                    ? null
-                    : (value) => widget.onSelected!(
-                          record,
-                          index,
-                          value ?? false,
-                        ),
-              ),
-              _selectionWidth,
-              alignment: Alignment.center,
-            ),
-          for (final column in widget.columns)
-            _dataCell(
-              widget.cellBuilder(context, record, column),
-              _columnWidth,
-            ),
-          if (widget.onEdit != null)
-            _dataCell(
-              IconButton(
-                key: ValueKey('edit-record-$number'),
-                tooltip: 'Editar registro',
-                onPressed: () => widget.onEdit!(record),
-                icon: const Icon(
-                  Icons.edit_outlined,
-                  color: Color(0xFF176B87),
+    return InkWell(
+      onTap: widget.onOpen == null ? null : () => widget.onOpen!(record),
+      child: Container(
+        key: ValueKey('mobile-record-$number'),
+        height: _rowHeight,
+        color: _rowColor(index, selected),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (widget.selectionEnabled)
+              _dataCell(
+                Checkbox(
+                  value: selected,
+                  activeColor: const Color(0xFF0D5F78),
+                  onChanged: widget.onSelected == null
+                      ? null
+                      : (value) => widget.onSelected!(
+                            record,
+                            index,
+                            value ?? false,
+                          ),
                 ),
+                _selectionWidth,
+                alignment: Alignment.center,
               ),
-              _editWidth,
-              alignment: Alignment.center,
-            ),
-        ],
+            for (final column in widget.columns)
+              _dataCell(
+                widget.cellBuilder(context, record, column),
+                _columnWidth,
+              ),
+            if (widget.onEdit != null)
+              _dataCell(
+                IconButton(
+                  key: ValueKey('edit-record-$number'),
+                  tooltip: 'Editar registro',
+                  onPressed: () => widget.onEdit!(record),
+                  icon: const Icon(
+                    Icons.edit_outlined,
+                    color: Color(0xFF176B87),
+                  ),
+                ),
+                _editWidth,
+                alignment: Alignment.center,
+              ),
+          ],
+        ),
       ),
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart' hide ScaffoldMessenger;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/zumac_scaffold_messenger.dart';
+import 'erp_document_pdf.dart';
 
 List<Map<String, dynamic>> _erpRows(dynamic value) {
   if (value is! List) return const [];
@@ -50,7 +51,7 @@ InputDecoration _erpDecoration(String label, {IconData? icon}) =>
     InputDecoration(
       labelText: label,
       prefixIcon: icon == null ? null : Icon(icon),
-      border: const OutlineInputBorder(),
+      border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
       isDense: true,
     );
 
@@ -61,6 +62,26 @@ void _erpToast(BuildContext context, String message, {bool error = false}) {
       backgroundColor: error ? Colors.red.shade800 : Colors.green.shade800,
     ),
   );
+}
+
+Future<void> _erpOpenPdf(
+  BuildContext context,
+  SupabaseClient client,
+  String table,
+  Map<String, dynamic> row,
+) async {
+  try {
+    await ErpDocumentPdf.openOrGenerate(
+      context: context,
+      client: client,
+      table: table,
+      row: row,
+    );
+  } catch (error) {
+    if (context.mounted) {
+      _erpToast(context, _erpError(error), error: true);
+    }
+  }
 }
 
 class _ArticleSearch extends SearchDelegate<Map<String, dynamic>?> {
@@ -343,6 +364,23 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       appBar: AppBar(
         title: Text(_number.isEmpty ? 'Nueva Solicitud de Pedido' : _number),
         actions: [
+          if (_number.isNotEmpty &&
+              ErpDocumentPdf.canOpenOrGenerate(
+                  'ERP_SOLICITUDES_COMPRA_APPGT', _initial))
+            IconButton(
+              tooltip: _erpText(_initial['pdf_url']).isEmpty
+                  ? 'Generar PDF'
+                  : 'Ver PDF generado',
+              onPressed: _saving
+                  ? null
+                  : () => _erpOpenPdf(
+                        context,
+                        _client,
+                        'ERP_SOLICITUDES_COMPRA_APPGT',
+                        _initial,
+                      ),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
           if (_editable)
             IconButton(
               tooltip: 'Guardar',
@@ -765,6 +803,23 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
             ? 'Ingreso $_receiptNumber'
             : 'Ingreso por orden de compra'),
         actions: [
+          if (_readOnly &&
+              ErpDocumentPdf.canOpenOrGenerate(
+                  'ERP_INGRESOS_ALMACEN_APPGT', _initial))
+            IconButton(
+              tooltip: _erpText(_initial['pdf_url']).isEmpty
+                  ? 'Generar PDF'
+                  : 'Ver PDF generado',
+              onPressed: _saving
+                  ? null
+                  : () => _erpOpenPdf(
+                        context,
+                        _client,
+                        'ERP_INGRESOS_ALMACEN_APPGT',
+                        _initial,
+                      ),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
           if (!_readOnly)
             IconButton(
               tooltip: 'Confirmar ingreso',
@@ -1054,28 +1109,6 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
     }
   }
 
-  Future<void> _changeState(String next) async {
-    setState(() => _saving = true);
-    try {
-      await _client.rpc('erp_cambiar_estado_vale_despacho_v1', params: {
-        'p_vale_numero': _number,
-        'p_estado': next,
-      });
-      if (!mounted) return;
-      _erpToast(
-        context,
-        next == 'DESPACHADO'
-            ? 'Vale despachado; el stock fue actualizado.'
-            : 'Vale actualizado a $next.',
-      );
-      widget.onSavedAndExit?.call();
-    } catch (error) {
-      if (mounted) _erpToast(context, _erpError(error), error: true);
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   @override
   void dispose() {
     _date.dispose();
@@ -1096,31 +1129,28 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
       appBar: AppBar(
         title: Text(_number.isEmpty ? 'Nuevo Vale de Despacho' : _number),
         actions: [
+          if (_number.isNotEmpty &&
+              ErpDocumentPdf.canOpenOrGenerate(
+                  'ERP_VALES_DESPACHO_APPGT', _initial))
+            IconButton(
+              tooltip: _erpText(_initial['pdf_url']).isEmpty
+                  ? 'Generar PDF'
+                  : 'Ver PDF generado',
+              onPressed: _saving
+                  ? null
+                  : () => _erpOpenPdf(
+                        context,
+                        _client,
+                        'ERP_VALES_DESPACHO_APPGT',
+                        _initial,
+                      ),
+              icon: const Icon(Icons.picture_as_pdf_outlined),
+            ),
           if (_editable)
             IconButton(
               tooltip: 'Guardar',
               onPressed: _saving ? null : _save,
               icon: const Icon(Icons.save_outlined),
-            ),
-          if (_state == 'PENDIENTE')
-            TextButton(
-              onPressed: _saving ? null : () => _changeState('REVISADO'),
-              child: const Text('REVISAR'),
-            ),
-          if (_state == 'REVISADO')
-            TextButton(
-              onPressed: _saving ? null : () => _changeState('APROBADO'),
-              child: const Text('APROBAR'),
-            ),
-          if (_state == 'APROBADO')
-            TextButton(
-              onPressed: _saving ? null : () => _changeState('DESPACHADO'),
-              child: const Text('DESPACHAR'),
-            ),
-          if (_state == 'DESPACHADO')
-            TextButton(
-              onPressed: _saving ? null : () => _changeState('ANULADO'),
-              child: const Text('ANULAR'),
             ),
         ],
       ),

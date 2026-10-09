@@ -17,6 +17,7 @@ import '../../core/services/human_resources_rules.dart';
 import '../../core/services/soft_delete.dart';
 import '../../core/services/sync_service.dart';
 import '../../core/services/tareo_draft_policy.dart';
+import 'erp_purchase_order_page.dart';
 import 'erp_workflow_pages.dart';
 import 'form_runner_page.dart';
 
@@ -64,7 +65,7 @@ Future<void> _showAppGtAlert(
     context: context,
     barrierDismissible: false,
     builder: (dialogContext) => AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+      shape: const RoundedRectangleBorder(),
       titlePadding: const EdgeInsets.fromLTRB(24, 22, 24, 0),
       contentPadding: const EdgeInsets.fromLTRB(24, 14, 24, 8),
       actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
@@ -75,7 +76,7 @@ Future<void> _showAppGtAlert(
             height: 42,
             decoration: BoxDecoration(
               color: const Color(0xFFEAF3E6),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               border: Border.all(color: const Color(0xFF9CB693)),
             ),
             child: Icon(icon, color: const Color(0xFF31552F)),
@@ -99,8 +100,7 @@ Future<void> _showAppGtAlert(
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF31552F),
             foregroundColor: Colors.white,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            shape: const RoundedRectangleBorder(),
           ),
           onPressed: () => Navigator.of(dialogContext).pop(),
           child: const Text('Aceptar'),
@@ -151,7 +151,7 @@ class _ScannerFeedbackCard extends StatelessWidget {
         ),
         decoration: BoxDecoration(
           color: clear ? const Color(0xF21B7F3C) : const Color(0xF2B71C1C),
-          borderRadius: BorderRadius.circular(compact ? 18 : 22),
+          borderRadius: BorderRadius.zero,
           border: Border.all(color: Colors.white, width: 2),
           boxShadow: const [
             BoxShadow(
@@ -413,8 +413,7 @@ Future<Set<String>?> _showMissingAttendanceAlert(
             .where((worker) => !removedDnis.contains(worker['dni']))
             .toList();
         return AlertDialog(
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+          shape: const RoundedRectangleBorder(),
           title: Row(
             children: [
               Container(
@@ -422,7 +421,7 @@ Future<Set<String>?> _showMissingAttendanceAlert(
                 height: 42,
                 decoration: BoxDecoration(
                   color: const Color(0xFFEAF3E6),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.zero,
                   border: Border.all(color: const Color(0xFF9CB693)),
                 ),
                 child: const Icon(Icons.person_off_rounded,
@@ -496,8 +495,7 @@ Future<Set<String>?> _showMissingAttendanceAlert(
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF31552F),
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.zero),
               ),
               onPressed: () => Navigator.of(dialogContext)
                   .pop(Set<String>.from(removedDnis)),
@@ -568,6 +566,16 @@ Map<String, dynamic>? appGtSpecialFormatFallback(Map<String, dynamic> format) {
       'tipo_pantalla': 'tareo_personal',
       'activo': 1,
     };
+  }
+  const erpScreens = <String, String>{
+    'ERP_SOLICITUDES_COMPRA_APPGT': 'erp_solicitud_pedido',
+    'ERP_ORDENES_COMPRA_APPGT': 'erp_orden_compra',
+    'ERP_INGRESOS_ALMACEN_APPGT': 'erp_ingreso_compra',
+    'ERP_VALES_DESPACHO_APPGT': 'erp_vale_despacho',
+  };
+  final erpScreen = erpScreens[table];
+  if (erpScreen != null) {
+    return <String, dynamic>{'tipo_pantalla': erpScreen, 'activo': 1};
   }
   return null;
 }
@@ -667,6 +675,12 @@ class SpecialFormRouterPage extends StatelessWidget {
     }
     if (tipo == 'erp_solicitud_pedido') {
       return ErpPurchaseRequestPage(
+        initialPayload: initialPayload,
+        onSavedAndExit: onSavedAndExit,
+      );
+    }
+    if (tipo == 'erp_orden_compra') {
+      return ErpPurchaseOrderPage(
         initialPayload: initialPayload,
         onSavedAndExit: onSavedAndExit,
       );
@@ -1126,8 +1140,7 @@ class _SpecialMatrixHeader {
         builder: (dialogContext) => StatefulBuilder(
           builder: (context, setLocalState) => AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape: const RoundedRectangleBorder(),
             title: Text(_label(field).replaceAll(' *', '')),
             content: SizedBox(
               width: 430,
@@ -2885,7 +2898,7 @@ class _AsistenciaPersonalSpecialPageState
           constraints: const BoxConstraints(maxHeight: 190),
           decoration: BoxDecoration(
             color: const Color(0xFFF9FCFA),
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
             border: Border.all(color: const Color(0xFFD8E5DD)),
           ),
           child: ListView.separated(
@@ -3086,7 +3099,7 @@ class _AsistenciaPersonalSpecialPageState
           padding: const EdgeInsets.fromLTRB(14, 7, 5, 7),
           decoration: BoxDecoration(
             color: const Color(0xFFF8FBFA),
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.zero,
             border: Border.all(color: const Color(0xFFD8E5DD)),
           ),
           child: Row(
@@ -3452,7 +3465,7 @@ class _AttendanceWorkersPageState extends State<_AttendanceWorkersPage> {
                         return Container(
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(14),
+                            borderRadius: BorderRadius.zero,
                             border: Border.all(color: const Color(0xFFDDE7EC)),
                           ),
                           clipBehavior: Clip.antiAlias,
@@ -3698,7 +3711,7 @@ class _ContinuousScannerPageState extends State<_ContinuousScannerPage> {
                   height: 270,
                   decoration: BoxDecoration(
                     color: Colors.transparent,
-                    borderRadius: BorderRadius.circular(22),
+                    borderRadius: BorderRadius.zero,
                     border: Border.all(color: Colors.white, width: 3),
                   ),
                   child: feedback == null
@@ -4527,8 +4540,7 @@ class _TareoPersonalSpecialPageState extends State<TareoPersonalSpecialPage> {
           var filtered = List<String>.from(unique);
           return AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape: const RoundedRectangleBorder(),
             title: Text(title,
                 style: const TextStyle(
                     color: Color(0xFF0D5F78), fontWeight: FontWeight.w800)),
@@ -5755,7 +5767,7 @@ class _TareoWorkersPageState extends State<_TareoWorkersPage> {
               child: Container(
                 decoration: BoxDecoration(
                   color: Colors.white,
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.zero,
                   border: Border.all(color: const Color(0xFFDDE7EC)),
                 ),
                 clipBehavior: Clip.antiAlias,
@@ -6875,7 +6887,7 @@ class _PlagasEnfermedadesSpecialPageState
     Future<List<String>> Function()? onReloadValues,
   }) {
     return InkWell(
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.zero,
       onTap: () async {
         FocusScope.of(context).unfocus();
         var availableValues = List<String>.from(values);
@@ -7159,7 +7171,7 @@ class _PlagasEnfermedadesSpecialPageState
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
                 color: const Color(0xFFF1F4F6),
-                borderRadius: BorderRadius.circular(12)),
+                borderRadius: BorderRadius.zero),
             child:
                 Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(
@@ -7197,7 +7209,7 @@ class _PlagasEnfermedadesSpecialPageState
                             horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
                             border: Border.all(color: const Color(0xFF2B7180)),
-                            borderRadius: BorderRadius.circular(20)),
+                            borderRadius: BorderRadius.zero),
                         child: Text(estadio,
                             style: const TextStyle(
                                 fontSize: 12,

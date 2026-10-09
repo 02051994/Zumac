@@ -1440,6 +1440,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         fontSize == null ? 1.0 : (fontSize / baseBodySize).clamp(0.5, 4.0);
     final effectiveBorderColor = borderColor ?? baseTheme.colorScheme.outline;
     final border = OutlineInputBorder(
+        borderRadius: BorderRadius.zero,
         borderSide: BorderSide(
             color: effectiveBorderColor, width: borderColor == null ? 1 : 1.8));
 
@@ -1496,7 +1497,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
       duration: const Duration(milliseconds: 120),
       decoration: BoxDecoration(
         color: bgColor,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.zero,
         border: borderColor == null
             ? null
             : Border.all(color: borderColor, width: 1.8),
@@ -1593,7 +1594,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             .colorScheme
             .surfaceContainerHighest
             .withOpacity(0.45),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.zero,
       ),
       child: Text(text,
           style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -1939,7 +1940,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         mainAxisSize: MainAxisSize.min,
         children: [
           InkWell(
-            borderRadius: BorderRadius.circular(8),
+            borderRadius: BorderRadius.zero,
             onTap: () async {
               await _capturePhotoForField(campo);
               if (mounted) refreshSheet();
@@ -1949,15 +1950,15 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               height: 78,
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.black26),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.zero,
               ),
               child: bytes != null
                   ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.zero,
                       child: Image.memory(bytes, fit: BoxFit.cover))
                   : hasRemoteImage
                       ? ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
+                          borderRadius: BorderRadius.zero,
                           child: FutureBuilder<String>(
                             future: EvidenceStorage.signedUrlForValue(raw),
                             builder: (context, snapshot) {
@@ -2097,7 +2098,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                         padding: const EdgeInsets.only(bottom: 8),
                         child: ListTile(
                           shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
+                              borderRadius: BorderRadius.zero,
                               side: const BorderSide(color: Colors.black12)),
                           leading: Icon(completed >= entry.value.length
                               ? Icons.check_circle
@@ -3902,7 +3903,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               color: hasDocument
                   ? const Color(0xFFE8F5F2)
                   : const Color(0xFFF4F8F9),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               border: Border.all(
                 color: hasDocument
                     ? const Color(0xFF17806D)
@@ -4809,8 +4810,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
 
           return AlertDialog(
             backgroundColor: const Color(0xFFF4F8F7),
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+            shape: const RoundedRectangleBorder(),
             title: Row(
               children: [
                 const CircleAvatar(
@@ -4872,7 +4872,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                                         ? const Color(0xFFDDF1F4)
                                         : Colors.white,
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(12),
+                                      borderRadius: BorderRadius.zero,
                                       side: BorderSide(
                                         color: selected
                                             ? const Color(0xFF176B87)
@@ -5003,8 +5003,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         context: context,
         builder: (context) => AlertDialog(
           backgroundColor: const Color(0xFFF4F8F7),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+          shape: const RoundedRectangleBorder(),
           title: Row(
             children: [
               const CircleAvatar(
@@ -5043,7 +5042,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                         tileColor:
                             checked ? const Color(0xFFDDF1F4) : Colors.white,
                         shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          borderRadius: BorderRadius.zero,
                           side: BorderSide(
                             color: checked
                                 ? const Color(0xFF176B87)
@@ -5506,7 +5505,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
             constraints: const BoxConstraints(maxHeight: 190),
             decoration: BoxDecoration(
               color: const Color(0xFFF9FCFA),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               border: Border.all(color: const Color(0xFFD8E5DD)),
             ),
             child: ListView.separated(
@@ -6044,11 +6043,11 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
               margin: const EdgeInsets.only(bottom: 8),
               decoration: BoxDecoration(
                 border: Border.all(color: Colors.black26),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.zero,
               ),
               child: bytes != null
                   ? ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
+                      borderRadius: BorderRadius.zero,
                       child: Image.memory(bytes, fit: BoxFit.cover))
                   : Center(
                       child: Text(hasRemoteImage
@@ -6103,7 +6102,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
                 margin: const EdgeInsets.only(bottom: 8),
                 decoration: BoxDecoration(
                   border: Border.all(color: Colors.black26),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.zero,
                 ),
                 child:
                     Image.memory(signatureValues[campo]!, fit: BoxFit.contain),
@@ -6674,7 +6673,7 @@ class _SignatureDialogState extends State<SignatureDialog> {
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
       contentPadding: const EdgeInsets.fromLTRB(24, 6, 24, 16),
       actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      shape: const RoundedRectangleBorder(),
       title: Row(
         children: [
           Container(
@@ -6682,7 +6681,7 @@ class _SignatureDialogState extends State<SignatureDialog> {
             height: 42,
             decoration: BoxDecoration(
               color: const Color(0xFFE8F5F2),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
             ),
             child: const Icon(Icons.draw_outlined, color: Color(0xFF147A6E)),
           ),
@@ -6725,7 +6724,7 @@ class _SignatureDialogState extends State<SignatureDialog> {
                     : const Color(0xFFCBD5E1),
                 width: 1.4,
               ),
-              borderRadius: BorderRadius.circular(14),
+              borderRadius: BorderRadius.zero,
             ),
             child: LayoutBuilder(
               builder: (context, constraints) {

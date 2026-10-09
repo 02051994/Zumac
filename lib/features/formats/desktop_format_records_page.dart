@@ -33,6 +33,7 @@ import '../../core/widgets/configuration_icon_catalog.dart';
 import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
+import '../form_runner/erp_document_pdf.dart';
 import '../form_runner/special_form_pages.dart';
 import 'hr_record_document_pdf.dart';
 import 'payroll_slip_pdf.dart';
@@ -472,7 +473,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   bool get _canSelectRows =>
       canDelete ||
-      (_approvalsEnabled && (canReview || canApprove)) ||
+      (_approvalsEnabled && (canReview || canApprove || canUpdate)) ||
       _isTareoTable ||
       _isPayrollPeriodTable;
 
@@ -1552,9 +1553,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (fallback != null) special = [fallback];
       }
 
-      final validInternalTables = internalTables
-          .where((e) => _clean(e['tabla_destino']) != null)
-          .toList();
+      const embeddedErpDetails = {
+        'ERP_SOLICITUDES_COMPRA_DETALLE_APPGT',
+        'ERP_ORDENES_COMPRA_DETALLE_APPGT',
+        'ERP_INGRESOS_ALMACEN_DETALLE_APPGT',
+        'ERP_VALES_DESPACHO_DETALLE_APPGT',
+      };
+      final validInternalTables = internalTables.where((entry) {
+        final destination = _clean(entry['tabla_destino']);
+        if (destination == null) return false;
+        return !(_boolValue(entry['es_detalle']) &&
+            embeddedErpDetails.contains(destination.toUpperCase()));
+      }).toList();
       final selectedStillExists = selectedTableName != null &&
           validInternalTables
               .any((e) => _clean(e['tabla_destino']) == selectedTableName);
@@ -4466,37 +4476,88 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     );
   }
 
-  Widget _approvalToolbarButton({
-    required String state,
-    required IconData icon,
-    required String tooltip,
-  }) {
+  Widget _workflowToolbarMenu() {
     return ValueListenableBuilder<int>(
       valueListenable: _deleteSelectionVersion,
       builder: (context, _, __) {
-        final enabled = _selectedDeleteRows.isNotEmpty;
+        final hasSelection = _selectedDeleteRows.isNotEmpty;
+        final isDispatchVoucher =
+            _isNamedTable(tableName, 'ERP_VALES_DESPACHO_APPGT');
+        final mayReview = canReview;
+        final mayApprove = canApprove;
+        final mayDispatch = isDispatchVoucher && (canApprove || canUpdate);
+        final mayAnnul = canUpdate || canDelete;
+        final hasAccess = mayReview || mayApprove || mayDispatch || mayAnnul;
+        final icon = Container(
+          width: 34,
+          height: 34,
+          alignment: Alignment.center,
+          decoration: BoxDecoration(
+            color: hasAccess ? const Color(0xFF0D5F78) : Colors.grey.shade300,
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            Icons.check_circle,
+            size: 24,
+            color: hasAccess ? const Color(0xFF45C86B) : Colors.grey.shade500,
+          ),
+        );
         return SizedBox(
           width: 44,
           height: 44,
           child: Tooltip(
-            message: tooltip,
-            child: OutlinedButton(
-              onPressed:
-                  enabled ? () => _setSelectedApprovalState(state) : null,
-              style: OutlinedButton.styleFrom(
-                foregroundColor: const Color(0xFF147A6E),
-                backgroundColor:
-                    enabled ? const Color(0xFFF2FAF8) : Colors.white,
-                side: BorderSide(
-                    color: enabled
-                        ? const Color(0xFF147A6E)
-                        : Colors.grey.shade300),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-                padding: EdgeInsets.zero,
-              ),
-              child: Icon(icon),
-            ),
+            message: hasAccess
+                ? (hasSelection ? 'Estados del flujo' : 'Seleccione registros')
+                : 'Sin acceso',
+            child: hasAccess
+                ? PopupMenuButton<String>(
+                    tooltip: 'Estados del flujo',
+                    onSelected: _setSelectedWorkflowState,
+                    itemBuilder: (_) => [
+                      if (mayReview)
+                        PopupMenuItem(
+                          value: 'REVISADO',
+                          enabled: hasSelection,
+                          child: const ListTile(
+                            dense: true,
+                            leading: Icon(Icons.fact_check_outlined),
+                            title: Text('Revisar'),
+                          ),
+                        ),
+                      if (mayApprove)
+                        PopupMenuItem(
+                          value: 'APROBADO',
+                          enabled: hasSelection,
+                          child: const ListTile(
+                            dense: true,
+                            leading: Icon(Icons.verified_outlined),
+                            title: Text('Aprobar'),
+                          ),
+                        ),
+                      if (mayDispatch)
+                        PopupMenuItem(
+                          value: 'DESPACHADO',
+                          enabled: hasSelection,
+                          child: const ListTile(
+                            dense: true,
+                            leading: Icon(Icons.local_shipping_outlined),
+                            title: Text('Despachar'),
+                          ),
+                        ),
+                      if (mayAnnul)
+                        PopupMenuItem(
+                          value: 'ANULADO',
+                          enabled: hasSelection,
+                          child: const ListTile(
+                            dense: true,
+                            leading: Icon(Icons.block_outlined),
+                            title: Text('Anular'),
+                          ),
+                        ),
+                    ],
+                    child: icon,
+                  )
+                : IconButton(onPressed: null, icon: icon),
           ),
         );
       },
@@ -4855,10 +4916,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           await _exportRecords(value.substring('export:'.length));
         }
         if (value == 'review') {
-          await _setSelectedApprovalState('REVISADO');
+          await _setSelectedWorkflowState('REVISADO');
         }
         if (value == 'approve') {
-          await _setSelectedApprovalState('APROBADO');
+          await _setSelectedWorkflowState('APROBADO');
+        }
+        if (value == 'dispatch') {
+          await _setSelectedWorkflowState('DESPACHADO');
+        }
+        if (value == 'annul') {
+          await _setSelectedWorkflowState('ANULADO');
         }
         if (value == 'authorize_overtime') {
           await _authorizeSelectedOvertime();
@@ -4941,6 +5008,28 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               dense: true,
               leading: Icon(Icons.verified_outlined),
               title: Text('Marcar APROBADO'),
+            ),
+          ),
+        if (_approvalsEnabled &&
+            _isNamedTable(tableName, 'ERP_VALES_DESPACHO_APPGT') &&
+            (canApprove || canUpdate))
+          PopupMenuItem(
+            value: 'dispatch',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.local_shipping_outlined),
+              title: Text('Marcar DESPACHADO'),
+            ),
+          ),
+        if (_approvalsEnabled && (canUpdate || canDelete))
+          PopupMenuItem(
+            value: 'annul',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.block_outlined),
+              title: Text('Anular'),
             ),
           ),
         if (_isTareoTable && canApprove)
@@ -5720,7 +5809,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                     width: width,
                     height: constraints.maxHeight * 0.94,
                     child: ClipRRect(
-                      borderRadius: BorderRadius.circular(18),
+                      borderRadius: BorderRadius.zero,
                       child: Material(
                         elevation: 10,
                         color: Colors.white,
@@ -5767,6 +5856,183 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
   void _scheduleRenderRows(int totalRows) {
     // Desactivado: con paginación de 200 filas, repintar por bloques hacía lenta la UI.
+  }
+
+  ({String table, String foreignKey, String parentKey, String title})?
+      _erpDetailSpec() {
+    final table = _norm(tableName ?? '');
+    if (table == _norm('ERP_SOLICITUDES_COMPRA_APPGT')) {
+      return (
+        table: 'ERP_SOLICITUDES_COMPRA_DETALLE_APPGT',
+        foreignKey: 'solicitud_numero',
+        parentKey: 'numero',
+        title: 'Detalle de la solicitud de pedido',
+      );
+    }
+    if (table == _norm('ERP_ORDENES_COMPRA_APPGT')) {
+      return (
+        table: 'ERP_ORDENES_COMPRA_DETALLE_APPGT',
+        foreignKey: 'orden_numero',
+        parentKey: 'numero',
+        title: 'Detalle de la orden de compra',
+      );
+    }
+    if (table == _norm('ERP_INGRESOS_ALMACEN_APPGT')) {
+      return (
+        table: 'ERP_INGRESOS_ALMACEN_DETALLE_APPGT',
+        foreignKey: 'ingreso_numero',
+        parentKey: 'numero',
+        title: 'Detalle recibido',
+      );
+    }
+    if (table == _norm('ERP_VALES_DESPACHO_APPGT')) {
+      return (
+        table: 'ERP_VALES_DESPACHO_DETALLE_APPGT',
+        foreignKey: 'vale_numero',
+        parentKey: 'numero',
+        title: 'Detalle del vale de despacho',
+      );
+    }
+    return null;
+  }
+
+  bool get _hasEmbeddedErpDetail => _erpDetailSpec() != null;
+
+  Future<void> _showEmbeddedErpDetail(Map<String, dynamic> row) async {
+    final spec = _erpDetailSpec();
+    if (spec == null) return;
+    final parentValue = _value(row, [spec.parentKey])?.toString().trim() ?? '';
+    if (parentValue.isEmpty) return;
+    try {
+      final raw = await supabase
+          .from(spec.table)
+          .select()
+          .eq(spec.foreignKey, parentValue)
+          .eq('eliminado', false)
+          .order('linea');
+      final details = (raw as List)
+          .whereType<Map>()
+          .map((item) => Map<String, dynamic>.from(item))
+          .toList();
+      if (!mounted) return;
+      final technical = {
+        'ID',
+        'ID_LOCAL',
+        'EMPRESA_ID',
+        'CREATED_BY',
+        'UPDATED_BY',
+        'CREATED_AT',
+        'UPDATED_AT',
+        'DELETED_AT',
+        'ELIMINADO',
+        'ESTADO_SYNC',
+        'VERSION',
+      };
+      final columns = <String>[];
+      for (final detail in details) {
+        for (final key in detail.keys) {
+          if (!technical.contains(_norm(key)) && !columns.contains(key)) {
+            columns.add(key);
+          }
+        }
+      }
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          shape: const RoundedRectangleBorder(),
+          title: Text('${spec.title} · $parentValue'),
+          content: SizedBox(
+            width: math.min(MediaQuery.sizeOf(context).width * .88, 1180),
+            height: math.min(MediaQuery.sizeOf(context).height * .68, 620),
+            child: details.isEmpty
+                ? const Center(child: Text('No hay líneas registradas.'))
+                : Scrollbar(
+                    child: SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: SingleChildScrollView(
+                        child: DataTable(
+                          headingRowColor:
+                              WidgetStateProperty.all(const Color(0xFF42576B)),
+                          headingTextStyle: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w700,
+                          ),
+                          columns: columns
+                              .map((column) => DataColumn(
+                                  label: Text(_tableHeaderLabel(column))))
+                              .toList(),
+                          rows: details
+                              .map((detail) => DataRow(
+                                    cells: columns
+                                        .map((column) => DataCell(Text(
+                                              _displayCellValue(_valueByColumn(
+                                                  detail, column)),
+                                            )))
+                                        .toList(),
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    ),
+                  ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cerrar'),
+            ),
+          ],
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('No se pudo cargar el detalle: $error')),
+      );
+    }
+  }
+
+  bool get _isErpDocumentTable =>
+      ErpDocumentPdf.supports(tableName?.trim() ?? '');
+
+  Future<void> _openOrGenerateErpDocument(Map<String, dynamic> row) async {
+    final table = tableName?.trim() ?? '';
+    if (!ErpDocumentPdf.supports(table)) return;
+    try {
+      await ErpDocumentPdf.openOrGenerate(
+        context: context,
+        client: supabase,
+        table: table,
+        row: row,
+      );
+      if (mounted) await _load();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Bad state: ', '')),
+        ),
+      );
+    }
+  }
+
+  Widget _erpPdfCell(Map<String, dynamic> row) {
+    final stored =
+        _value(row, const ['pdf_url', 'PDF_URL'])?.toString().trim() ?? '';
+    final allowed = stored.isNotEmpty ||
+        ErpDocumentPdf.mayGenerate(tableName?.trim() ?? '', row);
+    return Tooltip(
+      message: allowed
+          ? (stored.isEmpty ? 'Generar PDF' : 'Ver PDF generado')
+          : 'Disponible desde APROBADO',
+      child: IconButton(
+        onPressed: allowed ? () => _openOrGenerateErpDocument(row) : null,
+        icon: Icon(
+          stored.isEmpty ? Icons.picture_as_pdf_outlined : Icons.picture_as_pdf,
+          color: allowed ? const Color(0xFFC62828) : Colors.grey,
+        ),
+      ),
+    );
   }
 
   bool _isMediaColumn(String column) {
@@ -7707,7 +7973,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   width: width,
                   height: constraints.maxHeight * 0.94,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(18),
+                    borderRadius: BorderRadius.zero,
                     child: Material(
                       elevation: 10,
                       color: Colors.white,
@@ -7876,10 +8142,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return 'ESTADO_APROBACION';
   }
 
-  Future<void> _setSelectedApprovalState(String nextState) async {
+  Future<void> _setSelectedWorkflowState(String nextState) async {
     final table = tableName;
     final desired = nextState.trim().toUpperCase();
-    final allowed = desired == 'REVISADO' ? canReview : canApprove;
+    final allowed = switch (desired) {
+      'REVISADO' => canReview,
+      'APROBADO' => canApprove,
+      'DESPACHADO' => _isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT') &&
+          (canApprove || canUpdate),
+      'ANULADO' => canUpdate || canDelete,
+      _ => false,
+    };
     if (!_approvalsEnabled ||
         !allowed ||
         table == null ||
@@ -7892,21 +8165,33 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final row in _selectedDeleteRows.values) {
       final column = _approvalColumnForRow(row);
       final current = row[column]?.toString().trim().toUpperCase() ?? '';
-      if (desired == 'APROBADO') {
-        if (current == 'REVISADO' && _workflowStateAllows(row, 'update')) {
-          eligible.add(row);
-        }
-      } else if (current == 'PENDIENTE' &&
-          _workflowStateAllows(row, 'update')) {
+      final stateAllowed = _workflowStateAllows(row, 'update');
+      final validTransition = switch (desired) {
+        'REVISADO' => current == 'PENDIENTE' && stateAllowed,
+        'APROBADO' => current == 'REVISADO' && stateAllowed,
+        'DESPACHADO' => current == 'APROBADO' && stateAllowed,
+        'ANULADO' => _isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT')
+            ? current != 'ANULADO'
+            : const {'PENDIENTE', 'REVISADO', 'APROBADO'}.contains(current),
+        _ => false,
+      };
+      if (validTransition) {
         eligible.add(row);
       }
     }
     if (eligible.isEmpty) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text(desired == 'APROBADO'
-            ? 'Para aprobar, seleccione registros que ya estén REVISADOS.'
-            : 'Para revisar, seleccione registros en estado PENDIENTE.'),
+        content: Text(switch (desired) {
+          'APROBADO' =>
+            'Para aprobar, seleccione registros que ya estén REVISADOS.',
+          'REVISADO' =>
+            'Para revisar, seleccione registros en estado PENDIENTE.',
+          'DESPACHADO' =>
+            'Para despachar, seleccione vales en estado APROBADO.',
+          'ANULADO' => 'La selección no contiene registros anulables.',
+          _ => 'No hay registros elegibles para esta transición.',
+        }),
       ));
       return;
     }
@@ -7914,8 +8199,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text(
-            desired == 'APROBADO' ? 'Aprobar registros' : 'Revisar registros'),
+        shape: const RoundedRectangleBorder(),
+        title: Text(switch (desired) {
+          'APROBADO' => 'Aprobar registros',
+          'REVISADO' => 'Revisar registros',
+          'DESPACHADO' => 'Despachar vales',
+          'ANULADO' => 'Anular registros',
+          _ => 'Actualizar registros',
+        }),
         content: Text(
             'Se marcarán ${eligible.length} registro(s) como $desired. ¿Continuar?'),
         actions: [
@@ -7925,7 +8216,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: Text(desired == 'APROBADO' ? 'Aprobar' : 'Revisar'),
+            child: Text(switch (desired) {
+              'APROBADO' => 'Aprobar',
+              'REVISADO' => 'Revisar',
+              'DESPACHADO' => 'Despachar',
+              'ANULADO' => 'Anular',
+              _ => 'Continuar',
+            }),
           ),
         ],
       ),
@@ -7934,12 +8231,23 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
 
     try {
       for (final row in eligible) {
-        final pkColumn = _primaryKeyColumn(row);
-        if (pkColumn == null) continue;
-        final column = _approvalColumnForRow(row);
-        await supabase
-            .from(table)
-            .update({column: desired}).eq(pkColumn, row[pkColumn]);
+        if (_isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT')) {
+          final number =
+              _value(row, const ['numero', 'NUMERO'])?.toString().trim() ?? '';
+          if (number.isNotEmpty) {
+            await supabase.rpc('erp_cambiar_estado_vale_despacho_v1', params: {
+              'p_vale_numero': number,
+              'p_estado': desired,
+            });
+          }
+        } else {
+          final pkColumn = _primaryKeyColumn(row);
+          if (pkColumn == null) continue;
+          final column = _approvalColumnForRow(row);
+          await supabase
+              .from(table)
+              .update({column: desired}).eq(pkColumn, row[pkColumn]);
+        }
       }
       _selectedDeleteRowKeys.clear();
       _selectedDeleteRows.clear();
@@ -8218,6 +8526,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final fmt = _tableCellFormat(column, r);
       if (_isHumanResourcesDocumentColumn(column)) {
         child = _humanResourcesStoredDocumentButton(r, column);
+      } else if (_isErpDocumentTable && _norm(column) == 'PDF_URL') {
+        child = _erpPdfCell(r);
       } else if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
         child = Tooltip(
           message: text.isEmpty
@@ -8342,12 +8652,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       return RepaintBoundary(
         child: Container(
           color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
-          child: Row(
-            children: [
-              if (_canSelectRows) deleteCell(r, index),
-              if (canUpdate) editCell(r),
-              ...allColumns.map((c) => rowCell(r, index, c)),
-            ],
+          child: InkWell(
+            onTap:
+                _hasEmbeddedErpDetail ? () => _showEmbeddedErpDetail(r) : null,
+            child: Row(
+              children: [
+                if (_canSelectRows) deleteCell(r, index),
+                if (canUpdate) editCell(r),
+                ...allColumns.map((c) => rowCell(r, index, c)),
+              ],
+            ),
           ),
         ),
       );
@@ -8388,12 +8702,17 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             return RepaintBoundary(
               child: Container(
                 color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
-                child: Row(
-                  children: [
-                    if (_canSelectRows) deleteCell(r, index),
-                    if (canUpdate) editCell(r),
-                    ...pinned.map((c) => rowCell(r, index, c)),
-                  ],
+                child: InkWell(
+                  onTap: _hasEmbeddedErpDetail
+                      ? () => _showEmbeddedErpDetail(r)
+                      : null,
+                  child: Row(
+                    children: [
+                      if (_canSelectRows) deleteCell(r, index),
+                      if (canUpdate) editCell(r),
+                      ...pinned.map((c) => rowCell(r, index, c)),
+                    ],
+                  ),
                 ),
               ),
             );
@@ -8411,9 +8730,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             return RepaintBoundary(
               child: Container(
                 color: highlighted ? const Color(0xFFE8F4F8) : Colors.white,
-                child: Row(
-                    children:
-                        unpinned.map((c) => rowCell(r, index, c)).toList()),
+                child: InkWell(
+                  onTap: _hasEmbeddedErpDetail
+                      ? () => _showEmbeddedErpDetail(r)
+                      : null,
+                  child: Row(
+                      children:
+                          unpinned.map((c) => rowCell(r, index, c)).toList()),
+                ),
               ),
             );
           }
@@ -9260,20 +9584,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                   ),
                   const SizedBox(width: 10),
                 ],
-                if (_approvalsEnabled && canReview) ...[
-                  _approvalToolbarButton(
-                    state: 'REVISADO',
-                    icon: Icons.fact_check_outlined,
-                    tooltip: 'Marcar seleccionados como REVISADO',
-                  ),
-                  const SizedBox(width: 10),
-                ],
-                if (_approvalsEnabled && canApprove) ...[
-                  _approvalToolbarButton(
-                    state: 'APROBADO',
-                    icon: Icons.verified_outlined,
-                    tooltip: 'Marcar seleccionados como APROBADO',
-                  ),
+                if (_approvalsEnabled) ...[
+                  _workflowToolbarMenu(),
                   const SizedBox(width: 10),
                 ],
                 if (_isTareoTable && canApprove) ...[
@@ -9447,6 +9759,12 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         return Align(
           alignment: Alignment.centerLeft,
           child: _humanResourcesStoredDocumentButton(row, column),
+        );
+      }
+      if (_isErpDocumentTable && _norm(column) == 'PDF_URL') {
+        return Align(
+          alignment: Alignment.centerLeft,
+          child: _erpPdfCell(row),
         );
       }
       if (_isPayrollSlipTable && _norm(column) == 'PDF_URL') {
@@ -9633,6 +9951,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                                             cellBuilder: mobileCell,
                                             onEdit: canUpdate
                                                 ? _editRemoteRecord
+                                                : null,
+                                            onOpen: _hasEmbeddedErpDetail
+                                                ? _showEmbeddedErpDetail
                                                 : null,
                                             selectionEnabled: _canSelectRows,
                                             isSelected: (row, index) =>

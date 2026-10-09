@@ -50,9 +50,7 @@ class _AppGTState extends State<AppGT> {
         final scale = (width / 1440).clamp(1.0, 1.12).toDouble();
         final controlHeight = (44 * scale).clamp(44.0, 50.0).toDouble();
         final base = Theme.of(context);
-        final radius = RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        );
+        const radius = RoundedRectangleBorder();
         return Theme(
           data: base.copyWith(
             textTheme: base.textTheme.apply(fontSizeFactor: scale),
@@ -81,6 +79,15 @@ class _AppGTState extends State<AppGT> {
                 minimumSize: Size.square(width < 600 ? 44 : 46),
               ),
             ),
+            cardTheme: base.cardTheme.copyWith(
+              shape: const RoundedRectangleBorder(),
+            ),
+            dialogTheme: base.dialogTheme.copyWith(
+              shape: const RoundedRectangleBorder(),
+            ),
+            popupMenuTheme: base.popupMenuTheme.copyWith(
+              shape: const RoundedRectangleBorder(),
+            ),
           ),
           child: _AppInteractionScope(
             child: SelectionArea(
@@ -107,8 +114,7 @@ class _AppGTState extends State<AppGT> {
           style: FilledButton.styleFrom(
             backgroundColor: const Color(0xFF0D5F78),
             foregroundColor: Colors.white,
-            shape:
-                RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            shape: const RoundedRectangleBorder(),
           ),
         ),
         inputDecorationTheme: InputDecorationTheme(
@@ -117,16 +123,16 @@ class _AppGTState extends State<AppGT> {
           fillColor: const Color(0xFFFCFEFE),
           contentPadding:
               const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
-          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+          border: const OutlineInputBorder(borderRadius: BorderRadius.zero),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
             borderSide: const BorderSide(color: Color(0xFF6FA6B4), width: 1.2),
           ),
           focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.zero,
               borderSide: const BorderSide(color: Color(0xFF0D5F78), width: 2)),
           disabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.zero,
             borderSide: const BorderSide(color: Color(0xFFC9D9DE)),
           ),
           labelStyle: const TextStyle(color: Color(0xFF496977)),
