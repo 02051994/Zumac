@@ -71,6 +71,14 @@ class _PurchaseOrderLine {
     return qty * unitPrice * (1 - discount.clamp(0, 100).toDouble() / 100);
   }
 
+  double get grossAmount {
+    final qty = double.tryParse(quantity.text.replaceAll(',', '.')) ?? 0;
+    final unitPrice = double.tryParse(price.text.replaceAll(',', '.')) ?? 0;
+    return qty * unitPrice;
+  }
+
+  double get discountAmount => grossAmount - amount;
+
   Map<String, dynamic> toJson() => {
         'solicitud_numero': requestNumber,
         'solicitud_linea': requestLine,
@@ -116,6 +124,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
   final _client = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
   final _scrollController = ScrollController();
+  final _detailHorizontalController = ScrollController();
   late final TextEditingController _issueDate;
   late final TextEditingController _deliveryDate;
   late final TextEditingController _exchangeRate;
@@ -143,6 +152,10 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
 
   double get _itemsAmount =>
       _lines.fold<double>(0, (sum, line) => sum + line.amount);
+  double get _grossItemsAmount =>
+      _lines.fold<double>(0, (sum, line) => sum + line.grossAmount);
+  double get _lineDiscountValue =>
+      _lines.fold<double>(0, (sum, line) => sum + line.discountAmount);
   double get _discountValue =>
       (double.tryParse(_discount.text.replaceAll(',', '.')) ?? 0)
           .clamp(0, double.infinity)
@@ -175,9 +188,16 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       text: _text(_initial['observacion'] ?? _initial['OBSERVACION']),
     );
     _discount = TextEditingController(
-      text: _text(_initial['descuento'] ?? _initial['DESCUENTO']).isEmpty
+      text: _text(_initial['otros_descuentos'] ??
+                  _initial['OTROS_DESCUENTOS'] ??
+                  _initial['descuento'] ??
+                  _initial['DESCUENTO'])
+              .isEmpty
           ? '0'
-          : _text(_initial['descuento'] ?? _initial['DESCUENTO']),
+          : _text(_initial['otros_descuentos'] ??
+              _initial['OTROS_DESCUENTOS'] ??
+              _initial['descuento'] ??
+              _initial['DESCUENTO']),
     );
     _provider =
         _nullable(_initial['proveedor_codigo'] ?? _initial['PROVEEDOR_CODIGO']);
@@ -386,8 +406,18 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
     });
   }
 
+  void _removeLine(int index) {
+    setState(() {
+      final requestNumber = _lines[index].requestNumber;
+      _lines.removeAt(index).dispose();
+      if (!_lines.any((line) => line.requestNumber == requestNumber)) {
+        _requestNumbers.remove(requestNumber);
+      }
+    });
+  }
+
   Future<void> _save() async {
-    if (!_editable || !_formKey.currentState!.validate()) return;
+    if (_saving || !_editable || !_formKey.currentState!.validate()) return;
     if (_requestNumbers.isEmpty || _lines.isEmpty) {
       _toast('Agregue al menos una solicitud aprobada.', error: true);
       return;
@@ -424,11 +454,20 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       final result = raw is Map ? Map<String, dynamic>.from(raw) : const {};
       if (!mounted) return;
       _toast('Orden ${result['codigo'] ?? _code} guardada correctamente.');
-      widget.onSavedAndExit?.call();
+      _finishAfterSave();
     } catch (error) {
       if (mounted) _toast('No se pudo guardar la orden: $error', error: true);
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  void _finishAfterSave() {
+    final callback = widget.onSavedAndExit;
+    if (callback != null) {
+      callback();
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
     }
   }
 
@@ -533,8 +572,10 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
         border: Border.all(color: const Color(0xFF607D8B)),
       ),
       child: Column(children: [
-        line('Importe bruto', _totals.importeBruto),
-        line('Descuento', _discountValue),
+        line('Importe de ítems', _grossItemsAmount),
+        line('Dctos. por ítem', _lineDiscountValue),
+        line('Otros Dctos.', _discountValue),
+        line('Descuento total', _lineDiscountValue + _discountValue),
         line('Subtotal', _totals.subtotal),
         line('Impuesto (IGV)', _totals.impuesto),
         const Divider(),
@@ -599,54 +640,69 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       );
     }
 
+    double lineTax(_PurchaseOrderLine line) => _includesIgv
+        ? (line.amount == 0 ? 0 : line.amount - (line.amount / 1.18))
+        : line.amount * .18;
+    double lineTotal(_PurchaseOrderLine line) =>
+        _includesIgv ? line.amount : line.amount + lineTax(line);
+
     return Scrollbar(
+      controller: _detailHorizontalController,
+      thumbVisibility: true,
+      trackVisibility: true,
+      scrollbarOrientation: ScrollbarOrientation.bottom,
+      notificationPredicate: (notification) =>
+          notification.metrics.axis == Axis.horizontal,
       child: SingleChildScrollView(
+        controller: _detailHorizontalController,
         scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(bottom: 14),
         child: DataTable(
           headingRowColor: WidgetStateProperty.all(const Color(0xFF42576B)),
           headingTextStyle:
               const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
           columns: const [
             DataColumn(label: Text('Solicitud')),
-            DataColumn(label: Text('Fecha solicitada')),
-            DataColumn(label: Text('Código')),
+            DataColumn(label: Text('Artículo código')),
             DataColumn(label: Text('Descripción')),
-            DataColumn(label: Text('Unidad')),
-            DataColumn(label: Text('Almacén')),
             DataColumn(label: Text('Cant. solicitada')),
-            DataColumn(label: Text('Cant. OC')),
-            DataColumn(label: Text('Cant. recibida')),
-            DataColumn(label: Text('Fecha OC aprobada')),
-            DataColumn(label: Text('Fecha recibida')),
-            DataColumn(label: Text('Precio')),
-            DataColumn(label: Text('% Dcto.')),
+            DataColumn(label: Text('Cantidad')),
+            DataColumn(label: Text('Unidad de medida')),
+            DataColumn(label: Text('Almacén')),
+            DataColumn(label: Text('Precio unitario')),
+            DataColumn(label: Text('Descuento %')),
             DataColumn(label: Text('Importe')),
+            DataColumn(label: Text('Subtotal')),
+            DataColumn(label: Text('Impuesto')),
+            DataColumn(label: Text('Total')),
+            DataColumn(label: Text('')),
           ],
-          rows: _lines
-              .map((line) => DataRow(cells: [
-                    DataCell(Text(line.requestNumber)),
-                    DataCell(Text(line.requestedDate.isEmpty
-                        ? 'Pendiente'
-                        : line.requestedDate)),
-                    DataCell(input(line.articleCode, width: 130)),
-                    DataCell(input(line.description, width: 260)),
-                    DataCell(input(line.unit, width: 90)),
-                    DataCell(warehouseInput(line)),
-                    DataCell(Text(line.requestedQuantity.toStringAsFixed(2))),
-                    DataCell(input(line.quantity, numeric: true)),
-                    DataCell(Text(line.receivedQuantity.toStringAsFixed(2))),
-                    DataCell(Text(line.approvedDate.isEmpty
-                        ? 'Pendiente'
-                        : line.approvedDate)),
-                    DataCell(Text(line.receivedDate.isEmpty
-                        ? 'Pendiente'
-                        : line.receivedDate)),
-                    DataCell(input(line.price, numeric: true)),
-                    DataCell(
-                        input(line.discountPercent, width: 90, numeric: true)),
-                    DataCell(Text(line.amount.toStringAsFixed(2))),
-                  ]))
-              .toList(),
+          rows: _lines.asMap().entries.map((entry) {
+            final index = entry.key;
+            final line = entry.value;
+            return DataRow(cells: [
+              DataCell(Text(line.requestNumber)),
+              DataCell(input(line.articleCode, width: 130)),
+              DataCell(input(line.description, width: 260)),
+              DataCell(Text(line.requestedQuantity.toStringAsFixed(2))),
+              DataCell(input(line.quantity, numeric: true)),
+              DataCell(input(line.unit, width: 90)),
+              DataCell(warehouseInput(line)),
+              DataCell(input(line.price, numeric: true)),
+              DataCell(input(line.discountPercent, width: 90, numeric: true)),
+              DataCell(Text(line.grossAmount.toStringAsFixed(2))),
+              DataCell(Text(line.amount.toStringAsFixed(2))),
+              DataCell(Text(lineTax(line).toStringAsFixed(2))),
+              DataCell(Text(lineTotal(line).toStringAsFixed(2))),
+              DataCell(_editable
+                  ? IconButton(
+                      tooltip: 'Quitar fila',
+                      onPressed: () => _removeLine(index),
+                      icon: const Icon(Icons.close, color: Colors.red),
+                    )
+                  : const SizedBox.shrink()),
+            ]);
+          }).toList(),
         ),
       ),
     );
@@ -668,6 +724,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       line.dispose();
     }
     _scrollController.dispose();
+    _detailHorizontalController.dispose();
     super.dispose();
   }
 
@@ -737,8 +794,21 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                             '${row['ruc'] ?? ''} · ${row['razon_social']}',
                         onChanged: (value) => setState(() => _provider = value),
                       ),
+                      _field(_paymentTerms, 'Condición de pago'),
+                      _catalogDropdown(
+                        label: 'Almacén',
+                        value: _warehouse,
+                        rows: _warehouses,
+                        labelBuilder: (row) =>
+                            '${row['codigo']} · ${row['nombre']}',
+                        onChanged: (value) =>
+                            setState(() => _warehouse = value),
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
                       _dateField(_issueDate, 'Fecha de emisión'),
-                      _dateField(_deliveryDate, 'Fecha de entrega'),
+                      _dateField(_deliveryDate, 'Fecha de entrega programada'),
                       SizedBox(
                         width: 140,
                         child: DropdownButtonFormField<String>(
@@ -760,24 +830,6 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                           required: true,
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true)),
-                      const SizedBox(
-                        width: 250,
-                        child: Text(
-                          'Tipo de cambio: valor en soles (PEN) de 1 unidad de la moneda seleccionada. Para PEN use 1.',
-                          style:
-                              TextStyle(fontSize: 12, color: Colors.blueGrey),
-                        ),
-                      ),
-                      _field(_paymentTerms, 'Condición de pago'),
-                      _catalogDropdown(
-                        label: 'Almacén',
-                        value: _warehouse,
-                        rows: _warehouses,
-                        labelBuilder: (row) =>
-                            '${row['codigo']} · ${row['nombre']}',
-                        onChanged: (value) =>
-                            setState(() => _warehouse = value),
-                      ),
                     ]),
                     const SizedBox(height: 12),
                     TextFormField(
@@ -799,7 +851,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                       const SizedBox(width: 18),
                       _field(
                         _discount,
-                        'Descuento',
+                        'Otros Dctos.',
                         width: 180,
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),

@@ -5882,7 +5882,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         table: 'ERP_INGRESOS_ALMACEN_DETALLE_APPGT',
         foreignKey: 'ingreso_numero',
         parentKey: 'numero',
-        title: 'Detalle recibido',
+        title: 'Detalle de Ingresos en Almacén',
       );
     }
     if (table == _norm('ERP_VALES_DESPACHO_APPGT')) {
@@ -5903,6 +5903,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (spec == null) return;
     final parentValue = _value(row, [spec.parentKey])?.toString().trim() ?? '';
     if (parentValue.isEmpty) return;
+    final horizontalController = ScrollController();
+    final verticalController = ScrollController();
     try {
       final raw = await supabase
           .from(spec.table)
@@ -5947,30 +5949,45 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             child: details.isEmpty
                 ? const Center(child: Text('No hay líneas registradas.'))
                 : Scrollbar(
+                    controller: verticalController,
+                    thumbVisibility: true,
+                    trackVisibility: true,
                     child: SingleChildScrollView(
-                      scrollDirection: Axis.horizontal,
-                      child: SingleChildScrollView(
-                        child: DataTable(
-                          headingRowColor:
-                              WidgetStateProperty.all(const Color(0xFF42576B)),
-                          headingTextStyle: const TextStyle(
-                            color: Colors.white,
-                            fontWeight: FontWeight.w700,
+                      controller: verticalController,
+                      child: Scrollbar(
+                        controller: horizontalController,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        notificationPredicate: (notification) =>
+                            notification.metrics.axis == Axis.horizontal,
+                        child: SingleChildScrollView(
+                          controller: horizontalController,
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.only(bottom: 16),
+                          child: DataTable(
+                            headingRowColor: WidgetStateProperty.all(
+                                const Color(0xFF42576B)),
+                            headingTextStyle: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            columns: columns
+                                .map((column) => DataColumn(
+                                    label: Text(_tableHeaderLabel(column))))
+                                .toList(),
+                            rows: details
+                                .map((detail) => DataRow(
+                                      cells: columns
+                                          .map((column) => DataCell(Text(
+                                                _displayCellValue(
+                                                    _valueByColumn(
+                                                        detail, column)),
+                                              )))
+                                          .toList(),
+                                    ))
+                                .toList(),
                           ),
-                          columns: columns
-                              .map((column) => DataColumn(
-                                  label: Text(_tableHeaderLabel(column))))
-                              .toList(),
-                          rows: details
-                              .map((detail) => DataRow(
-                                    cells: columns
-                                        .map((column) => DataCell(Text(
-                                              _displayCellValue(_valueByColumn(
-                                                  detail, column)),
-                                            )))
-                                        .toList(),
-                                  ))
-                              .toList(),
                         ),
                       ),
                     ),
@@ -5989,6 +6006,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo cargar el detalle: $error')),
       );
+    } finally {
+      horizontalController.dispose();
+      verticalController.dispose();
     }
   }
 

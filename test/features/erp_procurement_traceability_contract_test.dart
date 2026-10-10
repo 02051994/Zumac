@@ -44,8 +44,10 @@ void main() {
   test('centro de costo del vale se conserva por artículo', () {
     expect(
       migration,
-      contains(
-        'ERP_VALES_DESPACHO_DETALLE_APPGT"\n  add column if not exists centro_costo',
+      matches(
+        RegExp(
+          r'ERP_VALES_DESPACHO_DETALLE_APPGT"\s+add column if not exists centro_costo',
+        ),
       ),
     );
     expect(migration, contains("v_item->>'centro_costo'"));

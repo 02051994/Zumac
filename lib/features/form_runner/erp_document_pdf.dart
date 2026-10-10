@@ -19,7 +19,7 @@ class ErpDocumentPdf {
   static const _titles = <String, String>{
     'ERP_SOLICITUDES_COMPRA_APPGT': 'SOLICITUD DE PEDIDO',
     'ERP_ORDENES_COMPRA_APPGT': 'ORDEN DE COMPRA',
-    'ERP_INGRESOS_ALMACEN_APPGT': 'INGRESO SEGUN ORDEN DE COMPRA',
+    'ERP_INGRESOS_ALMACEN_APPGT': 'INGRESO EN ALMACÉN',
     'ERP_VALES_DESPACHO_APPGT': 'VALE DE DESPACHO',
   };
 
@@ -337,7 +337,6 @@ class ErpDocumentPdf {
         ('Fecha de necesidad', _date(row, 'fecha_necesidad')),
         ('Solicitante', _value(row, 'solicitante')),
         ('Área', _value(row, 'area')),
-        ('Centro de costo', _value(row, 'centro_costo')),
       ]);
     } else if (table == 'ERP_ORDENES_COMPRA_APPGT') {
       values.addAll([
@@ -347,7 +346,7 @@ class ErpDocumentPdf {
         ('Teléfono', _value(provider, 'telefono')),
         ('Correo', _value(provider, 'email')),
         ('Fecha de emisión', _date(row, 'fecha_emision')),
-        ('Fecha de entrega', _date(row, 'fecha_entrega')),
+        ('Fecha de entrega programada', _date(row, 'fecha_entrega')),
         ('Forma de pago', _value(row, 'condicion_pago')),
         ('Moneda', _value(row, 'moneda')),
         ('Almacén', _value(row, 'almacen_codigo')),
@@ -360,6 +359,7 @@ class ErpDocumentPdf {
         ('RUC', _value(row, 'proveedor_ruc')),
         ('Almacén', _value(row, 'almacen_codigo')),
         ('Guía de remisión', _value(row, 'guia_remision')),
+        ('Usuario', _value(row, 'usuario')),
       ]);
     } else {
       values.addAll([
@@ -424,7 +424,10 @@ class ErpDocumentPdf {
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
           ('Cantidad', 'cantidad_solicitada'),
+          ('Precio unitario', 'precio_unitario'),
+          ('Total', 'total'),
           ('Recibido', 'cantidad_recibida'),
+          ('Estado recibido', 'estado_de_recibido'),
           ('OC aprobada', 'fecha_oc_aprobada'),
           ('Recibida', 'fecha_recibida'),
           ('Fecha requerida', 'fecha_necesidad'),
@@ -458,7 +461,12 @@ class ErpDocumentPdf {
   static pw.Widget _purchaseTotals(Map<String, dynamic> row) {
     final money = <(String, String)>[
       ('Importe bruto', _money(row, 'importe_bruto')),
-      ('Descuento', _money(row, 'descuento')),
+      (
+        'Otros Dctos.',
+        _value(row, 'otros_descuentos').isEmpty
+            ? _money(row, 'descuento')
+            : _money(row, 'otros_descuentos')
+      ),
       ('Subtotal', _money(row, 'subtotal')),
       ('IGV', _money(row, 'impuesto')),
       ('Total', _money(row, 'total')),
