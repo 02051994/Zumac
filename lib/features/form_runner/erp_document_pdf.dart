@@ -172,8 +172,7 @@ class ErpDocumentPdf {
     if (providerCode.isNotEmpty) {
       final raw = await client
           .from('ERP_PROVEEDORES_APPGT')
-          .select(
-              'codigo,razon_social,numero_documento,direccion,telefono,email,contacto')
+          .select('codigo,razon_social,ruc,direccion,telefono,email,contacto')
           .eq('codigo', providerCode)
           .maybeSingle();
       if (raw != null) provider = Map<String, dynamic>.from(raw);
@@ -343,8 +342,8 @@ class ErpDocumentPdf {
     } else if (table == 'ERP_ORDENES_COMPRA_APPGT') {
       values.addAll([
         ('Proveedor', _value(provider, 'razon_social')),
-        ('RUC', _value(provider, 'numero_documento')),
-        ('Dirección', _value(provider, 'direccion')),
+        ('RUC', _value(provider, 'ruc')),
+        ('Domicilio fiscal', _value(provider, 'direccion')),
         ('Teléfono', _value(provider, 'telefono')),
         ('Correo', _value(provider, 'email')),
         ('Fecha de emisión', _date(row, 'fecha_emision')),
@@ -395,7 +394,10 @@ class ErpDocumentPdf {
           ('Código', 'articulo_codigo'),
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
-          ('Cantidad', 'cantidad'),
+          ('Almacén', 'almacen_destino_codigo'),
+          ('Solicitado', 'cantidad_solicitada'),
+          ('Cantidad OC', 'cantidad'),
+          ('Recibido', 'cantidad_recibida'),
           ('Precio', 'precio_unitario'),
           ('% Dcto', 'descuento_porcentaje'),
           ('Importe', 'subtotal'),
@@ -414,6 +416,7 @@ class ErpDocumentPdf {
           ('Unidad', 'unidad_medida'),
           ('Solicitado', 'cantidad_solicitada'),
           ('Despachado', 'cantidad_despachada'),
+          ('Centro costo', 'centro_costo'),
           ('Lote', 'lote'),
         ],
       _ => const [
@@ -421,6 +424,9 @@ class ErpDocumentPdf {
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
           ('Cantidad', 'cantidad_solicitada'),
+          ('Recibido', 'cantidad_recibida'),
+          ('OC aprobada', 'fecha_oc_aprobada'),
+          ('Recibida', 'fecha_recibida'),
           ('Fecha requerida', 'fecha_necesidad'),
           ('Almacén', 'almacen_destino_codigo'),
         ],

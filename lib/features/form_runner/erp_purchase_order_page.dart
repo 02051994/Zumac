@@ -33,6 +33,11 @@ class _PurchaseOrderLine {
   final TextEditingController discountPercent;
   final String? costCenter;
   final String? agriculturalLot;
+  String? warehouse;
+  final double receivedQuantity;
+  final String requestedDate;
+  final String approvedDate;
+  final String receivedDate;
 
   _PurchaseOrderLine({
     required this.requestNumber,
@@ -46,6 +51,11 @@ class _PurchaseOrderLine {
     required String discountPercent,
     this.costCenter,
     this.agriculturalLot,
+    this.warehouse,
+    this.receivedQuantity = 0,
+    this.requestedDate = '',
+    this.approvedDate = '',
+    this.receivedDate = '',
   })  : articleCode = TextEditingController(text: articleCode),
         description = TextEditingController(text: description),
         unit = TextEditingController(text: unit),
@@ -75,6 +85,7 @@ class _PurchaseOrderLine {
             double.tryParse(discountPercent.text.replaceAll(',', '.')) ?? 0,
         'centro_costo': costCenter,
         'lote_agricola': agriculturalLot,
+        'almacen_destino_codigo': warehouse,
       };
 
   void dispose() {
@@ -104,6 +115,7 @@ class ErpPurchaseOrderPage extends StatefulWidget {
 class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
   final _client = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
+  final _scrollController = ScrollController();
   late final TextEditingController _issueDate;
   late final TextEditingController _deliveryDate;
   late final TextEditingController _exchangeRate;
@@ -194,7 +206,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
         _client.rpc('erp_solicitudes_aprobadas_oc_v1'),
         _client
             .from('ERP_PROVEEDORES_APPGT')
-            .select('codigo,razon_social,numero_documento,email')
+            .select('codigo,razon_social,ruc,email')
             .eq('estado', 'ACTIVO')
             .eq('eliminado', false)
             .order('razon_social'),
@@ -243,6 +255,12 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
             discountPercent: _text(row['descuento_porcentaje']),
             costCenter: _nullable(row['centro_costo']),
             agriculturalLot: _nullable(row['lote_agricola']),
+            warehouse: _nullable(row['almacen_destino_codigo']) ?? _warehouse,
+            receivedQuantity:
+                double.tryParse(_text(row['cantidad_recibida'])) ?? 0,
+            requestedDate: _date(row['fecha_solicitada']),
+            approvedDate: _date(row['fecha_oc_aprobada']),
+            receivedDate: _date(row['fecha_recibida']),
           ));
         }
       }
@@ -342,6 +360,13 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
               : _text(detail['precio_referencial']),
           discountPercent: '0',
           costCenter: _nullable(selected['centro_costo']),
+          warehouse: _nullable(detail['almacen_destino_codigo']) ?? _warehouse,
+          receivedQuantity:
+              double.tryParse(_text(detail['cantidad_recibida'])) ?? 0,
+          requestedDate: _date(detail['fecha_solicitada'],
+              fallback: _date(selected['fecha'])),
+          approvedDate: _date(detail['fecha_oc_aprobada']),
+          receivedDate: _date(detail['fecha_recibida']),
         ));
         _provider ??= _nullable(detail['proveedor_recomendado_codigo']);
         _warehouse ??= _nullable(detail['almacen_destino_codigo']);
@@ -547,6 +572,33 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       );
     }
 
+    Widget warehouseInput(_PurchaseOrderLine line) {
+      final values = _warehouses.map((row) => _text(row['codigo'])).toSet();
+      return SizedBox(
+        width: 210,
+        child: DropdownButtonFormField<String>(
+          initialValue: values.contains(line.warehouse) ? line.warehouse : null,
+          isExpanded: true,
+          decoration: const InputDecoration(
+            isDense: true,
+            border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+          ),
+          items: _warehouses
+              .map((row) => DropdownMenuItem(
+                    value: _text(row['codigo']),
+                    child: Text('${row['codigo']} · ${row['nombre']}',
+                        overflow: TextOverflow.ellipsis),
+                  ))
+              .toList(),
+          onChanged: !_editable
+              ? null
+              : (value) => setState(() => line.warehouse = value),
+          validator: (value) =>
+              _text(value).isEmpty ? 'Seleccione almacén' : null,
+        ),
+      );
+    }
+
     return Scrollbar(
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
@@ -556,10 +608,16 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
               const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
           columns: const [
             DataColumn(label: Text('Solicitud')),
+            DataColumn(label: Text('Fecha solicitada')),
             DataColumn(label: Text('Código')),
             DataColumn(label: Text('Descripción')),
             DataColumn(label: Text('Unidad')),
-            DataColumn(label: Text('Cantidad')),
+            DataColumn(label: Text('Almacén')),
+            DataColumn(label: Text('Cant. solicitada')),
+            DataColumn(label: Text('Cant. OC')),
+            DataColumn(label: Text('Cant. recibida')),
+            DataColumn(label: Text('Fecha OC aprobada')),
+            DataColumn(label: Text('Fecha recibida')),
             DataColumn(label: Text('Precio')),
             DataColumn(label: Text('% Dcto.')),
             DataColumn(label: Text('Importe')),
@@ -567,10 +625,22 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
           rows: _lines
               .map((line) => DataRow(cells: [
                     DataCell(Text(line.requestNumber)),
+                    DataCell(Text(line.requestedDate.isEmpty
+                        ? 'Pendiente'
+                        : line.requestedDate)),
                     DataCell(input(line.articleCode, width: 130)),
                     DataCell(input(line.description, width: 260)),
                     DataCell(input(line.unit, width: 90)),
+                    DataCell(warehouseInput(line)),
+                    DataCell(Text(line.requestedQuantity.toStringAsFixed(2))),
                     DataCell(input(line.quantity, numeric: true)),
+                    DataCell(Text(line.receivedQuantity.toStringAsFixed(2))),
+                    DataCell(Text(line.approvedDate.isEmpty
+                        ? 'Pendiente'
+                        : line.approvedDate)),
+                    DataCell(Text(line.receivedDate.isEmpty
+                        ? 'Pendiente'
+                        : line.receivedDate)),
                     DataCell(input(line.price, numeric: true)),
                     DataCell(
                         input(line.discountPercent, width: 90, numeric: true)),
@@ -597,6 +667,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
     for (final line in _lines) {
       line.dispose();
     }
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -634,119 +705,135 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (_code.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Chip(label: Text('Estado: $_state')),
-                    ),
-                  Wrap(spacing: 12, runSpacing: 12, children: [
-                    SizedBox(
-                      width: 210,
-                      child: TextFormField(
-                        initialValue:
-                            _code.isEmpty ? 'Automático (Comp-#)' : _code,
-                        readOnly: true,
-                        decoration: _decoration('Código'),
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                child: ListView(
+                  controller: _scrollController,
+                  primary: false,
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (_code.isNotEmpty)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: Chip(label: Text('Estado: $_state')),
                       ),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
+                      SizedBox(
+                        width: 210,
+                        child: TextFormField(
+                          initialValue: _code.isEmpty
+                              ? 'Automático al guardar (OC-10001...)'
+                              : _code,
+                          readOnly: true,
+                          decoration: _decoration('Código'),
+                        ),
+                      ),
+                      _catalogDropdown(
+                        label: 'Proveedor',
+                        value: _provider,
+                        rows: _providers,
+                        labelBuilder: (row) =>
+                            '${row['ruc'] ?? ''} · ${row['razon_social']}',
+                        onChanged: (value) => setState(() => _provider = value),
+                      ),
+                      _dateField(_issueDate, 'Fecha de emisión'),
+                      _dateField(_deliveryDate, 'Fecha de entrega'),
+                      SizedBox(
+                        width: 140,
+                        child: DropdownButtonFormField<String>(
+                          initialValue: _currency,
+                          decoration: _decoration('Moneda'),
+                          items: const [
+                            DropdownMenuItem(value: 'PEN', child: Text('PEN')),
+                            DropdownMenuItem(value: 'USD', child: Text('USD')),
+                            DropdownMenuItem(value: 'EUR', child: Text('EUR')),
+                          ],
+                          onChanged: !_editable
+                              ? null
+                              : (value) =>
+                                  setState(() => _currency = value ?? 'PEN'),
+                        ),
+                      ),
+                      _field(_exchangeRate, 'Tipo de cambio',
+                          width: 160,
+                          required: true,
+                          keyboardType: const TextInputType.numberWithOptions(
+                              decimal: true)),
+                      const SizedBox(
+                        width: 250,
+                        child: Text(
+                          'Tipo de cambio: valor en soles (PEN) de 1 unidad de la moneda seleccionada. Para PEN use 1.',
+                          style:
+                              TextStyle(fontSize: 12, color: Colors.blueGrey),
+                        ),
+                      ),
+                      _field(_paymentTerms, 'Condición de pago'),
+                      _catalogDropdown(
+                        label: 'Almacén',
+                        value: _warehouse,
+                        rows: _warehouses,
+                        labelBuilder: (row) =>
+                            '${row['codigo']} · ${row['nombre']}',
+                        onChanged: (value) =>
+                            setState(() => _warehouse = value),
+                      ),
+                    ]),
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _observation,
+                      readOnly: !_editable,
+                      maxLines: 2,
+                      decoration: _decoration('Observaciones'),
                     ),
-                    _catalogDropdown(
-                      label: 'Proveedor',
-                      value: _provider,
-                      rows: _providers,
-                      labelBuilder: (row) =>
-                          '${row['codigo']} · ${row['razon_social']} · ${row['numero_documento'] ?? ''}',
-                      onChanged: (value) => setState(() => _provider = value),
-                    ),
-                    _dateField(_issueDate, 'Fecha de emisión'),
-                    _dateField(_deliveryDate, 'Fecha de entrega'),
-                    SizedBox(
-                      width: 140,
-                      child: DropdownButtonFormField<String>(
-                        initialValue: _currency,
-                        decoration: _decoration('Moneda'),
-                        items: const [
-                          DropdownMenuItem(value: 'PEN', child: Text('PEN')),
-                          DropdownMenuItem(value: 'USD', child: Text('USD')),
-                          DropdownMenuItem(value: 'EUR', child: Text('EUR')),
-                        ],
+                    const SizedBox(height: 14),
+                    Row(children: [
+                      Checkbox(
+                        value: _includesIgv,
                         onChanged: !_editable
                             ? null
                             : (value) =>
-                                setState(() => _currency = value ?? 'PEN'),
+                                setState(() => _includesIgv = value ?? false),
                       ),
-                    ),
-                    _field(_exchangeRate, 'Tipo de cambio',
-                        width: 160,
-                        required: true,
+                      const Text('Con IGV'),
+                      const SizedBox(width: 18),
+                      _field(
+                        _discount,
+                        'Descuento',
+                        width: 180,
                         keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true)),
-                    _field(_paymentTerms, 'Condición de pago'),
-                    _catalogDropdown(
-                      label: 'Almacén',
-                      value: _warehouse,
-                      rows: _warehouses,
-                      labelBuilder: (row) =>
-                          '${row['codigo']} · ${row['nombre']}',
-                      onChanged: (value) => setState(() => _warehouse = value),
+                            decimal: true),
+                        onChanged: (_) => setState(() {}),
+                      ),
+                    ]),
+                    if (_requestNumbers.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: _requestNumbers
+                            .map((number) => InputChip(
+                                  label: Text(number),
+                                  onDeleted: _editable
+                                      ? () => _removeRequest(number)
+                                      : null,
+                                ))
+                            .toList(),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+                    Text('Ítems de la orden de compra',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    _itemsTable(),
+                    const SizedBox(height: 14),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: _moneySummary(),
                     ),
-                  ]),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _observation,
-                    readOnly: !_editable,
-                    maxLines: 2,
-                    decoration: _decoration('Observaciones'),
-                  ),
-                  const SizedBox(height: 14),
-                  Row(children: [
-                    Checkbox(
-                      value: _includesIgv,
-                      onChanged: !_editable
-                          ? null
-                          : (value) =>
-                              setState(() => _includesIgv = value ?? false),
-                    ),
-                    const Text('Con IGV'),
-                    const SizedBox(width: 18),
-                    _field(
-                      _discount,
-                      'Descuento',
-                      width: 180,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      onChanged: (_) => setState(() {}),
-                    ),
-                  ]),
-                  if (_requestNumbers.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: _requestNumbers
-                          .map((number) => InputChip(
-                                label: Text(number),
-                                onDeleted: _editable
-                                    ? () => _removeRequest(number)
-                                    : null,
-                              ))
-                          .toList(),
-                    ),
+                    const SizedBox(height: 40),
                   ],
-                  const SizedBox(height: 16),
-                  Text('Ítems de la orden de compra',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  _itemsTable(),
-                  const SizedBox(height: 14),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _moneySummary(),
-                  ),
-                  const SizedBox(height: 40),
-                ],
+                ),
               ),
             ),
     );

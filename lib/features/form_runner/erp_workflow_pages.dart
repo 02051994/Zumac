@@ -141,6 +141,10 @@ class _EditableArticleLine {
   final TextEditingController observation;
   String? warehouse;
   String? provider;
+  String? costCenter;
+  final String receivedQuantity;
+  final String purchaseOrderApprovedDate;
+  final String receivedDate;
 
   _EditableArticleLine({
     required this.article,
@@ -149,6 +153,10 @@ class _EditableArticleLine {
     String observation = '',
     this.warehouse,
     this.provider,
+    this.costCenter,
+    this.receivedQuantity = '',
+    this.purchaseOrderApprovedDate = '',
+    this.receivedDate = '',
   })  : quantity = TextEditingController(text: quantity),
         lot = TextEditingController(text: lot),
         observation = TextEditingController(text: observation);
@@ -177,6 +185,7 @@ class ErpPurchaseRequestPage extends StatefulWidget {
 class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
   final _client = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
+  final _scrollController = ScrollController();
   late final TextEditingController _date;
   late final TextEditingController _needDate;
   late final TextEditingController _requester;
@@ -240,13 +249,21 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
             .order('nombre'),
         _client
             .from('ERP_PROVEEDORES_APPGT')
-            .select('codigo,razon_social,numero_documento')
+            .select('codigo,razon_social,ruc')
             .eq('estado', 'ACTIVO')
             .order('razon_social'),
+        _client.rpc('erp_identidad_usuario_actual_v1'),
       ]);
       _articles = _erpRows(results[0]);
       _warehouses = _erpRows(results[1]);
       _providers = _erpRows(results[2]);
+      final identity = _erpMap(results[3]);
+      if (_number.isEmpty) {
+        _requester.text = _erpText(identity['solicitante']);
+        if (_area.text.trim().isEmpty) {
+          _area.text = _erpText(identity['area']);
+        }
+      }
       if (_number.isNotEmpty) {
         final raw = await _client
             .from('ERP_SOLICITUDES_COMPRA_DETALLE_APPGT')
@@ -268,6 +285,9 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
             observation: _erpText(row['observacion']),
             warehouse: _erpText(row['almacen_destino_codigo']),
             provider: _erpText(row['proveedor_recomendado_codigo']),
+            receivedQuantity: _erpText(row['cantidad_recibida']),
+            purchaseOrderApprovedDate: _dateOnly(row['fecha_oc_aprobada']),
+            receivedDate: _dateOnly(row['fecha_recibida']),
           ));
         }
       }
@@ -355,6 +375,7 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
     for (final line in _lines) {
       line.dispose();
     }
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -400,129 +421,163 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
           ? const Center(child: CircularProgressIndicator())
           : Form(
               key: _formKey,
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  if (_number.isNotEmpty)
-                    Chip(
-                        label: Text(
-                            'Estado: ${_state.isEmpty ? 'PENDIENTE' : _state}')),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 12,
-                    children: [
-                      _dateInput(context, _date, 'Fecha', _editable),
-                      _dateInput(context, _needDate, 'Fecha en que se necesita',
-                          _editable),
-                      _textInput(_requester, 'Solicitante', _editable,
-                          isRequired: true),
-                      _textInput(_area, 'Área solicitante', _editable),
-                      _textInput(_costCenter, 'Centro de costo', _editable),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextFormField(
-                    controller: _justification,
-                    readOnly: !_editable,
-                    maxLines: 2,
-                    decoration: _erpDecoration('Justificación'),
-                  ),
-                  const SizedBox(height: 18),
-                  Text('Artículos e insumos (${_lines.length})',
-                      style: Theme.of(context).textTheme.titleMedium),
-                  const SizedBox(height: 8),
-                  if (_lines.isEmpty)
-                    const Card(
-                      child: Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Text('Aún no se agregaron artículos.'),
-                      ),
+              child: Scrollbar(
+                controller: _scrollController,
+                thumbVisibility: true,
+                child: ListView(
+                  controller: _scrollController,
+                  primary: false,
+                  padding: const EdgeInsets.all(16),
+                  children: [
+                    if (_number.isNotEmpty)
+                      Chip(
+                          label: Text(
+                              'Estado: ${_state.isEmpty ? 'PENDIENTE' : _state}')),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 12,
+                      children: [
+                        SizedBox(
+                          width: 240,
+                          child: TextFormField(
+                            initialValue: _number.isEmpty
+                                ? 'Automático al guardar (SP-10001...)'
+                                : _number,
+                            readOnly: true,
+                            decoration: _erpDecoration('Código'),
+                          ),
+                        ),
+                        _dateInput(context, _date, 'Fecha', _editable),
+                        _dateInput(context, _needDate,
+                            'Fecha en que se necesita', _editable),
+                        _textInput(_requester, 'Solicitante', false,
+                            isRequired: true),
+                        _textInput(_area, 'Área solicitante', _editable),
+                        _textInput(_costCenter, 'Centro de costo', _editable),
+                      ],
                     ),
-                  ..._lines.asMap().entries.map((entry) {
-                    final index = entry.key;
-                    final line = entry.value;
-                    return Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(children: [
-                              Expanded(
-                                child: Text(
-                                  '${line.article['codigo']} · ${line.article['nombre']}',
-                                  style: const TextStyle(
-                                      fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                              if (_editable)
-                                IconButton(
-                                  tooltip: 'Quitar artículo',
-                                  onPressed: () => setState(() {
-                                    _lines.removeAt(index).dispose();
-                                  }),
-                                  icon: const Icon(Icons.delete_outline),
-                                ),
-                            ]),
-                            Text('Unidad: ${line.article['unidad_medida']}'),
-                            const SizedBox(height: 10),
-                            Wrap(spacing: 12, runSpacing: 12, children: [
-                              SizedBox(
-                                width: 180,
-                                child: TextFormField(
-                                  controller: line.quantity,
-                                  readOnly: !_editable,
-                                  keyboardType:
-                                      const TextInputType.numberWithOptions(
-                                          decimal: true),
-                                  decoration: _erpDecoration('Cantidad'),
-                                  validator: (value) => (double.tryParse(
-                                                  (value ?? '')
-                                                      .replaceAll(',', '.')) ??
-                                              0) <=
-                                          0
-                                      ? 'Cantidad inválida'
-                                      : null,
-                                ),
-                              ),
-                              _dropdown(
-                                value: line.warehouse,
-                                label: 'Almacén de destino',
-                                rows: _warehouses,
-                                valueKey: 'codigo',
-                                labelBuilder: (row) =>
-                                    '${row['codigo']} · ${row['nombre']}',
-                                enabled: _editable,
-                                isRequired: true,
-                                onChanged: (value) =>
-                                    setState(() => line.warehouse = value),
-                              ),
-                              _dropdown(
-                                value: line.provider,
-                                label: 'Proveedor recomendado',
-                                rows: _providers,
-                                valueKey: 'codigo',
-                                labelBuilder: (row) =>
-                                    '${row['razon_social']} · ${row['numero_documento']}',
-                                enabled: _editable,
-                                onChanged: (value) =>
-                                    setState(() => line.provider = value),
-                              ),
-                            ]),
-                            const SizedBox(height: 10),
-                            TextFormField(
-                              controller: line.observation,
-                              readOnly: !_editable,
-                              decoration:
-                                  _erpDecoration('Observación de línea'),
-                            ),
-                          ],
+                    const SizedBox(height: 12),
+                    TextFormField(
+                      controller: _justification,
+                      readOnly: !_editable,
+                      maxLines: 2,
+                      decoration: _erpDecoration('Justificación'),
+                    ),
+                    const SizedBox(height: 18),
+                    Text('Artículos e insumos (${_lines.length})',
+                        style: Theme.of(context).textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    if (_lines.isEmpty)
+                      const Card(
+                        child: Padding(
+                          padding: EdgeInsets.all(20),
+                          child: Text('Aún no se agregaron artículos.'),
                         ),
                       ),
-                    );
-                  }),
-                  const SizedBox(height: 90),
-                ],
+                    ..._lines.asMap().entries.map((entry) {
+                      final index = entry.key;
+                      final line = entry.value;
+                      return Card(
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(children: [
+                                Expanded(
+                                  child: Text(
+                                    '${line.article['codigo']} · ${line.article['nombre']}',
+                                    style: const TextStyle(
+                                        fontWeight: FontWeight.w700),
+                                  ),
+                                ),
+                                if (_editable)
+                                  IconButton(
+                                    tooltip: 'Quitar artículo',
+                                    onPressed: () => setState(() {
+                                      _lines.removeAt(index).dispose();
+                                    }),
+                                    icon: const Icon(Icons.delete_outline),
+                                  ),
+                              ]),
+                              Text('Unidad: ${line.article['unidad_medida']}'),
+                              const SizedBox(height: 10),
+                              Wrap(spacing: 12, runSpacing: 12, children: [
+                                SizedBox(
+                                  width: 180,
+                                  child: TextFormField(
+                                    controller: line.quantity,
+                                    readOnly: !_editable,
+                                    keyboardType:
+                                        const TextInputType.numberWithOptions(
+                                            decimal: true),
+                                    decoration: _erpDecoration('Cantidad'),
+                                    validator: (value) => (double.tryParse(
+                                                    (value ?? '').replaceAll(
+                                                        ',', '.')) ??
+                                                0) <=
+                                            0
+                                        ? 'Cantidad inválida'
+                                        : null,
+                                  ),
+                                ),
+                                _dropdown(
+                                  value: line.warehouse,
+                                  label: 'Almacén de destino',
+                                  rows: _warehouses,
+                                  valueKey: 'codigo',
+                                  labelBuilder: (row) =>
+                                      '${row['codigo']} · ${row['nombre']}',
+                                  enabled: _editable,
+                                  isRequired: true,
+                                  onChanged: (value) =>
+                                      setState(() => line.warehouse = value),
+                                ),
+                                _dropdown(
+                                  value: line.provider,
+                                  label: 'Proveedor recomendado',
+                                  rows: _providers,
+                                  valueKey: 'codigo',
+                                  labelBuilder: (row) =>
+                                      '${row['ruc']} · ${row['razon_social']}',
+                                  enabled: _editable,
+                                  onChanged: (value) =>
+                                      setState(() => line.provider = value),
+                                ),
+                              ]),
+                              const SizedBox(height: 10),
+                              if (line.receivedQuantity.isNotEmpty ||
+                                  line.purchaseOrderApprovedDate.isNotEmpty ||
+                                  line.receivedDate.isNotEmpty)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 10),
+                                  child: Wrap(
+                                    spacing: 18,
+                                    runSpacing: 6,
+                                    children: [
+                                      Text('Cantidad recibida: '
+                                          '${line.receivedQuantity.isEmpty ? '0' : line.receivedQuantity}'),
+                                      Text('Fecha OC aprobada: '
+                                          '${line.purchaseOrderApprovedDate.isEmpty ? 'Pendiente' : line.purchaseOrderApprovedDate}'),
+                                      Text('Fecha recibida: '
+                                          '${line.receivedDate.isEmpty ? 'Pendiente' : line.receivedDate}'),
+                                    ],
+                                  ),
+                                ),
+                              TextFormField(
+                                controller: line.observation,
+                                readOnly: !_editable,
+                                decoration:
+                                    _erpDecoration('Observación de línea'),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    const SizedBox(height: 90),
+                  ],
+                ),
               ),
             ),
     );
@@ -1009,8 +1064,12 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
 
   Future<void> _load() async {
     try {
-      final catalog =
-          _erpMap(await _client.rpc('erp_catalogos_vale_despacho_v1'));
+      final results = await Future.wait<dynamic>([
+        _client.rpc('erp_catalogos_vale_despacho_v1'),
+        _client.rpc('erp_identidad_usuario_actual_v1'),
+      ]);
+      final catalog = _erpMap(results[0]);
+      final identity = _erpMap(results[1]);
       _articles = _erpRows(catalog['articulos']);
       _warehouses = _erpRows(catalog['almacenes']);
       _lots = (catalog['lotes'] as List? ?? const [])
@@ -1021,6 +1080,10 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
           .map(_erpText)
           .where((value) => value.isNotEmpty)
           .toList();
+      if (_number.isEmpty) {
+        _dni.text = _erpText(identity['dni']);
+        _name.text = _erpText(identity['usuario_nombre']);
+      }
       _warehouse ??=
           _warehouses.isEmpty ? null : _erpText(_warehouses.first['codigo']);
       if (_number.isNotEmpty) {
@@ -1043,6 +1106,9 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
             quantity: _erpText(row['cantidad_solicitada']),
             lot: _erpText(row['lote']),
             observation: _erpText(row['observacion']),
+            costCenter: _erpText(row['centro_costo']).isEmpty
+                ? _costCenter
+                : _erpText(row['centro_costo']),
           ));
         }
       }
@@ -1065,8 +1131,8 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
   }
 
   Future<void> _save() async {
-    if (_dni.text.trim().isEmpty || _costCenter == null || _warehouse == null) {
-      _erpToast(context, 'Complete DNI, centro de costo y almacén.',
+    if (_dni.text.trim().isEmpty || _warehouse == null) {
+      _erpToast(context, 'No se pudo resolver el usuario o el almacén.',
           error: true);
       return;
     }
@@ -1074,6 +1140,12 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
       _erpToast(context, 'Agregue al menos un artículo o insumo.', error: true);
       return;
     }
+    if (_lines.any((line) => _erpText(line.costCenter).isEmpty)) {
+      _erpToast(context, 'Defina el centro de costo de cada artículo.',
+          error: true);
+      return;
+    }
+    _costCenter = _lines.first.costCenter;
     setState(() => _saving = true);
     try {
       final result = _erpMap(await _client.rpc(
@@ -1092,6 +1164,7 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
                     'cantidad_solicitada': double.tryParse(
                             line.quantity.text.replaceAll(',', '.')) ??
                         0,
+                    'centro_costo': line.costCenter,
                     'lote': line.lot.text.trim(),
                     'observacion': line.observation.text.trim(),
                   })
@@ -1124,7 +1197,6 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
   @override
   Widget build(BuildContext context) {
     final centers = _centers;
-    final safeCenter = centers.contains(_costCenter) ? _costCenter : null;
     return Scaffold(
       appBar: AppBar(
         title: Text(_number.isEmpty ? 'Nuevo Vale de Despacho' : _number),
@@ -1169,9 +1241,8 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
                 if (_number.isNotEmpty) Chip(label: Text('Estado: $_state')),
                 Wrap(spacing: 12, runSpacing: 12, children: [
                   _dateInput(context, _date, 'Fecha', _editable),
-                  _textInput(_dni, 'Usuario (DNI)', _editable,
-                      isRequired: true),
-                  _textInput(_name, 'Nombre del usuario', _editable),
+                  _textInput(_dni, 'Usuario (DNI)', false, isRequired: true),
+                  _textInput(_name, 'Nombre del usuario', false),
                   SizedBox(
                     width: 240,
                     child: DropdownButtonFormField<String>(
@@ -1188,27 +1259,10 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
                           : (value) => setState(() {
                                 _type = value ?? 'DIRECTO';
                                 _costCenter = null;
+                                for (final line in _lines) {
+                                  line.costCenter = null;
+                                }
                               }),
-                    ),
-                  ),
-                  SizedBox(
-                    width: 300,
-                    child: DropdownButtonFormField<String>(
-                      key: ValueKey(_type),
-                      initialValue: safeCenter,
-                      isExpanded: true,
-                      decoration: _erpDecoration(_type == 'DIRECTO'
-                          ? 'Centro de costo (lote)'
-                          : 'Centro de costo (área / inversión)'),
-                      items: centers
-                          .map((value) => DropdownMenuItem(
-                                value: value,
-                                child: Text(value),
-                              ))
-                          .toList(),
-                      onChanged: !_editable
-                          ? null
-                          : (value) => setState(() => _costCenter = value),
                     ),
                   ),
                   _dropdown(
@@ -1265,6 +1319,30 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
                                 isRequired: true),
                             _textInput(line.lot, 'Lote específico (opcional)',
                                 _editable),
+                            SizedBox(
+                              width: 300,
+                              child: DropdownButtonFormField<String>(
+                                key: ValueKey(
+                                    '$_type-$index-${line.costCenter}'),
+                                initialValue: centers.contains(line.costCenter)
+                                    ? line.costCenter
+                                    : null,
+                                isExpanded: true,
+                                decoration: _erpDecoration(_type == 'DIRECTO'
+                                    ? 'Centro de costo (lote)'
+                                    : 'Centro de costo (área / inversión)'),
+                                items: centers
+                                    .map((value) => DropdownMenuItem(
+                                          value: value,
+                                          child: Text(value),
+                                        ))
+                                    .toList(),
+                                onChanged: !_editable
+                                    ? null
+                                    : (value) =>
+                                        setState(() => line.costCenter = value),
+                              ),
+                            ),
                           ]),
                           const SizedBox(height: 10),
                           TextFormField(
