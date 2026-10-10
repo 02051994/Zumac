@@ -128,7 +128,7 @@
         spinner.hidden = true;
         title.textContent = 'No se pudo iniciar Zumac';
         message.textContent =
-          'Comprueba tu conexión y vuelve a intentarlo. Si el problema continúa, actualiza la página con Ctrl+F5.';
+          'Comprueba tu conexiÃ³n y vuelve a intentarlo. Si el problema continÃºa, actualiza la pÃ¡gina con Ctrl+F5.';
         retry.hidden = false;
         if (error) console.error('Error al iniciar Zumac:', error);
       };
@@ -147,7 +147,7 @@
       );
 
       window.__zumacBootstrapTimeout = window.setTimeout(() => {
-        showError(new Error('Tiempo de espera agotado al descargar la aplicación.'));
+        showError(new Error('Tiempo de espera agotado al descargar la aplicaciÃ³n.'));
       }, 45000);
 
       const start = async () => {
@@ -166,7 +166,7 @@
         }
 
         const script = document.createElement('script');
-        script.src = 'flutter_bootstrap.0a5b17ed0257.js';
+        script.src = 'flutter_bootstrap.ec8243b938f6.js';
         script.async = true;
         script.addEventListener('error', () => {
           showError(new Error('No se pudo descargar el inicializador web.'));
