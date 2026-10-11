@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'erp_document_pdf.dart';
+import 'erp_image_attachment.dart';
 import 'erp_purchase_math.dart';
 
 String _text(dynamic value) => value?.toString().trim() ?? '';
@@ -38,6 +39,7 @@ class _PurchaseOrderLine {
   final String requestedDate;
   final String approvedDate;
   final String receivedDate;
+  final String photoUrl;
 
   _PurchaseOrderLine({
     required this.requestNumber,
@@ -56,6 +58,7 @@ class _PurchaseOrderLine {
     this.requestedDate = '',
     this.approvedDate = '',
     this.receivedDate = '',
+    this.photoUrl = '',
   })  : articleCode = TextEditingController(text: articleCode),
         description = TextEditingController(text: description),
         unit = TextEditingController(text: unit),
@@ -257,6 +260,18 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
         _requestNumbers.addAll(_rows(existing[0])
             .map((row) => _text(row['solicitud_numero']))
             .where((value) => value.isNotEmpty));
+        final photoByRequestLine = <String, String>{};
+        if (_requestNumbers.isNotEmpty) {
+          final photoRows = _rows(await _client
+              .from('ERP_SOLICITUDES_COMPRA_DETALLE_APPGT')
+              .select('solicitud_numero,linea,foto_url')
+              .inFilter('solicitud_numero', _requestNumbers));
+          for (final photoRow in photoRows) {
+            photoByRequestLine[
+                    '${_text(photoRow['solicitud_numero'])}|${_text(photoRow['linea'])}'] =
+                _text(photoRow['foto_url']);
+          }
+        }
         for (final row in _rows(existing[1])) {
           final request = _text(row['solicitud_numero']);
           if (request.isNotEmpty && !_requestNumbers.contains(request)) {
@@ -281,6 +296,9 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
             requestedDate: _date(row['fecha_solicitada']),
             approvedDate: _date(row['fecha_oc_aprobada']),
             receivedDate: _date(row['fecha_recibida']),
+            photoUrl: photoByRequestLine[
+                    '$request|${_text(row['solicitud_linea'])}'] ??
+                '',
           ));
         }
       }
@@ -387,6 +405,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
               fallback: _date(selected['fecha'])),
           approvedDate: _date(detail['fecha_oc_aprobada']),
           receivedDate: _date(detail['fecha_recibida']),
+          photoUrl: _text(detail['foto_url']),
         ));
         _provider ??= _nullable(detail['proveedor_recomendado_codigo']);
         _warehouse ??= _nullable(detail['almacen_destino_codigo']);
@@ -573,11 +592,9 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       ),
       child: Column(children: [
         line('Importe de ítems', _grossItemsAmount),
-        line('Dctos. por ítem', _lineDiscountValue),
-        line('Otros Dctos.', _discountValue),
         line('Descuento total', _lineDiscountValue + _discountValue),
         line('Subtotal', _totals.subtotal),
-        line('Impuesto (IGV)', _totals.impuesto),
+        line('Impuesto (IGV 18%)', _totals.impuesto),
         const Divider(),
         line('Total', _totals.total, total: true),
       ]),
@@ -675,6 +692,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
             DataColumn(label: Text('Subtotal')),
             DataColumn(label: Text('Impuesto')),
             DataColumn(label: Text('Total')),
+            DataColumn(label: Text('Foto')),
             DataColumn(label: Text('')),
           ],
           rows: _lines.asMap().entries.map((entry) {
@@ -694,6 +712,16 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
               DataCell(Text(line.amount.toStringAsFixed(2))),
               DataCell(Text(lineTax(line).toStringAsFixed(2))),
               DataCell(Text(lineTotal(line).toStringAsFixed(2))),
+              DataCell(line.photoUrl.isEmpty
+                  ? const Icon(Icons.photo_outlined, color: Colors.grey)
+                  : IconButton(
+                      tooltip: 'Ver foto solicitada',
+                      onPressed: () => ErpImageAttachment.show(
+                        context,
+                        storageUrl: line.photoUrl,
+                      ),
+                      icon: const Icon(Icons.photo, color: Color(0xFF008C95)),
+                    )),
               DataCell(_editable
                   ? IconButton(
                       tooltip: 'Quitar fila',
@@ -779,9 +807,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                       SizedBox(
                         width: 210,
                         child: TextFormField(
-                          initialValue: _code.isEmpty
-                              ? 'Automático al guardar (OC-10001...)'
-                              : _code,
+                          initialValue: _code.isEmpty ? 'Automático' : _code,
                           readOnly: true,
                           decoration: _decoration('Código'),
                         ),

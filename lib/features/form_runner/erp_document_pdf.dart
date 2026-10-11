@@ -337,6 +337,8 @@ class ErpDocumentPdf {
         ('Fecha de necesidad', _date(row, 'fecha_necesidad')),
         ('Solicitante', _value(row, 'solicitante')),
         ('Área', _value(row, 'area')),
+        ('Proveedor', _value(row, 'proveedor_codigo')),
+        ('Almacén', _value(row, 'almacen_codigo')),
       ]);
     } else if (table == 'ERP_ORDENES_COMPRA_APPGT') {
       values.addAll([
@@ -358,7 +360,8 @@ class ErpDocumentPdf {
         ('Proveedor', _value(provider, 'razon_social')),
         ('RUC', _value(row, 'proveedor_ruc')),
         ('Almacén', _value(row, 'almacen_codigo')),
-        ('Guía de remisión', _value(row, 'guia_remision')),
+        ('Tipo de documento', _value(row, 'tipo_documento')),
+        ('Número de documento', _value(row, 'guia_remision')),
         ('Usuario', _value(row, 'usuario')),
       ]);
     } else {
@@ -408,14 +411,16 @@ class ErpDocumentPdf {
           ('Código', 'articulo_codigo'),
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
+          ('Almacén', 'almacen_codigo'),
+          ('Ordenada', 'cantidad_ordenada'),
+          ('Pendiente', 'cantidad_pendiente'),
           ('Recibido', 'cantidad_recibida'),
         ],
       'ERP_VALES_DESPACHO_APPGT' => const [
           ('Código', 'articulo_codigo'),
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
-          ('Solicitado', 'cantidad_solicitada'),
-          ('Despachado', 'cantidad_despachada'),
+          ('Cantidad', 'cantidad_solicitada'),
           ('Centro costo', 'centro_costo'),
           ('Lote', 'lote'),
         ],
@@ -460,15 +465,15 @@ class ErpDocumentPdf {
 
   static pw.Widget _purchaseTotals(Map<String, dynamic> row) {
     final money = <(String, String)>[
-      ('Importe bruto', _money(row, 'importe_bruto')),
+      ('Importe de ítems', _money(row, 'importe_bruto')),
       (
-        'Otros Dctos.',
+        'Descuento total',
         _value(row, 'otros_descuentos').isEmpty
             ? _money(row, 'descuento')
             : _money(row, 'otros_descuentos')
       ),
       ('Subtotal', _money(row, 'subtotal')),
-      ('IGV', _money(row, 'impuesto')),
+      ('Impuesto (IGV 18%)', _money(row, 'impuesto')),
       ('Total', _money(row, 'total')),
     ];
     return pw.Align(

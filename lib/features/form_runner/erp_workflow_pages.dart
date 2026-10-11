@@ -3,6 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'erp_document_pdf.dart';
+import 'erp_image_attachment.dart';
 
 List<Map<String, dynamic>> _erpRows(dynamic value) {
   if (value is! List) return const [];
@@ -146,6 +147,8 @@ class _EditableArticleLine {
   final String receivedQuantity;
   final String purchaseOrderApprovedDate;
   final String receivedDate;
+  String photoUrl;
+  ErpPendingImage? pendingImage;
 
   _EditableArticleLine({
     required this.article,
@@ -159,6 +162,7 @@ class _EditableArticleLine {
     this.receivedQuantity = '',
     this.purchaseOrderApprovedDate = '',
     this.receivedDate = '',
+    this.photoUrl = '',
   })  : quantity = TextEditingController(text: quantity),
         price = TextEditingController(text: price),
         lot = TextEditingController(text: lot),
@@ -207,6 +211,9 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
   List<Map<String, dynamic>> _articles = [];
   List<Map<String, dynamic>> _warehouses = [];
   List<Map<String, dynamic>> _providers = [];
+  String? _warehouse;
+  String? _provider;
+  String _companyId = '';
   bool _loading = true;
   bool _saving = false;
 
@@ -239,7 +246,16 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
     _justification = TextEditingController(
       text: _erpText(_initial['justificacion'] ?? _initial['JUSTIFICACION']),
     );
+    _warehouse =
+        _nullable(_initial['almacen_codigo'] ?? _initial['ALMACEN_CODIGO']);
+    _provider =
+        _nullable(_initial['proveedor_codigo'] ?? _initial['PROVEEDOR_CODIGO']);
     _load();
+  }
+
+  String? _nullable(dynamic value) {
+    final text = _erpText(value);
+    return text.isEmpty || text.toUpperCase() == 'NULL' ? null : text;
   }
 
   Future<void> _load() async {
@@ -267,6 +283,10 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       _warehouses = _erpRows(results[1]);
       _providers = _erpRows(results[2]);
       final identity = _erpMap(results[3]);
+      _companyId = _erpText(identity['empresa_id']);
+      if (_companyId.isEmpty) {
+        _companyId = _erpText(_initial['empresa_id'] ?? _initial['EMPRESA_ID']);
+      }
       if (_number.isEmpty) {
         _requester.text = _erpText(identity['solicitante']);
         if (_area.text.trim().isEmpty) {
@@ -280,6 +300,8 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
             .eq('solicitud_numero', _number)
             .order('linea');
         for (final row in _erpRows(raw)) {
+          _warehouse ??= _nullable(row['almacen_destino_codigo']);
+          _provider ??= _nullable(row['proveedor_recomendado_codigo']);
           final article = _articles.firstWhere(
             (item) => item['codigo'] == row['articulo_codigo'],
             orElse: () => {
@@ -298,9 +320,12 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
             receivedQuantity: _erpText(row['cantidad_recibida']),
             purchaseOrderApprovedDate: _dateOnly(row['fecha_oc_aprobada']),
             receivedDate: _dateOnly(row['fecha_recibida']),
+            photoUrl: _erpText(row['foto_url']),
           ));
         }
       }
+      _warehouse ??=
+          _warehouses.isEmpty ? null : _erpText(_warehouses.first['codigo']);
     } catch (error) {
       if (mounted) _erpToast(context, _erpError(error), error: true);
     } finally {
@@ -321,13 +346,78 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
         price: _erpText(article['costo_estandar']).isEmpty
             ? '0'
             : _erpText(article['costo_estandar']),
-        warehouse: _erpText(article['almacen_predeterminado_codigo']).isEmpty
-            ? (_warehouses.isEmpty
-                ? null
-                : _erpText(_warehouses.first['codigo']))
-            : _erpText(article['almacen_predeterminado_codigo']),
       ));
+      _warehouse ??= _erpText(article['almacen_predeterminado_codigo']).isEmpty
+          ? (_warehouses.isEmpty ? null : _erpText(_warehouses.first['codigo']))
+          : _erpText(article['almacen_predeterminado_codigo']);
     });
+  }
+
+  Future<void> _pickLineImage(_EditableArticleLine line) async {
+    try {
+      final image = await ErpImageAttachment.pick();
+      if (image != null && mounted) {
+        setState(() => line.pendingImage = image);
+      }
+    } catch (error) {
+      if (mounted) _erpToast(context, _erpError(error), error: true);
+    }
+  }
+
+  Future<void> _showLineImage(_EditableArticleLine line) =>
+      ErpImageAttachment.show(
+        context,
+        bytes: line.pendingImage?.bytes,
+        storageUrl: line.photoUrl,
+      );
+
+  Widget _photoCell(_EditableArticleLine line) {
+    final attached = line.pendingImage != null || line.photoUrl.isNotEmpty;
+    if (!attached) {
+      return IconButton(
+        tooltip: 'Adjuntar foto opcional',
+        onPressed: _editable ? () => _pickLineImage(line) : null,
+        icon: const Icon(Icons.add_a_photo_outlined, color: Colors.blueGrey),
+      );
+    }
+    return PopupMenuButton<String>(
+      tooltip: 'Foto adjunta',
+      icon: const Icon(Icons.photo, color: Color(0xFF008C95)),
+      onSelected: (action) async {
+        if (action == 'view') {
+          await _showLineImage(line);
+        } else if (action == 'replace') {
+          await _pickLineImage(line);
+        } else if (action == 'remove') {
+          setState(() {
+            line.pendingImage = null;
+            line.photoUrl = '';
+          });
+        }
+      },
+      itemBuilder: (_) => [
+        const PopupMenuItem(value: 'view', child: Text('Ver foto')),
+        if (_editable)
+          const PopupMenuItem(value: 'replace', child: Text('Cambiar foto')),
+        if (_editable)
+          const PopupMenuItem(value: 'remove', child: Text('Quitar foto')),
+      ],
+    );
+  }
+
+  Future<void> _uploadPendingImages() async {
+    final userId = _client.auth.currentUser?.id ?? '';
+    for (final line in _lines) {
+      final image = line.pendingImage;
+      if (image == null) continue;
+      line.photoUrl = await ErpImageAttachment.upload(
+        client: _client,
+        companyId: _companyId,
+        userId: userId,
+        image: image,
+      );
+      line.pendingImage = null;
+    }
   }
 
   Future<void> _save() async {
@@ -336,8 +426,13 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       _erpToast(context, 'Agregue al menos un artículo o insumo.', error: true);
       return;
     }
+    if (_provider == null || _warehouse == null) {
+      _erpToast(context, 'Seleccione proveedor y almacén.', error: true);
+      return;
+    }
     setState(() => _saving = true);
     try {
+      await _uploadPendingImages();
       final details = _lines
           .map((line) => {
                 'articulo_codigo': line.article['codigo'],
@@ -346,13 +441,14 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
                 'precio_unitario':
                     double.tryParse(line.price.text.replaceAll(',', '.')) ?? 0,
                 'fecha_necesidad': _needDate.text,
-                'proveedor_recomendado_codigo': line.provider,
-                'almacen_destino_codigo': line.warehouse,
+                'proveedor_recomendado_codigo': _provider,
+                'almacen_destino_codigo': _warehouse,
                 'observacion': line.observation.text.trim(),
+                'foto_url': line.photoUrl.isEmpty ? null : line.photoUrl,
               })
           .toList();
       final result = await _client.rpc(
-        'erp_guardar_solicitud_pedido_v1',
+        'erp_guardar_solicitud_pedido_v2',
         params: {
           'p_numero': _number.isEmpty ? null : _number,
           'p_fecha': _date.text,
@@ -361,6 +457,8 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
           'p_area': _area.text.trim(),
           'p_centro_costo': null,
           'p_justificacion': _justification.text.trim(),
+          'p_proveedor_codigo': _provider,
+          'p_almacen_codigo': _warehouse,
           'p_detalles': details,
         },
       );
@@ -411,58 +509,6 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       );
     }
 
-    Widget warehouseInput(_EditableArticleLine line) {
-      final values = _warehouses.map((row) => _erpText(row['codigo'])).toSet();
-      return SizedBox(
-        width: 210,
-        child: DropdownButtonFormField<String>(
-          initialValue: values.contains(line.warehouse) ? line.warehouse : null,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-          ),
-          items: _warehouses
-              .map((row) => DropdownMenuItem(
-                    value: _erpText(row['codigo']),
-                    child: Text('${row['codigo']} · ${row['nombre']}',
-                        overflow: TextOverflow.ellipsis),
-                  ))
-              .toList(),
-          onChanged: !_editable
-              ? null
-              : (value) => setState(() => line.warehouse = value),
-          validator: (value) =>
-              _erpText(value).isEmpty ? 'Seleccione almacén' : null,
-        ),
-      );
-    }
-
-    Widget providerInput(_EditableArticleLine line) {
-      final values = _providers.map((row) => _erpText(row['codigo'])).toSet();
-      return SizedBox(
-        width: 250,
-        child: DropdownButtonFormField<String>(
-          initialValue: values.contains(line.provider) ? line.provider : null,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-          ),
-          items: _providers
-              .map((row) => DropdownMenuItem(
-                    value: _erpText(row['codigo']),
-                    child: Text('${row['ruc']} · ${row['razon_social']}',
-                        overflow: TextOverflow.ellipsis),
-                  ))
-              .toList(),
-          onChanged: !_editable
-              ? null
-              : (value) => setState(() => line.provider = value),
-        ),
-      );
-    }
-
     return Scrollbar(
       controller: _detailHorizontalController,
       thumbVisibility: true,
@@ -485,11 +531,7 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
             DataColumn(label: Text('Unidad de medida')),
             DataColumn(label: Text('Precio unitario')),
             DataColumn(label: Text('Total')),
-            DataColumn(label: Text('Almacén')),
-            DataColumn(label: Text('Proveedor recomendado')),
-            DataColumn(label: Text('Cant. recibida')),
-            DataColumn(label: Text('Fecha OC aprobada')),
-            DataColumn(label: Text('Fecha recibida')),
+            DataColumn(label: Text('Foto')),
             DataColumn(label: Text('')),
           ],
           rows: _lines.asMap().entries.map((entry) {
@@ -503,15 +545,7 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
               DataCell(Text(_erpText(line.article['unidad_medida']))),
               DataCell(numberInput(line.price)),
               DataCell(Text(line.total.toStringAsFixed(2))),
-              DataCell(warehouseInput(line)),
-              DataCell(providerInput(line)),
-              DataCell(Text(
-                  line.receivedQuantity.isEmpty ? '0' : line.receivedQuantity)),
-              DataCell(Text(line.purchaseOrderApprovedDate.isEmpty
-                  ? 'Pendiente'
-                  : line.purchaseOrderApprovedDate)),
-              DataCell(Text(
-                  line.receivedDate.isEmpty ? 'Pendiente' : line.receivedDate)),
+              DataCell(_photoCell(line)),
               DataCell(_editable
                   ? IconButton(
                       tooltip: 'Quitar artículo',
@@ -617,9 +651,8 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
                         SizedBox(
                           width: 240,
                           child: TextFormField(
-                            initialValue: _number.isEmpty
-                                ? 'Automático al guardar (SP-10001...)'
-                                : _number,
+                            initialValue:
+                                _number.isEmpty ? 'Automático' : _number,
                             readOnly: true,
                             decoration: _erpDecoration('Código'),
                           ),
@@ -630,6 +663,30 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
                         _textInput(_requester, 'Solicitante', false,
                             isRequired: true),
                         _textInput(_area, 'Área solicitante', _editable),
+                        _dropdown(
+                          value: _provider,
+                          label: 'Proveedor',
+                          rows: _providers,
+                          valueKey: 'codigo',
+                          labelBuilder: (row) =>
+                              '${row['ruc'] ?? ''} · ${row['razon_social']}',
+                          enabled: _editable,
+                          isRequired: true,
+                          onChanged: (value) =>
+                              setState(() => _provider = value),
+                        ),
+                        _dropdown(
+                          value: _warehouse,
+                          label: 'Almacén',
+                          rows: _warehouses,
+                          valueKey: 'codigo',
+                          labelBuilder: (row) =>
+                              '${row['codigo']} · ${row['nombre']}',
+                          enabled: _editable,
+                          isRequired: true,
+                          onChanged: (value) =>
+                              setState(() => _warehouse = value),
+                        ),
                       ],
                     ),
                     const SizedBox(height: 12),
@@ -702,6 +759,7 @@ Widget _dropdown({
   return SizedBox(
     width: 300,
     child: DropdownButtonFormField<String>(
+      key: ValueKey('$label-$safeValue'),
       initialValue: safeValue,
       isExpanded: true,
       decoration: _erpDecoration(label),
@@ -767,7 +825,10 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
   final _observation = TextEditingController();
   final List<_ReceiptLine> _lines = [];
   List<Map<String, dynamic>> _orders = [];
+  List<Map<String, dynamic>> _warehouses = [];
   Map<String, dynamic>? _selected;
+  String _documentType = 'GUIA DE REMISION';
+  String? _warehouse;
   bool _loading = true;
   bool _saving = false;
 
@@ -789,14 +850,33 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
       _observation.text =
           _erpText(_initial['observacion'] ?? _initial['OBSERVACION']);
       _user.text = _erpText(_initial['usuario'] ?? _initial['USUARIO']);
+      _documentType = _erpText(
+        _initial['tipo_documento'] ?? _initial['TIPO_DOCUMENTO'],
+      ).toUpperCase();
+      if (!const {'GUIA DE REMISION', 'FACTURA'}.contains(_documentType)) {
+        _documentType = 'GUIA DE REMISION';
+      }
+      final initialWarehouse = _erpText(
+        _initial['almacen_codigo'] ?? _initial['ALMACEN_CODIGO'],
+      );
+      _warehouse = initialWarehouse.isEmpty ? null : initialWarehouse;
     }
     _load();
   }
 
   Future<void> _load() async {
     try {
-      final identity =
-          _erpMap(await _client.rpc('erp_identidad_usuario_actual_v1'));
+      final base = await Future.wait<dynamic>([
+        _client.rpc('erp_identidad_usuario_actual_v1'),
+        _client
+            .from('ERP_ALMACENES_APPGT')
+            .select('codigo,nombre')
+            .eq('estado', 'ACTIVO')
+            .eq('eliminado', false)
+            .order('nombre'),
+      ]);
+      final identity = _erpMap(base[0]);
+      _warehouses = _erpRows(base[1]);
       if (!_readOnly) _user.text = _erpText(identity['solicitante']);
       if (_readOnly) {
         final raw = await _client
@@ -817,7 +897,10 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
         for (final row in details) {
           row['linea'] = row['orden_linea'];
           row['cantidad_oc'] = row['cantidad_ordenada'];
-          row['cantidad_pendiente'] = row['cantidad_pendiente_antes'];
+          row['cantidad_pendiente'] = row['cantidad_pendiente'] ??
+              ((double.tryParse(_erpText(row['cantidad_pendiente_antes'])) ??
+                      0) -
+                  (double.tryParse(_erpText(row['cantidad_recibida'])) ?? 0));
           _lines.add(
               _ReceiptLine(row, received: _erpText(row['cantidad_recibida'])));
         }
@@ -826,6 +909,8 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
           await _client.rpc('erp_ordenes_pendientes_ingreso_v1'),
         );
       }
+      _warehouse ??=
+          _warehouses.isEmpty ? null : _erpText(_warehouses.first['codigo']);
     } catch (error) {
       if (mounted) _erpToast(context, _erpError(error), error: true);
     } finally {
@@ -841,6 +926,8 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     _selected = number == null
         ? null
         : _orders.firstWhere((row) => _erpText(row['numero']) == number);
+    final suggestedWarehouse = _erpText(_selected?['almacen_codigo']);
+    if (suggestedWarehouse.isNotEmpty) _warehouse = suggestedWarehouse;
     for (final detail in _erpRows(_selected?['detalles'])) {
       _lines.add(_ReceiptLine(detail));
     }
@@ -854,7 +941,11 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
       return;
     }
     if (_guide.text.trim().isEmpty) {
-      _erpToast(context, 'Ingrese la guía de remisión.', error: true);
+      _erpToast(context, 'Ingrese el número de documento.', error: true);
+      return;
+    }
+    if (_warehouse == null) {
+      _erpToast(context, 'Seleccione el almacén de ingreso.', error: true);
       return;
     }
     final details = _lines
@@ -876,11 +967,13 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     setState(() => _saving = true);
     try {
       final result = _erpMap(await _client.rpc(
-        'erp_registrar_ingreso_compra_v1',
+        'erp_registrar_ingreso_compra_v2',
         params: {
           'p_orden_numero': _selected!['numero'],
           'p_fecha': _date.text,
-          'p_guia_remision': _guide.text.trim(),
+          'p_tipo_documento': _documentType,
+          'p_numero_documento': _guide.text.trim(),
+          'p_almacen_codigo': _warehouse,
           'p_detalles': details,
           'p_observacion': _observation.text.trim(),
         },
@@ -958,7 +1051,10 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
             DataColumn(label: Text('Artículo código')),
             DataColumn(label: Text('Descripción')),
             DataColumn(label: Text('Unidad de medida')),
-            DataColumn(label: Text('Cantidad')),
+            DataColumn(label: Text('Cantidad ordenada')),
+            DataColumn(label: Text('Cantidad pendiente')),
+            DataColumn(label: Text('Cantidad recibida')),
+            DataColumn(label: Text('Almacén')),
             DataColumn(label: Text('Lote')),
             DataColumn(label: Text('Fecha vencimiento')),
           ],
@@ -979,7 +1075,12 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
                     width: 260,
                     child: Text(_erpText(line.data['descripcion'])))),
                 DataCell(Text(_erpText(line.data['unidad_medida']))),
+                DataCell(Text(_erpText(line.data['cantidad_oc']).isEmpty
+                    ? _erpText(line.data['cantidad_ordenada'])
+                    : _erpText(line.data['cantidad_oc']))),
+                DataCell(Text(_erpText(line.data['cantidad_pendiente']))),
                 DataCell(input(line.quantity, !_readOnly && line.included)),
+                DataCell(Text(_warehouse ?? '')),
                 DataCell(
                     input(line.lot, !_readOnly && line.included, width: 150)),
                 DataCell(SizedBox(
@@ -1106,7 +1207,7 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
                               'Proveedor: ${_selected!['proveedor'] ?? _selected!['proveedor_codigo']}'),
                           Text('RUC: ${_selected!['proveedor_ruc'] ?? ''}'),
                           Text(
-                              'Almacén: ${_selected!['almacen_codigo'] ?? ''}'),
+                              'Almacén sugerido OC: ${_selected!['almacen_codigo'] ?? ''}'),
                         ]),
                       ),
                     ),
@@ -1114,8 +1215,40 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
                   Wrap(spacing: 12, runSpacing: 12, children: [
                     _dateInput(context, _date, 'Fecha de ingreso', !_readOnly),
                     _textInput(_user, 'Usuario', false, isRequired: true),
-                    _textInput(_guide, 'Guía de remisión', !_readOnly,
+                    SizedBox(
+                      width: 240,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: _documentType,
+                        decoration: _erpDecoration('Tipo de documento'),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'GUIA DE REMISION',
+                            child: Text('Guía de remisión'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'FACTURA',
+                            child: Text('Factura'),
+                          ),
+                        ],
+                        onChanged: _readOnly
+                            ? null
+                            : (value) => setState(() =>
+                                _documentType = value ?? 'GUIA DE REMISION'),
+                      ),
+                    ),
+                    _textInput(_guide, 'Número de documento', !_readOnly,
                         isRequired: true),
+                    _dropdown(
+                      value: _warehouse,
+                      label: 'Almacén',
+                      rows: _warehouses,
+                      valueKey: 'codigo',
+                      labelBuilder: (row) =>
+                          '${row['codigo']} · ${row['nombre']}',
+                      enabled: !_readOnly,
+                      isRequired: true,
+                      onChanged: (value) => setState(() => _warehouse = value),
+                    ),
                   ]),
                   const SizedBox(height: 12),
                   TextFormField(

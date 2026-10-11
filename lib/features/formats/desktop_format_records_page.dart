@@ -34,6 +34,7 @@ import '../../core/widgets/zumac_scaffold_messenger.dart';
 import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/erp_document_pdf.dart';
+import '../form_runner/erp_image_attachment.dart';
 import '../form_runner/special_form_pages.dart';
 import 'hr_record_document_pdf.dart';
 import 'payroll_slip_pdf.dart';
@@ -5929,6 +5930,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         'ELIMINADO',
         'ESTADO_SYNC',
         'VERSION',
+        if (spec.table == 'ERP_VALES_DESPACHO_DETALLE_APPGT')
+          'CANTIDAD_DESPACHADA',
+        if (spec.table == 'ERP_INGRESOS_ALMACEN_DETALLE_APPGT')
+          'CANTIDAD_PENDIENTE_ANTES',
       };
       final columns = <String>[];
       for (final detail in details) {
@@ -5974,17 +5979,38 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                             ),
                             columns: columns
                                 .map((column) => DataColumn(
-                                    label: Text(_tableHeaderLabel(column))))
+                                    label: Text(_erpDetailHeaderLabel(
+                                        spec.table, column))))
                                 .toList(),
                             rows: details
                                 .map((detail) => DataRow(
-                                      cells: columns
-                                          .map((column) => DataCell(Text(
-                                                _displayCellValue(
-                                                    _valueByColumn(
-                                                        detail, column)),
-                                              )))
-                                          .toList(),
+                                      cells: columns.map((column) {
+                                        final value =
+                                            _valueByColumn(detail, column);
+                                        if (_norm(column) == 'FOTO_URL') {
+                                          final photo =
+                                              value?.toString().trim() ?? '';
+                                          return DataCell(photo.isEmpty
+                                              ? const Icon(Icons.photo_outlined,
+                                                  color: Colors.grey)
+                                              : IconButton(
+                                                  tooltip:
+                                                      'Ver foto solicitada',
+                                                  onPressed: () =>
+                                                      ErpImageAttachment.show(
+                                                    dialogContext,
+                                                    storageUrl: photo,
+                                                  ),
+                                                  icon: const Icon(
+                                                    Icons.photo,
+                                                    color: Color(0xFF008C95),
+                                                  ),
+                                                ));
+                                        }
+                                        return DataCell(Text(
+                                          _displayCellValue(value),
+                                        ));
+                                      }).toList(),
                                     ))
                                 .toList(),
                           ),
@@ -6010,6 +6036,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       horizontalController.dispose();
       verticalController.dispose();
     }
+  }
+
+  String _erpDetailHeaderLabel(String table, String column) {
+    if (table == 'ERP_VALES_DESPACHO_DETALLE_APPGT' &&
+        _norm(column) == 'CANTIDAD_SOLICITADA') {
+      return 'cantidad';
+    }
+    return _tableHeaderLabel(column);
   }
 
   bool get _isErpDocumentTable =>
