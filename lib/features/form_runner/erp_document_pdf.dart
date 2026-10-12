@@ -51,7 +51,8 @@ class ErpDocumentPdf {
     }
     return const {
       'APROBADO',
-      'DESPACHADO PARCIALMENTE',
+      'RECIBIDO PARCIAL',
+      'RECIBIDO',
       'DESPACHADO',
     }.contains(state);
   }
@@ -392,30 +393,47 @@ class ErpDocumentPdf {
 
   static pw.Widget _detailsTable(
       String table, List<Map<String, dynamic>> details) {
+    final withoutOrder = table == 'ERP_INGRESOS_ALMACEN_APPGT' &&
+        details.isNotEmpty &&
+        details.every((detail) =>
+            _value(detail, 'orden_numero').toUpperCase() == 'SIN OC');
     final columns = switch (table) {
       'ERP_ORDENES_COMPRA_APPGT' => const [
           ('Código', 'articulo_codigo'),
           ('Descripción', 'descripcion'),
           ('Unidad', 'unidad_medida'),
-          ('Almacén', 'almacen_destino_codigo'),
           ('Solicitado', 'cantidad_solicitada'),
           ('Cantidad OC', 'cantidad'),
           ('Recibido', 'cantidad_recibida'),
           ('Precio', 'precio_unitario'),
           ('% Dcto', 'descuento_porcentaje'),
-          ('Importe', 'subtotal'),
+          ('%IGV', 'impuesto_porcentaje'),
+          ('Importe', 'importe'),
+          ('Descuento', 'descuento'),
+          ('Subtotal', 'subtotal'),
+          ('Impuesto', 'impuesto'),
+          ('Total', 'total'),
         ],
-      'ERP_INGRESOS_ALMACEN_APPGT' => const [
-          ('OC', 'orden_numero'),
-          ('Solicitud', 'solicitud_numero'),
-          ('Código', 'articulo_codigo'),
-          ('Descripción', 'descripcion'),
-          ('Unidad', 'unidad_medida'),
-          ('Almacén', 'almacen_codigo'),
-          ('Ordenada', 'cantidad_ordenada'),
-          ('Pendiente', 'cantidad_pendiente'),
-          ('Recibido', 'cantidad_recibida'),
-        ],
+      'ERP_INGRESOS_ALMACEN_APPGT' => withoutOrder
+          ? const [
+              ('OC', 'orden_numero'),
+              ('Código', 'articulo_codigo'),
+              ('Descripción', 'descripcion'),
+              ('Unidad', 'unidad_medida'),
+              ('Almacén', 'almacen_codigo'),
+              ('Recibido', 'cantidad_recibida'),
+            ]
+          : const [
+              ('OC', 'orden_numero'),
+              ('Solicitud', 'solicitud_numero'),
+              ('Código', 'articulo_codigo'),
+              ('Descripción', 'descripcion'),
+              ('Unidad', 'unidad_medida'),
+              ('Almacén', 'almacen_codigo'),
+              ('Ordenada', 'cantidad_ordenada'),
+              ('Recibido', 'cantidad_recibida'),
+              ('Pendiente', 'cantidad_pendiente'),
+            ],
       'ERP_VALES_DESPACHO_APPGT' => const [
           ('Código', 'articulo_codigo'),
           ('Descripción', 'descripcion'),
@@ -432,7 +450,7 @@ class ErpDocumentPdf {
           ('Precio unitario', 'precio_unitario'),
           ('Total', 'total'),
           ('Recibido', 'cantidad_recibida'),
-          ('Estado recibido', 'estado_de_recibido'),
+          ('Estado', 'estado'),
           ('OC aprobada', 'fecha_oc_aprobada'),
           ('Recibida', 'fecha_recibida'),
           ('Fecha requerida', 'fecha_necesidad'),
@@ -464,17 +482,19 @@ class ErpDocumentPdf {
   }
 
   static pw.Widget _purchaseTotals(Map<String, dynamic> row) {
+    final igv = double.tryParse(_value(row, 'igv_porcentaje')) ?? 18;
+    final igvLabel = igv == igv.roundToDouble()
+        ? igv.toStringAsFixed(0)
+        : igv.toStringAsFixed(2);
+    final includesIgv = const {'TRUE', '1', 'SI', 'SÍ'}
+        .contains(_value(row, 'con_igv').toUpperCase());
     final money = <(String, String)>[
       ('Importe de ítems', _money(row, 'importe_bruto')),
-      (
-        'Descuento total',
-        _value(row, 'otros_descuentos').isEmpty
-            ? _money(row, 'descuento')
-            : _money(row, 'otros_descuentos')
-      ),
+      ('Descuento total', _money(row, 'descuento')),
       ('Subtotal', _money(row, 'subtotal')),
-      ('Impuesto (IGV 18%)', _money(row, 'impuesto')),
+      ('Impuesto (IGV $igvLabel%)', includesIgv ? '' : _money(row, 'impuesto')),
       ('Total', _money(row, 'total')),
+      if (includesIgv) ('', 'IGV incluido'),
     ];
     return pw.Align(
       alignment: pw.Alignment.centerRight,

@@ -5,6 +5,7 @@ import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'erp_document_pdf.dart';
 import 'erp_image_attachment.dart';
 import 'erp_purchase_math.dart';
+import 'erp_sticky_detail_table.dart';
 
 String _text(dynamic value) => value?.toString().trim() ?? '';
 
@@ -82,7 +83,7 @@ class _PurchaseOrderLine {
 
   double get discountAmount => grossAmount - amount;
 
-  Map<String, dynamic> toJson() => {
+  Map<String, dynamic> toJson({String? warehouseOverride}) => {
         'solicitud_numero': requestNumber,
         'solicitud_linea': requestLine,
         'articulo_codigo': articleCode.text.trim(),
@@ -96,7 +97,7 @@ class _PurchaseOrderLine {
             double.tryParse(discountPercent.text.replaceAll(',', '.')) ?? 0,
         'centro_costo': costCenter,
         'lote_agricola': agriculturalLot,
-        'almacen_destino_codigo': warehouse,
+        'almacen_destino_codigo': warehouseOverride ?? warehouse,
       };
 
   void dispose() {
@@ -127,13 +128,13 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
   final _client = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
   final _scrollController = ScrollController();
-  final _detailHorizontalController = ScrollController();
   late final TextEditingController _issueDate;
   late final TextEditingController _deliveryDate;
   late final TextEditingController _exchangeRate;
   late final TextEditingController _paymentTerms;
   late final TextEditingController _observation;
   late final TextEditingController _discount;
+  late final TextEditingController _igvPercentageController;
   final List<_PurchaseOrderLine> _lines = [];
   final List<String> _requestNumbers = [];
   List<Map<String, dynamic>> _approvedRequests = [];
@@ -153,8 +154,6 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
   bool get _editable =>
       _code.isEmpty || _state == 'PENDIENTE' || _state == 'REVISADO';
 
-  double get _itemsAmount =>
-      _lines.fold<double>(0, (sum, line) => sum + line.amount);
   double get _grossItemsAmount =>
       _lines.fold<double>(0, (sum, line) => sum + line.grossAmount);
   double get _lineDiscountValue =>
@@ -163,10 +162,17 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       (double.tryParse(_discount.text.replaceAll(',', '.')) ?? 0)
           .clamp(0, double.infinity)
           .toDouble();
+  double get _igvPercentage =>
+      (double.tryParse(_igvPercentageController.text.replaceAll(',', '.')) ??
+              18)
+          .clamp(0, 100)
+          .toDouble();
+  double get _totalDiscount => _lineDiscountValue + _discountValue;
   ErpPurchaseTotals get _totals => ErpPurchaseTotals.calculate(
-        itemAmount: _itemsAmount,
-        discount: _discountValue,
+        itemAmount: _grossItemsAmount,
+        discount: _totalDiscount,
         includesIgv: _includesIgv,
+        igvPercentage: _igvPercentage,
       );
 
   @override
@@ -201,6 +207,18 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
               _initial['OTROS_DESCUENTOS'] ??
               _initial['descuento'] ??
               _initial['DESCUENTO']),
+    );
+    _igvPercentageController = TextEditingController(
+      text: _text(_initial['igv_porcentaje'] ??
+                  _initial['IGV_PORCENTAJE'] ??
+                  _initial['impuesto_porcentaje'] ??
+                  _initial['IMPUESTO_PORCENTAJE'])
+              .isEmpty
+          ? '18'
+          : _text(_initial['igv_porcentaje'] ??
+              _initial['IGV_PORCENTAJE'] ??
+              _initial['impuesto_porcentaje'] ??
+              _initial['IMPUESTO_PORCENTAJE']),
     );
     _provider =
         _nullable(_initial['proveedor_codigo'] ?? _initial['PROVEEDOR_CODIGO']);
@@ -445,8 +463,8 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       _toast('Seleccione proveedor y almacén.', error: true);
       return;
     }
-    if (_discountValue > _itemsAmount) {
-      _toast('El descuento no puede superar el importe de los ítems.',
+    if (_totalDiscount > _grossItemsAmount) {
+      _toast('El descuento total no puede superar el importe de los ítems.',
           error: true);
       return;
     }
@@ -465,10 +483,13 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
         'p_almacen_codigo': _warehouse,
         'p_observacion': _observation.text.trim(),
         'p_con_igv': _includesIgv,
+        'p_igv_porcentaje': _igvPercentage,
         'p_descuento': _discountValue,
         'p_solicitudes':
             _requestNumbers.map((number) => {'numero': number}).toList(),
-        'p_detalles': _lines.map((line) => line.toJson()).toList(),
+        'p_detalles': _lines
+            .map((line) => line.toJson(warehouseOverride: _warehouse))
+            .toList(),
       });
       final result = raw is Map ? Map<String, dynamic>.from(raw) : const {};
       if (!mounted) return;
@@ -529,9 +550,10 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
     );
   }
 
-  Widget _dateField(TextEditingController controller, String label) {
+  Widget _dateField(TextEditingController controller, String label,
+      {double width = 178}) {
     return SizedBox(
-      width: 210,
+      width: width,
       child: TextFormField(
         controller: controller,
         readOnly: true,
@@ -548,10 +570,11 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
     required List<Map<String, dynamic>> rows,
     required String Function(Map<String, dynamic>) labelBuilder,
     required ValueChanged<String?> onChanged,
+    double width = 310,
   }) {
     final values = rows.map((row) => _text(row['codigo'])).toSet();
     return SizedBox(
-      width: 310,
+      width: width,
       child: DropdownButtonFormField<String>(
         initialValue: value != null && values.contains(value) ? value : null,
         isExpanded: true,
@@ -570,8 +593,70 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
     );
   }
 
+  Future<void> _openObservation() async {
+    final draft = TextEditingController(text: _observation.text);
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(),
+        title: const Text('Observaciones'),
+        content: SizedBox(
+          width: 560,
+          child: TextFormField(
+            controller: draft,
+            readOnly: !_editable,
+            autofocus: _editable,
+            minLines: 4,
+            maxLines: 8,
+            decoration: _decoration('Observaciones'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(_editable ? 'Cancelar' : 'Cerrar'),
+          ),
+          if (_editable)
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Aceptar'),
+            ),
+        ],
+      ),
+    );
+    if (accepted == true) _observation.text = draft.text.trim();
+    draft.dispose();
+  }
+
+  Widget _observationButton() => Tooltip(
+        message: 'Observaciones',
+        child: SizedBox(
+          width: 48,
+          height: 48,
+          child: OutlinedButton(
+            onPressed: _openObservation,
+            style: OutlinedButton.styleFrom(
+              padding: EdgeInsets.zero,
+              shape: const RoundedRectangleBorder(),
+            ),
+            child: Icon(
+              _observation.text.trim().isEmpty
+                  ? Icons.comment_outlined
+                  : Icons.comment,
+            ),
+          ),
+        ),
+      );
+
+  String get _igvLabel {
+    final value = _igvPercentage;
+    return value == value.roundToDouble()
+        ? value.toStringAsFixed(0)
+        : value.toStringAsFixed(2);
+  }
+
   Widget _moneySummary() {
-    Widget line(String label, double value, {bool total = false}) => Padding(
+    Widget line(String label, double? value, {bool total = false}) => Padding(
           padding: const EdgeInsets.symmetric(vertical: 3),
           child: Row(children: [
             Expanded(
@@ -579,7 +664,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                     style: TextStyle(
                         fontWeight:
                             total ? FontWeight.w800 : FontWeight.w500))),
-            Text('$_currency ${value.toStringAsFixed(2)}',
+            Text(value == null ? '' : '$_currency ${value.toStringAsFixed(2)}',
                 style: TextStyle(
                     fontWeight: total ? FontWeight.w800 : FontWeight.w600)),
           ]),
@@ -592,11 +677,21 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       ),
       child: Column(children: [
         line('Importe de ítems', _grossItemsAmount),
-        line('Descuento total', _lineDiscountValue + _discountValue),
+        line('Descuento total', _totalDiscount),
         line('Subtotal', _totals.subtotal),
-        line('Impuesto (IGV 18%)', _totals.impuesto),
+        line('Impuesto (IGV $_igvLabel%)', _totals.impuesto),
         const Divider(),
         line('Total', _totals.total, total: true),
+        if (_includesIgv) ...[
+          const SizedBox(height: 6),
+          const Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              'IGV incluido',
+              style: TextStyle(fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ]),
     );
   }
@@ -630,109 +725,119 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       );
     }
 
-    Widget warehouseInput(_PurchaseOrderLine line) {
-      final values = _warehouses.map((row) => _text(row['codigo'])).toSet();
-      return SizedBox(
-        width: 210,
-        child: DropdownButtonFormField<String>(
-          initialValue: values.contains(line.warehouse) ? line.warehouse : null,
-          isExpanded: true,
-          decoration: const InputDecoration(
-            isDense: true,
-            border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-          ),
-          items: _warehouses
-              .map((row) => DropdownMenuItem(
-                    value: _text(row['codigo']),
-                    child: Text('${row['codigo']} · ${row['nombre']}',
-                        overflow: TextOverflow.ellipsis),
-                  ))
-              .toList(),
-          onChanged: !_editable
-              ? null
-              : (value) => setState(() => line.warehouse = value),
-          validator: (value) =>
-              _text(value).isEmpty ? 'Seleccione almacén' : null,
-        ),
-      );
-    }
-
-    double lineTax(_PurchaseOrderLine line) => _includesIgv
-        ? (line.amount == 0 ? 0 : line.amount - (line.amount / 1.18))
-        : line.amount * .18;
+    double? lineTax(_PurchaseOrderLine line) =>
+        _includesIgv ? null : line.amount * _igvPercentage / 100;
     double lineTotal(_PurchaseOrderLine line) =>
-        _includesIgv ? line.amount : line.amount + lineTax(line);
+        line.amount + (lineTax(line) ?? 0);
 
-    return Scrollbar(
-      controller: _detailHorizontalController,
-      thumbVisibility: true,
-      trackVisibility: true,
-      scrollbarOrientation: ScrollbarOrientation.bottom,
-      notificationPredicate: (notification) =>
-          notification.metrics.axis == Axis.horizontal,
-      child: SingleChildScrollView(
-        controller: _detailHorizontalController,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 14),
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(const Color(0xFF42576B)),
-          headingTextStyle:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          columns: const [
-            DataColumn(label: Text('Solicitud')),
-            DataColumn(label: Text('Artículo código')),
-            DataColumn(label: Text('Descripción')),
-            DataColumn(label: Text('Cant. solicitada')),
-            DataColumn(label: Text('Cantidad')),
-            DataColumn(label: Text('Unidad de medida')),
-            DataColumn(label: Text('Almacén')),
-            DataColumn(label: Text('Precio unitario')),
-            DataColumn(label: Text('Descuento %')),
-            DataColumn(label: Text('Importe')),
-            DataColumn(label: Text('Subtotal')),
-            DataColumn(label: Text('Impuesto')),
-            DataColumn(label: Text('Total')),
-            DataColumn(label: Text('Foto')),
-            DataColumn(label: Text('')),
-          ],
-          rows: _lines.asMap().entries.map((entry) {
-            final index = entry.key;
-            final line = entry.value;
-            return DataRow(cells: [
-              DataCell(Text(line.requestNumber)),
-              DataCell(input(line.articleCode, width: 130)),
-              DataCell(input(line.description, width: 260)),
-              DataCell(Text(line.requestedQuantity.toStringAsFixed(2))),
-              DataCell(input(line.quantity, numeric: true)),
-              DataCell(input(line.unit, width: 90)),
-              DataCell(warehouseInput(line)),
-              DataCell(input(line.price, numeric: true)),
-              DataCell(input(line.discountPercent, width: 90, numeric: true)),
-              DataCell(Text(line.grossAmount.toStringAsFixed(2))),
-              DataCell(Text(line.amount.toStringAsFixed(2))),
-              DataCell(Text(lineTax(line).toStringAsFixed(2))),
-              DataCell(Text(lineTotal(line).toStringAsFixed(2))),
-              DataCell(line.photoUrl.isEmpty
-                  ? const Icon(Icons.photo_outlined, color: Colors.grey)
-                  : IconButton(
-                      tooltip: 'Ver foto solicitada',
-                      onPressed: () => ErpImageAttachment.show(
-                        context,
-                        storageUrl: line.photoUrl,
-                      ),
-                      icon: const Icon(Icons.photo, color: Color(0xFF008C95)),
-                    )),
-              DataCell(_editable
-                  ? IconButton(
-                      tooltip: 'Quitar fila',
-                      onPressed: () => _removeLine(index),
-                      icon: const Icon(Icons.close, color: Colors.red),
-                    )
-                  : const SizedBox.shrink()),
-            ]);
-          }).toList(),
+    return ErpStickyDetailTable<_PurchaseOrderLine>(
+      frozenColumnCount: 2,
+      rows: _lines,
+      columns: [
+        ErpDetailColumn(
+          label: 'Solicitud',
+          width: 145,
+          cellBuilder: (_, line, __) => Text(line.requestNumber),
         ),
-      ),
+        ErpDetailColumn(
+          label: 'Artículo código',
+          width: 160,
+          cellBuilder: (_, line, __) => input(line.articleCode, width: 136),
+        ),
+        ErpDetailColumn(
+          label: 'Descripción',
+          width: 284,
+          cellBuilder: (_, line, __) => input(line.description, width: 260),
+        ),
+        ErpDetailColumn(
+          label: 'Cant. solicitada',
+          width: 130,
+          cellBuilder: (_, line, __) =>
+              Text(line.requestedQuantity.toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Cantidad',
+          width: 144,
+          cellBuilder: (_, line, __) => input(line.quantity, numeric: true),
+        ),
+        ErpDetailColumn(
+          label: 'Unidad de medida',
+          width: 120,
+          cellBuilder: (_, line, __) => input(line.unit, width: 96),
+        ),
+        ErpDetailColumn(
+          label: 'Precio unitario',
+          width: 144,
+          cellBuilder: (_, line, __) => input(line.price, numeric: true),
+        ),
+        ErpDetailColumn(
+          label: 'Descuento %',
+          width: 116,
+          cellBuilder: (_, line, __) =>
+              input(line.discountPercent, width: 92, numeric: true),
+        ),
+        ErpDetailColumn(
+          label: '%IGV',
+          width: 84,
+          cellBuilder: (_, __, ___) => Text(_igvLabel),
+        ),
+        ErpDetailColumn(
+          label: 'Importe',
+          width: 116,
+          cellBuilder: (_, line, __) =>
+              Text(line.grossAmount.toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Descuento',
+          width: 116,
+          cellBuilder: (_, line, __) =>
+              Text(line.discountAmount.toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Subtotal',
+          width: 116,
+          cellBuilder: (_, line, __) => Text(line.amount.toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Impuesto',
+          width: 116,
+          cellBuilder: (_, line, __) {
+            final tax = lineTax(line);
+            return Text(tax == null ? '' : tax.toStringAsFixed(2));
+          },
+        ),
+        ErpDetailColumn(
+          label: 'Total',
+          width: 116,
+          cellBuilder: (_, line, __) =>
+              Text(lineTotal(line).toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Foto',
+          width: 78,
+          cellBuilder: (_, line, __) => line.photoUrl.isEmpty
+              ? const Icon(Icons.photo_outlined, color: Colors.grey)
+              : IconButton(
+                  tooltip: 'Ver foto solicitada',
+                  onPressed: () => ErpImageAttachment.show(
+                    context,
+                    storageUrl: line.photoUrl,
+                  ),
+                  icon: const Icon(Icons.photo, color: Color(0xFF008C95)),
+                ),
+        ),
+        ErpDetailColumn(
+          label: '',
+          width: 66,
+          cellBuilder: (_, __, index) => _editable
+              ? IconButton(
+                  tooltip: 'Quitar fila',
+                  onPressed: () => _removeLine(index),
+                  icon: const Icon(Icons.close, color: Colors.red),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 
@@ -745,6 +850,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       _paymentTerms,
       _observation,
       _discount,
+      _igvPercentageController,
     ]) {
       controller.dispose();
     }
@@ -752,7 +858,6 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
       line.dispose();
     }
     _scrollController.dispose();
-    _detailHorizontalController.dispose();
     super.dispose();
   }
 
@@ -821,22 +926,31 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                         onChanged: (value) => setState(() => _provider = value),
                       ),
                       _field(_paymentTerms, 'Condición de pago'),
+                    ]),
+                    const SizedBox(height: 12),
+                    Wrap(spacing: 12, runSpacing: 12, children: [
+                      _dateField(_issueDate, 'Fecha de emisión', width: 178),
+                      _dateField(_deliveryDate, 'Fecha de entrega programada',
+                          width: 196),
                       _catalogDropdown(
                         label: 'Almacén',
                         value: _warehouse,
                         rows: _warehouses,
                         labelBuilder: (row) =>
                             '${row['codigo']} · ${row['nombre']}',
-                        onChanged: (value) =>
-                            setState(() => _warehouse = value),
+                        width: 220,
+                        onChanged: (value) => setState(() {
+                          _warehouse = value;
+                          for (final line in _lines) {
+                            line.warehouse = value;
+                          }
+                        }),
                       ),
                     ]),
                     const SizedBox(height: 12),
                     Wrap(spacing: 12, runSpacing: 12, children: [
-                      _dateField(_issueDate, 'Fecha de emisión'),
-                      _dateField(_deliveryDate, 'Fecha de entrega programada'),
                       SizedBox(
-                        width: 140,
+                        width: 116,
                         child: DropdownButtonFormField<String>(
                           initialValue: _currency,
                           decoration: _decoration('Moneda'),
@@ -852,20 +966,11 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                         ),
                       ),
                       _field(_exchangeRate, 'Tipo de cambio',
-                          width: 160,
+                          width: 132,
                           required: true,
                           keyboardType: const TextInputType.numberWithOptions(
                               decimal: true)),
-                    ]),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _observation,
-                      readOnly: !_editable,
-                      maxLines: 2,
-                      decoration: _decoration('Observaciones'),
-                    ),
-                    const SizedBox(height: 14),
-                    Row(children: [
+                      _observationButton(),
                       Checkbox(
                         value: _includesIgv,
                         onChanged: !_editable
@@ -874,11 +979,19 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
                                 setState(() => _includesIgv = value ?? false),
                       ),
                       const Text('Con IGV'),
-                      const SizedBox(width: 18),
+                      _field(
+                        _igvPercentageController,
+                        '%IGV',
+                        width: 96,
+                        required: true,
+                        keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true),
+                        onChanged: (_) => setState(() {}),
+                      ),
                       _field(
                         _discount,
                         'Otros Dctos.',
-                        width: 180,
+                        width: 136,
                         keyboardType: const TextInputType.numberWithOptions(
                             decimal: true),
                         onChanged: (_) => setState(() {}),

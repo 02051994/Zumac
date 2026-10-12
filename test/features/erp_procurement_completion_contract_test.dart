@@ -51,15 +51,28 @@ void main() {
     expect(result.total, 1062);
   });
 
-  test('totales con IGV desagregan el total usando 1.18', () {
+  test('totales con IGV conservan subtotal y dejan impuesto vacío', () {
     final result = ErpPurchaseTotals.calculate(
       itemAmount: 1180,
-      discount: 0,
+      discount: 180,
       includesIgv: true,
     );
-    expect(result.subtotal, closeTo(1000, .000001));
-    expect(result.impuesto, closeTo(180, .000001));
-    expect(result.total, 1180);
-    expect(result.importeBruto, closeTo(1000, .000001));
+    expect(result.importeBruto, 1180);
+    expect(result.descuento, 180);
+    expect(result.subtotal, 1000);
+    expect(result.impuesto, isNull);
+    expect(result.total, 1000);
+  });
+
+  test('el porcentaje de IGV configurable participa en el cálculo', () {
+    final result = ErpPurchaseTotals.calculate(
+      itemAmount: 1000,
+      discount: 100,
+      includesIgv: false,
+      igvPercentage: 10,
+    );
+    expect(result.subtotal, 900);
+    expect(result.impuesto, 90);
+    expect(result.total, 990);
   });
 }

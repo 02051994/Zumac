@@ -52,11 +52,11 @@ void main() {
     expect(workflow, contains("'erp_guardar_solicitud_pedido_v2'"));
     expect(workflow, contains("label: 'Proveedor'"));
     expect(workflow, contains("label: 'Almacén'"));
-    expect(workflow, contains("DataColumn(label: Text('Foto'))"));
+    expect(workflow, contains("label: 'Foto'"));
     expect(workflow, contains("'erp_registrar_ingreso_compra_v2'"));
     expect(workflow, contains("_textInput(_guide, 'Número de documento'"));
     expect(purchaseOrder, contains("line('Descuento total'"));
-    expect(purchaseOrder, contains("line('Impuesto (IGV 18%)'"));
+    expect(purchaseOrder, contains("line('Impuesto (IGV \$_igvLabel%)'"));
     expect(purchaseOrder, isNot(contains("line('Dctos. por ítem'")));
   });
 }

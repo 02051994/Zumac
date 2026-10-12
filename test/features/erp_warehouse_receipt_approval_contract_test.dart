@@ -17,6 +17,9 @@ void main() {
   final records = File(
     'lib/features/formats/desktop_format_records_page.dart',
   ).readAsStringSync();
+  final stickyTable = File(
+    'lib/features/form_runner/erp_sticky_detail_table.dart',
+  ).readAsStringSync();
 
   test('publica ingresos y detalles de almacén y vales con identidad activa',
       () {
@@ -51,8 +54,8 @@ void main() {
   });
 
   test('solicitud usa detalle tabular, precio y cierre idempotente', () {
-    expect(workflow, contains("DataColumn(label: Text('Precio unitario'))"));
-    expect(workflow, contains("DataColumn(label: Text('Total'))"));
+    expect(workflow, contains("label: 'Precio unitario'"));
+    expect(workflow, contains("label: 'Total'"));
     expect(workflow, contains("'p_centro_costo': null"));
     expect(workflow, contains('if (_saving || !_editable'));
     expect(workflow, contains('Navigator.of(context).pop()'));
@@ -82,7 +85,10 @@ void main() {
     expect(records, contains('controller: horizontalController'));
     expect(records, contains('controller: verticalController'));
     expect(records, contains('ScrollbarOrientation.bottom'));
-    expect(workflow, contains('controller: _detailHorizontalController'));
-    expect(purchaseOrder, contains('controller: _detailHorizontalController'));
+    expect(stickyTable, contains('controller: _bodyHorizontal'));
+    expect(stickyTable, contains('controller: _bodyVertical'));
+    expect(stickyTable, contains('ScrollbarOrientation.bottom'));
+    expect(workflow, contains('ErpStickyDetailTable<'));
+    expect(purchaseOrder, contains('ErpStickyDetailTable<'));
   });
 }

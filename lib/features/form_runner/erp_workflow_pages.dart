@@ -4,6 +4,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'erp_document_pdf.dart';
 import 'erp_image_attachment.dart';
+import 'erp_sticky_detail_table.dart';
 
 List<Map<String, dynamic>> _erpRows(dynamic value) {
   if (value is! List) return const [];
@@ -201,7 +202,6 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
   final _client = Supabase.instance.client;
   final _formKey = GlobalKey<FormState>();
   final _scrollController = ScrollController();
-  final _detailHorizontalController = ScrollController();
   late final TextEditingController _date;
   late final TextEditingController _needDate;
   late final TextEditingController _requester;
@@ -244,7 +244,10 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       text: _erpText(_initial['area'] ?? _initial['AREA']),
     );
     _justification = TextEditingController(
-      text: _erpText(_initial['justificacion'] ?? _initial['JUSTIFICACION']),
+      text: _erpText(_initial['observacion'] ??
+          _initial['OBSERVACION'] ??
+          _initial['justificacion'] ??
+          _initial['JUSTIFICACION']),
     );
     _warehouse =
         _nullable(_initial['almacen_codigo'] ?? _initial['ALMACEN_CODIGO']);
@@ -473,6 +476,41 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
     }
   }
 
+  Future<void> _openObservation() async {
+    final draft = TextEditingController(text: _justification.text);
+    final accepted = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: const RoundedRectangleBorder(),
+        title: const Text('Observaciones'),
+        content: SizedBox(
+          width: 560,
+          child: TextFormField(
+            controller: draft,
+            readOnly: !_editable,
+            autofocus: _editable,
+            minLines: 4,
+            maxLines: 8,
+            decoration: _erpDecoration('Observaciones'),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(_editable ? 'Cancelar' : 'Cerrar'),
+          ),
+          if (_editable)
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Aceptar'),
+            ),
+        ],
+      ),
+    );
+    if (accepted == true) _justification.text = draft.text.trim();
+    draft.dispose();
+  }
+
   Widget _requestItemsTable() {
     if (_lines.isEmpty) {
       return const Card(
@@ -509,56 +547,61 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       );
     }
 
-    return Scrollbar(
-      controller: _detailHorizontalController,
-      thumbVisibility: true,
-      trackVisibility: true,
-      scrollbarOrientation: ScrollbarOrientation.bottom,
-      notificationPredicate: (notification) =>
-          notification.metrics.axis == Axis.horizontal,
-      child: SingleChildScrollView(
-        controller: _detailHorizontalController,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 14),
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(const Color(0xFF42576B)),
-          headingTextStyle:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          columns: const [
-            DataColumn(label: Text('Artículo código')),
-            DataColumn(label: Text('Descripción')),
-            DataColumn(label: Text('Cantidad')),
-            DataColumn(label: Text('Unidad de medida')),
-            DataColumn(label: Text('Precio unitario')),
-            DataColumn(label: Text('Total')),
-            DataColumn(label: Text('Foto')),
-            DataColumn(label: Text('')),
-          ],
-          rows: _lines.asMap().entries.map((entry) {
-            final index = entry.key;
-            final line = entry.value;
-            return DataRow(cells: [
-              DataCell(Text(_erpText(line.article['codigo']))),
-              DataCell(SizedBox(
-                  width: 240, child: Text(_erpText(line.article['nombre'])))),
-              DataCell(numberInput(line.quantity, mustBePositive: true)),
-              DataCell(Text(_erpText(line.article['unidad_medida']))),
-              DataCell(numberInput(line.price)),
-              DataCell(Text(line.total.toStringAsFixed(2))),
-              DataCell(_photoCell(line)),
-              DataCell(_editable
-                  ? IconButton(
-                      tooltip: 'Quitar artículo',
-                      onPressed: () => setState(() {
-                        _lines.removeAt(index).dispose();
-                      }),
-                      icon: const Icon(Icons.close, color: Colors.red),
-                    )
-                  : const SizedBox.shrink()),
-            ]);
-          }).toList(),
+    return ErpStickyDetailTable<_EditableArticleLine>(
+      frozenColumnCount: 1,
+      rows: _lines,
+      columns: [
+        ErpDetailColumn(
+          label: 'Artículo código',
+          width: 160,
+          cellBuilder: (_, line, __) => Text(_erpText(line.article['codigo'])),
         ),
-      ),
+        ErpDetailColumn(
+          label: 'Descripción',
+          width: 264,
+          cellBuilder: (_, line, __) => Text(_erpText(line.article['nombre'])),
+        ),
+        ErpDetailColumn(
+          label: 'Cantidad',
+          width: 144,
+          cellBuilder: (_, line, __) =>
+              numberInput(line.quantity, mustBePositive: true),
+        ),
+        ErpDetailColumn(
+          label: 'Unidad de medida',
+          width: 136,
+          cellBuilder: (_, line, __) =>
+              Text(_erpText(line.article['unidad_medida'])),
+        ),
+        ErpDetailColumn(
+          label: 'Precio unitario',
+          width: 144,
+          cellBuilder: (_, line, __) => numberInput(line.price),
+        ),
+        ErpDetailColumn(
+          label: 'Total',
+          width: 116,
+          cellBuilder: (_, line, __) => Text(line.total.toStringAsFixed(2)),
+        ),
+        ErpDetailColumn(
+          label: 'Foto',
+          width: 76,
+          cellBuilder: (_, line, __) => _photoCell(line),
+        ),
+        ErpDetailColumn(
+          label: '',
+          width: 66,
+          cellBuilder: (_, __, index) => _editable
+              ? IconButton(
+                  tooltip: 'Quitar artículo',
+                  onPressed: () => setState(() {
+                    _lines.removeAt(index).dispose();
+                  }),
+                  icon: const Icon(Icons.close, color: Colors.red),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 
@@ -577,7 +620,6 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       line.dispose();
     }
     _scrollController.dispose();
-    _detailHorizontalController.dispose();
     super.dispose();
   }
 
@@ -687,14 +729,26 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
                           onChanged: (value) =>
                               setState(() => _warehouse = value),
                         ),
+                        Tooltip(
+                          message: 'Observaciones',
+                          child: SizedBox(
+                            width: 48,
+                            height: 48,
+                            child: OutlinedButton(
+                              onPressed: _openObservation,
+                              style: OutlinedButton.styleFrom(
+                                padding: EdgeInsets.zero,
+                                shape: const RoundedRectangleBorder(),
+                              ),
+                              child: Icon(
+                                _justification.text.trim().isEmpty
+                                    ? Icons.comment_outlined
+                                    : Icons.comment,
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
-                    ),
-                    const SizedBox(height: 12),
-                    TextFormField(
-                      controller: _justification,
-                      readOnly: !_editable,
-                      maxLines: 2,
-                      decoration: _erpDecoration('Justificación'),
                     ),
                     const SizedBox(height: 18),
                     Text('Artículos e insumos (${_lines.length})',
@@ -787,12 +841,24 @@ class _ReceiptLine {
 
   _ReceiptLine(this.data, {String? received})
       : quantity = TextEditingController(
-          text: received ?? _erpText(data['cantidad_pendiente']),
+          text: received ?? '',
         ),
         lot = TextEditingController(text: _erpText(data['lote'])),
         expiry =
             TextEditingController(text: _erpText(data['fecha_vencimiento'])),
         included = true;
+
+  double get received =>
+      double.tryParse(quantity.text.replaceAll(',', '.')) ?? 0;
+
+  double get pendingBefore =>
+      double.tryParse(_erpText(data['cantidad_pendiente_antes'] ??
+          data['cantidad_pendiente'] ??
+          data['cantidad_oc'] ??
+          data['cantidad_ordenada'])) ??
+      0;
+
+  double get pending => (pendingBefore - received).clamp(0, double.infinity);
 
   void dispose() {
     quantity.dispose();
@@ -818,7 +884,6 @@ class ErpPurchaseReceiptPage extends StatefulWidget {
 class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
   final _client = Supabase.instance.client;
   final _scrollController = ScrollController();
-  final _detailHorizontalController = ScrollController();
   final _date = TextEditingController(text: _today());
   final _user = TextEditingController();
   final _guide = TextEditingController();
@@ -826,6 +891,7 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
   final List<_ReceiptLine> _lines = [];
   List<Map<String, dynamic>> _orders = [];
   List<Map<String, dynamic>> _warehouses = [];
+  List<Map<String, dynamic>> _articles = [];
   Map<String, dynamic>? _selected;
   String _documentType = 'GUIA DE REMISION';
   String? _warehouse;
@@ -836,6 +902,8 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
   String get _receiptNumber =>
       _erpText(_initial['numero'] ?? _initial['NUMERO']);
   bool get _readOnly => _receiptNumber.isNotEmpty;
+  bool get _withoutOrder =>
+      _erpText(_selected?['numero']).toUpperCase() == 'SIN OC';
 
   @override
   void initState() {
@@ -874,9 +942,16 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
             .eq('estado', 'ACTIVO')
             .eq('eliminado', false)
             .order('nombre'),
+        _client
+            .from('ERP_ARTICULOS_APPGT')
+            .select('codigo,nombre,unidad_medida,costo_estandar')
+            .eq('estado', 'ACTIVO')
+            .eq('eliminado', false)
+            .order('nombre'),
       ]);
       final identity = _erpMap(base[0]);
       _warehouses = _erpRows(base[1]);
+      _articles = _erpRows(base[2]);
       if (!_readOnly) _user.text = _erpText(identity['solicitante']);
       if (_readOnly) {
         final raw = await _client
@@ -895,7 +970,7 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
               _initial['almacen_codigo'] ?? _initial['ALMACEN_CODIGO'],
         };
         for (final row in details) {
-          row['linea'] = row['orden_linea'];
+          row['linea'] = row['orden_linea'] ?? row['linea'];
           row['cantidad_oc'] = row['cantidad_ordenada'];
           row['cantidad_pendiente'] = row['cantidad_pendiente'] ??
               ((double.tryParse(_erpText(row['cantidad_pendiente_antes'])) ??
@@ -925,7 +1000,13 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     _lines.clear();
     _selected = number == null
         ? null
-        : _orders.firstWhere((row) => _erpText(row['numero']) == number);
+        : number == 'SIN OC'
+            ? <String, dynamic>{
+                'numero': 'SIN OC',
+                'referencia': 'SIN OC',
+                'detalles': <dynamic>[],
+              }
+            : _orders.firstWhere((row) => _erpText(row['numero']) == number);
     final suggestedWarehouse = _erpText(_selected?['almacen_codigo']);
     if (suggestedWarehouse.isNotEmpty) _warehouse = suggestedWarehouse;
     for (final detail in _erpRows(_selected?['detalles'])) {
@@ -934,10 +1015,28 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     setState(() {});
   }
 
+  Future<void> _addReceiptArticle() async {
+    final article = await showSearch<Map<String, dynamic>?>(
+      context: context,
+      delegate: _ArticleSearch(_articles),
+    );
+    if (article == null || !mounted) return;
+    setState(() {
+      _lines.add(_ReceiptLine({
+        'linea': _lines.length + 1,
+        'articulo_codigo': article['codigo'],
+        'descripcion': article['nombre'],
+        'unidad_medida': article['unidad_medida'],
+        'costo_unitario': article['costo_estandar'] ?? 0,
+      }));
+    });
+  }
+
   Future<void> _save() async {
     if (_saving) return;
     if (_selected == null) {
-      _erpToast(context, 'Seleccione una orden de compra.', error: true);
+      _erpToast(context, 'Seleccione una orden de compra o SIN OC.',
+          error: true);
       return;
     }
     if (_guide.text.trim().isEmpty) {
@@ -952,6 +1051,10 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
         .where((line) => line.included)
         .map((line) => {
               'linea': line.data['linea'],
+              'articulo_codigo': line.data['articulo_codigo'],
+              'descripcion': line.data['descripcion'],
+              'unidad_medida': line.data['unidad_medida'],
+              'costo_unitario': line.data['costo_unitario'] ?? 0,
               'cantidad_recibida':
                   double.tryParse(line.quantity.text.replaceAll(',', '.')) ?? 0,
               'lote': line.lot.text.trim(),
@@ -981,8 +1084,10 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
       if (!mounted) return;
       _erpToast(
         context,
-        'Ingreso ${result['ingreso_numero'] ?? ''} confirmado. '
-        'OC: ${result['estado_orden'] ?? ''}.',
+        _withoutOrder
+            ? 'Ingreso ${result['ingreso_numero'] ?? ''} guardado como PENDIENTE.'
+            : 'Ingreso ${result['ingreso_numero'] ?? ''} confirmado. '
+                'OC: ${result['estado_orden'] ?? ''}.',
       );
       _finishAfterSave();
     } catch (error) {
@@ -1027,82 +1132,109 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
             isDense: true,
             border: OutlineInputBorder(borderRadius: BorderRadius.zero),
           ),
+          onChanged: (_) => setState(() {}),
         ),
       );
     }
 
-    return Scrollbar(
-      controller: _detailHorizontalController,
-      thumbVisibility: true,
-      trackVisibility: true,
-      scrollbarOrientation: ScrollbarOrientation.bottom,
-      notificationPredicate: (notification) =>
-          notification.metrics.axis == Axis.horizontal,
-      child: SingleChildScrollView(
-        controller: _detailHorizontalController,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 14),
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(const Color(0xFF42576B)),
-          headingTextStyle:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          columns: const [
-            DataColumn(label: Text('Ingresar')),
-            DataColumn(label: Text('Artículo código')),
-            DataColumn(label: Text('Descripción')),
-            DataColumn(label: Text('Unidad de medida')),
-            DataColumn(label: Text('Cantidad ordenada')),
-            DataColumn(label: Text('Cantidad pendiente')),
-            DataColumn(label: Text('Cantidad recibida')),
-            DataColumn(label: Text('Almacén')),
-            DataColumn(label: Text('Lote')),
-            DataColumn(label: Text('Fecha vencimiento')),
-          ],
-          rows: _lines.map((line) {
-            return DataRow(
-              color: WidgetStatePropertyAll(
-                  line.included ? Colors.white : Colors.grey.shade200),
-              cells: [
-                DataCell(_readOnly
-                    ? const Icon(Icons.check_circle_outline)
-                    : Checkbox(
-                        value: line.included,
-                        onChanged: (value) =>
-                            setState(() => line.included = value ?? false),
-                      )),
-                DataCell(Text(_erpText(line.data['articulo_codigo']))),
-                DataCell(SizedBox(
-                    width: 260,
-                    child: Text(_erpText(line.data['descripcion'])))),
-                DataCell(Text(_erpText(line.data['unidad_medida']))),
-                DataCell(Text(_erpText(line.data['cantidad_oc']).isEmpty
-                    ? _erpText(line.data['cantidad_ordenada'])
-                    : _erpText(line.data['cantidad_oc']))),
-                DataCell(Text(_erpText(line.data['cantidad_pendiente']))),
-                DataCell(input(line.quantity, !_readOnly && line.included)),
-                DataCell(Text(_warehouse ?? '')),
-                DataCell(
-                    input(line.lot, !_readOnly && line.included, width: 150)),
-                DataCell(SizedBox(
-                  width: 170,
-                  child: TextFormField(
-                    controller: line.expiry,
-                    readOnly: true,
-                    onTap: !_readOnly && line.included
-                        ? () => _pickDate(context, line.expiry)
-                        : null,
-                    decoration: const InputDecoration(
-                      isDense: true,
-                      border:
-                          OutlineInputBorder(borderRadius: BorderRadius.zero),
-                    ),
-                  ),
-                )),
-              ],
-            );
-          }).toList(),
+    final columns = <ErpDetailColumn<_ReceiptLine>>[
+      ErpDetailColumn(
+        label: 'Ingresar',
+        width: 82,
+        cellBuilder: (_, line, __) => _readOnly
+            ? const Icon(Icons.check_circle_outline)
+            : Checkbox(
+                value: line.included,
+                onChanged: (value) =>
+                    setState(() => line.included = value ?? false),
+              ),
+      ),
+      ErpDetailColumn(
+        label: 'Artículo código',
+        width: 160,
+        cellBuilder: (_, line, __) =>
+            Text(_erpText(line.data['articulo_codigo'])),
+      ),
+      ErpDetailColumn(
+        label: 'Descripción',
+        width: 284,
+        cellBuilder: (_, line, __) => Text(_erpText(line.data['descripcion'])),
+      ),
+      ErpDetailColumn(
+        label: 'Unidad de medida',
+        width: 136,
+        cellBuilder: (_, line, __) =>
+            Text(_erpText(line.data['unidad_medida'])),
+      ),
+      if (!_withoutOrder)
+        ErpDetailColumn(
+          label: 'Cantidad ordenada',
+          width: 148,
+          cellBuilder: (_, line, __) => Text(
+            _erpText(line.data['cantidad_oc']).isEmpty
+                ? _erpText(line.data['cantidad_ordenada'])
+                : _erpText(line.data['cantidad_oc']),
+          ),
+        ),
+      ErpDetailColumn(
+        label: 'Cantidad recibida',
+        width: 144,
+        cellBuilder: (_, line, __) =>
+            input(line.quantity, !_readOnly && line.included),
+      ),
+      if (!_withoutOrder)
+        ErpDetailColumn(
+          label: 'Cantidad pendiente',
+          width: 148,
+          cellBuilder: (_, line, __) => Text(line.pending.toStringAsFixed(2)),
+        ),
+      ErpDetailColumn(
+        label: 'Almacén',
+        width: 136,
+        cellBuilder: (_, __, ___) => Text(_warehouse ?? ''),
+      ),
+      ErpDetailColumn(
+        label: 'Lote',
+        width: 174,
+        cellBuilder: (_, line, __) =>
+            input(line.lot, !_readOnly && line.included, width: 150),
+      ),
+      ErpDetailColumn(
+        label: 'Fecha vencimiento',
+        width: 194,
+        cellBuilder: (_, line, __) => SizedBox(
+          width: 170,
+          child: TextFormField(
+            controller: line.expiry,
+            readOnly: true,
+            onTap: !_readOnly && line.included
+                ? () => _pickDate(context, line.expiry)
+                : null,
+            decoration: const InputDecoration(
+              isDense: true,
+              border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+            ),
+          ),
         ),
       ),
+      if (_withoutOrder && !_readOnly)
+        ErpDetailColumn(
+          label: '',
+          width: 66,
+          cellBuilder: (_, __, index) => IconButton(
+            tooltip: 'Quitar artículo',
+            onPressed: () => setState(() {
+              _lines.removeAt(index).dispose();
+            }),
+            icon: const Icon(Icons.close, color: Colors.red),
+          ),
+        ),
+    ];
+
+    return ErpStickyDetailTable<_ReceiptLine>(
+      frozenColumnCount: 2,
+      rows: _lines,
+      columns: columns,
     );
   }
 
@@ -1113,7 +1245,6 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     _guide.dispose();
     _observation.dispose();
     _scrollController.dispose();
-    _detailHorizontalController.dispose();
     for (final line in _lines) {
       line.dispose();
     }
@@ -1170,6 +1301,13 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
             ),
         ],
       ),
+      floatingActionButton: !_readOnly && _withoutOrder
+          ? FloatingActionButton.extended(
+              onPressed: _addReceiptArticle,
+              icon: const Icon(Icons.add),
+              label: const Text('Artículo'),
+            )
+          : null,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : Scrollbar(
@@ -1188,17 +1326,21 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
                       isExpanded: true,
                       decoration:
                           _erpDecoration('Número de orden - RUC de proveedor'),
-                      items: _orders
-                          .map((row) => DropdownMenuItem(
-                                value: _erpText(row['numero']),
-                                child: Text(_erpText(row['referencia'])),
-                              ))
-                          .toList(),
+                      items: [
+                        const DropdownMenuItem(
+                          value: 'SIN OC',
+                          child: Text('SIN OC'),
+                        ),
+                        ..._orders.map((row) => DropdownMenuItem(
+                              value: _erpText(row['numero']),
+                              child: Text(_erpText(row['referencia'])),
+                            )),
+                      ],
                       onChanged: _selectOrder,
                     ),
                   if (_readOnly) Chip(label: Text('Estado: $state')),
                   const SizedBox(height: 12),
-                  if (_selected != null)
+                  if (_selected != null && !_withoutOrder)
                     Card(
                       child: Padding(
                         padding: const EdgeInsets.all(12),
@@ -1209,6 +1351,15 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
                           Text(
                               'Almacén sugerido OC: ${_selected!['almacen_codigo'] ?? ''}'),
                         ]),
+                      ),
+                    ),
+                  if (_withoutOrder)
+                    const Card(
+                      child: Padding(
+                        padding: EdgeInsets.all(12),
+                        child: Text(
+                          'Ingreso sin orden de compra: agregue los artículos recibidos con el botón + Artículo.',
+                        ),
                       ),
                     ),
                   const SizedBox(height: 12),
@@ -1286,7 +1437,6 @@ class ErpDispatchVoucherPage extends StatefulWidget {
 class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
   final _client = Supabase.instance.client;
   final _scrollController = ScrollController();
-  final _detailHorizontalController = ScrollController();
   final _date = TextEditingController(text: _today());
   final _dni = TextEditingController();
   final _name = TextEditingController();
@@ -1476,74 +1626,74 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
       );
     }
 
-    return Scrollbar(
-      controller: _detailHorizontalController,
-      thumbVisibility: true,
-      trackVisibility: true,
-      scrollbarOrientation: ScrollbarOrientation.bottom,
-      notificationPredicate: (notification) =>
-          notification.metrics.axis == Axis.horizontal,
-      child: SingleChildScrollView(
-        controller: _detailHorizontalController,
-        scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.only(bottom: 14),
-        child: DataTable(
-          headingRowColor: WidgetStateProperty.all(const Color(0xFF42576B)),
-          headingTextStyle:
-              const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
-          columns: const [
-            DataColumn(label: Text('Artículo código')),
-            DataColumn(label: Text('Descripción')),
-            DataColumn(label: Text('Unidad de medida')),
-            DataColumn(label: Text('Cantidad')),
-            DataColumn(label: Text('Centro de costo')),
-            DataColumn(label: Text('Lote')),
-            DataColumn(label: Text('')),
-          ],
-          rows: _lines.asMap().entries.map((entry) {
-            final index = entry.key;
-            final line = entry.value;
-            return DataRow(cells: [
-              DataCell(Text(_erpText(line.article['codigo']))),
-              DataCell(SizedBox(
-                  width: 260, child: Text(_erpText(line.article['nombre'])))),
-              DataCell(Text(_erpText(line.article['unidad_medida']))),
-              DataCell(input(line.quantity)),
-              DataCell(SizedBox(
-                width: 260,
-                child: DropdownButtonFormField<String>(
-                  key: ValueKey('$_type-$index-${line.costCenter}'),
-                  initialValue: centers.contains(line.costCenter)
-                      ? line.costCenter
-                      : null,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.zero),
-                  ),
-                  items: centers
-                      .map((value) =>
-                          DropdownMenuItem(value: value, child: Text(value)))
-                      .toList(),
-                  onChanged: !_editable
-                      ? null
-                      : (value) => setState(() => line.costCenter = value),
-                ),
-              )),
-              DataCell(input(line.lot, width: 150)),
-              DataCell(_editable
-                  ? IconButton(
-                      tooltip: 'Quitar artículo',
-                      onPressed: () => setState(() {
-                        _lines.removeAt(index).dispose();
-                      }),
-                      icon: const Icon(Icons.close, color: Colors.red),
-                    )
-                  : const SizedBox.shrink()),
-            ]);
-          }).toList(),
+    return ErpStickyDetailTable<_EditableArticleLine>(
+      frozenColumnCount: 1,
+      rows: _lines,
+      columns: [
+        ErpDetailColumn(
+          label: 'Artículo código',
+          width: 160,
+          cellBuilder: (_, line, __) => Text(_erpText(line.article['codigo'])),
         ),
-      ),
+        ErpDetailColumn(
+          label: 'Descripción',
+          width: 284,
+          cellBuilder: (_, line, __) => Text(_erpText(line.article['nombre'])),
+        ),
+        ErpDetailColumn(
+          label: 'Unidad de medida',
+          width: 136,
+          cellBuilder: (_, line, __) =>
+              Text(_erpText(line.article['unidad_medida'])),
+        ),
+        ErpDetailColumn(
+          label: 'Cantidad',
+          width: 144,
+          cellBuilder: (_, line, __) => input(line.quantity),
+        ),
+        ErpDetailColumn(
+          label: 'Centro de costo',
+          width: 284,
+          cellBuilder: (_, line, index) => SizedBox(
+            width: 260,
+            child: DropdownButtonFormField<String>(
+              key: ValueKey('$_type-$index-${line.costCenter}'),
+              initialValue:
+                  centers.contains(line.costCenter) ? line.costCenter : null,
+              isExpanded: true,
+              decoration: const InputDecoration(
+                isDense: true,
+                border: OutlineInputBorder(borderRadius: BorderRadius.zero),
+              ),
+              items: centers
+                  .map((value) =>
+                      DropdownMenuItem(value: value, child: Text(value)))
+                  .toList(),
+              onChanged: !_editable
+                  ? null
+                  : (value) => setState(() => line.costCenter = value),
+            ),
+          ),
+        ),
+        ErpDetailColumn(
+          label: 'Lote',
+          width: 174,
+          cellBuilder: (_, line, __) => input(line.lot, width: 150),
+        ),
+        ErpDetailColumn(
+          label: '',
+          width: 66,
+          cellBuilder: (_, __, index) => _editable
+              ? IconButton(
+                  tooltip: 'Quitar artículo',
+                  onPressed: () => setState(() {
+                    _lines.removeAt(index).dispose();
+                  }),
+                  icon: const Icon(Icons.close, color: Colors.red),
+                )
+              : const SizedBox.shrink(),
+        ),
+      ],
     );
   }
 
@@ -1554,7 +1704,6 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
     _name.dispose();
     _observation.dispose();
     _scrollController.dispose();
-    _detailHorizontalController.dispose();
     for (final line in _lines) {
       line.dispose();
     }

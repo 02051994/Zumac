@@ -4484,11 +4484,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         final hasSelection = _selectedDeleteRows.isNotEmpty;
         final isDispatchVoucher =
             _isNamedTable(tableName, 'ERP_VALES_DESPACHO_APPGT');
-        final mayReview = canReview;
-        final mayApprove = canApprove;
+        final isWarehouseReceipt =
+            _isNamedTable(tableName, 'ERP_INGRESOS_ALMACEN_APPGT');
+        final mayReview = !isWarehouseReceipt && canReview;
+        final mayApprove = !isWarehouseReceipt && canApprove;
+        final mayConfirm = isWarehouseReceipt && (canApprove || canUpdate);
         final mayDispatch = isDispatchVoucher && (canApprove || canUpdate);
         final mayAnnul = canUpdate || canDelete;
-        final hasAccess = mayReview || mayApprove || mayDispatch || mayAnnul;
+        final hasAccess =
+            mayReview || mayApprove || mayConfirm || mayDispatch || mayAnnul;
         final icon = Container(
           width: 34,
           height: 34,
@@ -4543,6 +4547,16 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
                             dense: true,
                             leading: Icon(Icons.local_shipping_outlined),
                             title: Text('Despachar'),
+                          ),
+                        ),
+                      if (mayConfirm)
+                        PopupMenuItem(
+                          value: 'CONFIRMADO',
+                          enabled: hasSelection,
+                          child: const ListTile(
+                            dense: true,
+                            leading: Icon(Icons.inventory_outlined),
+                            title: Text('Confirmar'),
                           ),
                         ),
                       if (mayAnnul)
@@ -4925,6 +4939,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (value == 'dispatch') {
           await _setSelectedWorkflowState('DESPACHADO');
         }
+        if (value == 'confirm') {
+          await _setSelectedWorkflowState('CONFIRMADO');
+        }
         if (value == 'annul') {
           await _setSelectedWorkflowState('ANULADO');
         }
@@ -4991,7 +5008,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               title: Text('Exportar CSV'),
             ),
           ),
-        if (_approvalsEnabled && canReview)
+        if (_approvalsEnabled &&
+            !_isNamedTable(tableName, 'ERP_INGRESOS_ALMACEN_APPGT') &&
+            canReview)
           PopupMenuItem(
             value: 'review',
             enabled: _selectedDeleteRows.isNotEmpty,
@@ -5001,7 +5020,9 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               title: Text('Marcar REVISADO'),
             ),
           ),
-        if (_approvalsEnabled && canApprove)
+        if (_approvalsEnabled &&
+            !_isNamedTable(tableName, 'ERP_INGRESOS_ALMACEN_APPGT') &&
+            canApprove)
           PopupMenuItem(
             value: 'approve',
             enabled: _selectedDeleteRows.isNotEmpty,
@@ -5009,6 +5030,18 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               dense: true,
               leading: Icon(Icons.verified_outlined),
               title: Text('Marcar APROBADO'),
+            ),
+          ),
+        if (_approvalsEnabled &&
+            _isNamedTable(tableName, 'ERP_INGRESOS_ALMACEN_APPGT') &&
+            (canApprove || canUpdate))
+          PopupMenuItem(
+            value: 'confirm',
+            enabled: _selectedDeleteRows.isNotEmpty,
+            child: const ListTile(
+              dense: true,
+              leading: Icon(Icons.inventory_outlined),
+              title: Text('CONFIRMAR'),
             ),
           ),
         if (_approvalsEnabled &&
@@ -8204,6 +8237,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       'APROBADO' => canApprove,
       'DESPACHADO' => _isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT') &&
           (canApprove || canUpdate),
+      'CONFIRMADO' => _isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT') &&
+          (canApprove || canUpdate),
       'ANULADO' => canUpdate || canDelete,
       _ => false,
     };
@@ -8224,9 +8259,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         'REVISADO' => current == 'PENDIENTE' && stateAllowed,
         'APROBADO' => current == 'REVISADO' && stateAllowed,
         'DESPACHADO' => current == 'APROBADO' && stateAllowed,
+        'CONFIRMADO' => _isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT') &&
+            current == 'PENDIENTE' &&
+            stateAllowed,
         'ANULADO' => _isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT')
             ? current != 'ANULADO'
-            : const {'PENDIENTE', 'REVISADO', 'APROBADO'}.contains(current),
+            : _isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT')
+                ? const {'PENDIENTE', 'CONFIRMADO'}.contains(current)
+                : const {'PENDIENTE', 'REVISADO', 'APROBADO'}.contains(current),
         _ => false,
       };
       if (validTransition) {
@@ -8243,6 +8283,8 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             'Para revisar, seleccione registros en estado PENDIENTE.',
           'DESPACHADO' =>
             'Para despachar, seleccione vales en estado APROBADO.',
+          'CONFIRMADO' =>
+            'Para confirmar, seleccione ingresos SIN OC en estado PENDIENTE.',
           'ANULADO' => 'La selección no contiene registros anulables.',
           _ => 'No hay registros elegibles para esta transición.',
         }),
@@ -8258,6 +8300,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
           'APROBADO' => 'Aprobar registros',
           'REVISADO' => 'Revisar registros',
           'DESPACHADO' => 'Despachar vales',
+          'CONFIRMADO' => 'Confirmar ingresos',
           'ANULADO' => 'Anular registros',
           _ => 'Actualizar registros',
         }),
@@ -8274,6 +8317,7 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               'APROBADO' => 'Aprobar',
               'REVISADO' => 'Revisar',
               'DESPACHADO' => 'Despachar',
+              'CONFIRMADO' => 'Confirmar',
               'ANULADO' => 'Anular',
               _ => 'Continuar',
             }),
@@ -8293,6 +8337,20 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
               'p_vale_numero': number,
               'p_estado': desired,
             });
+          }
+        } else if (_isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT')) {
+          final number =
+              _value(row, const ['numero', 'NUMERO'])?.toString().trim() ?? '';
+          if (number.isNotEmpty) {
+            if (desired == 'CONFIRMADO') {
+              await supabase.rpc('erp_confirmar_ingreso_almacen_v1', params: {
+                'p_ingreso_numero': number,
+              });
+            } else if (desired == 'ANULADO') {
+              await supabase.rpc('erp_anular_ingreso_compra_v1', params: {
+                'p_ingreso_numero': number,
+              });
+            }
           }
         } else {
           final pkColumn = _primaryKeyColumn(row);

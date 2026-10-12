@@ -2,7 +2,7 @@ class ErpPurchaseTotals {
   final double importeBruto;
   final double descuento;
   final double subtotal;
-  final double impuesto;
+  final double? impuesto;
   final double total;
 
   const ErpPurchaseTotals({
@@ -17,30 +17,19 @@ class ErpPurchaseTotals {
     required double itemAmount,
     required double discount,
     required bool includesIgv,
+    double igvPercentage = 18,
   }) {
     final safeAmount = itemAmount.clamp(0, double.infinity).toDouble();
     final safeDiscount = discount.clamp(0, safeAmount).toDouble();
-    if (includesIgv) {
-      final total = safeAmount - safeDiscount;
-      final subtotal = total == 0 ? 0.0 : total / 1.18;
-      final tax = total - subtotal;
-      return ErpPurchaseTotals(
-        importeBruto: subtotal + safeDiscount,
-        descuento: safeDiscount,
-        subtotal: subtotal,
-        impuesto: tax,
-        total: total,
-      );
-    }
-    final gross = safeAmount;
-    final subtotal = gross - safeDiscount;
-    final tax = subtotal * .18;
+    final safeIgv = igvPercentage.clamp(0, 100).toDouble();
+    final subtotal = safeAmount - safeDiscount;
+    final tax = includesIgv ? null : subtotal * safeIgv / 100;
     return ErpPurchaseTotals(
-      importeBruto: gross,
+      importeBruto: safeAmount,
       descuento: safeDiscount,
       subtotal: subtotal,
       impuesto: tax,
-      total: subtotal + tax,
+      total: subtotal + (tax ?? 0),
     );
   }
 }
