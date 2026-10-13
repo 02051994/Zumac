@@ -2,7 +2,8 @@
 param(
     [string]$Message = "Actualiza Zumac Web",
     [switch]$SkipBuild,
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$SupabaseDefinesFile
 )
 
 $ErrorActionPreference = "Stop"
@@ -110,6 +111,44 @@ function Assert-WebBuild {
     }
 }
 
+function Resolve-SupabaseRuntimeDefines {
+    param(
+        [string]$RequestedPath
+    )
+
+    $candidate = $RequestedPath
+    if ([string]::IsNullOrWhiteSpace($candidate)) {
+        $candidate = Join-Path -Path $projectRoot -ChildPath "supabase.runtime.json"
+    }
+    $resolved = [System.IO.Path]::GetFullPath($candidate)
+    if (-not (Test-Path -LiteralPath $resolved -PathType Leaf)) {
+        throw @"
+No existe el archivo local de configuración Supabase: $resolved
+Copia supabase.runtime.example.json como supabase.runtime.json y reemplaza los marcadores.
+"@
+    }
+
+    try {
+        $runtime = Get-Content -LiteralPath $resolved -Raw | ConvertFrom-Json
+    } catch {
+        throw "El archivo de configuración Supabase no contiene JSON válido: $resolved"
+    }
+    $url = [string]$runtime.SUPABASE_URL
+    $anonKey = [string]$runtime.SUPABASE_ANON_KEY
+    if (
+        [string]::IsNullOrWhiteSpace($url) -or
+        [string]::IsNullOrWhiteSpace($anonKey) -or
+        $url.StartsWith("AQUI_VA_") -or
+        $anonKey.StartsWith("AQUI_VA_")
+    ) {
+        throw "Completa SUPABASE_URL y SUPABASE_ANON_KEY en $resolved antes de compilar."
+    }
+    if ($anonKey -match 'service_role') {
+        throw "No se permite compilar la aplicación cliente con una clave service_role."
+    }
+    return $resolved
+}
+
 function New-VersionedWebAssets {
     param(
         [Parameter(Mandatory = $true)]
@@ -215,8 +254,12 @@ try {
     Assert-SourceBackedUp
 
     if (-not $SkipBuild) {
+        $runtimeDefinesPath = Resolve-SupabaseRuntimeDefines `
+            -RequestedPath $SupabaseDefinesFile
         Write-Host "Compilando Flutter Web para $pagesBaseHref..."
-        Invoke-NativeCommand flutter build web --release --base-href $pagesBaseHref
+        Invoke-NativeCommand flutter build web --release `
+            --base-href $pagesBaseHref `
+            "--dart-define-from-file=$runtimeDefinesPath"
     }
 
     Assert-WebBuild

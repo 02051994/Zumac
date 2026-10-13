@@ -35,6 +35,7 @@ import '../configuration_admin/configuration_admin_repository.dart';
 import '../form_runner/form_runner_page.dart';
 import '../form_runner/erp_document_pdf.dart';
 import '../form_runner/erp_image_attachment.dart';
+import '../form_runner/erp_sticky_detail_table.dart';
 import '../form_runner/special_form_pages.dart';
 import 'hr_record_document_pdf.dart';
 import 'payroll_slip_pdf.dart';
@@ -5937,8 +5938,6 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     if (spec == null) return;
     final parentValue = _value(row, [spec.parentKey])?.toString().trim() ?? '';
     if (parentValue.isEmpty) return;
-    final horizontalController = ScrollController();
-    final verticalController = ScrollController();
     try {
       final raw = await supabase
           .from(spec.table)
@@ -5980,76 +5979,53 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         context: context,
         builder: (dialogContext) => AlertDialog(
           shape: const RoundedRectangleBorder(),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
           title: Text('${spec.title} · $parentValue'),
           content: SizedBox(
             width: math.min(MediaQuery.sizeOf(context).width * .88, 1180),
             height: math.min(MediaQuery.sizeOf(context).height * .68, 620),
             child: details.isEmpty
                 ? const Center(child: Text('No hay líneas registradas.'))
-                : Scrollbar(
-                    controller: verticalController,
-                    thumbVisibility: true,
-                    trackVisibility: true,
-                    child: SingleChildScrollView(
-                      controller: verticalController,
-                      child: Scrollbar(
-                        controller: horizontalController,
-                        thumbVisibility: true,
-                        trackVisibility: true,
-                        scrollbarOrientation: ScrollbarOrientation.bottom,
-                        notificationPredicate: (notification) =>
-                            notification.metrics.axis == Axis.horizontal,
-                        child: SingleChildScrollView(
-                          controller: horizontalController,
-                          scrollDirection: Axis.horizontal,
-                          padding: const EdgeInsets.only(bottom: 16),
-                          child: DataTable(
-                            headingRowColor: WidgetStateProperty.all(
-                                const Color(0xFF42576B)),
-                            headingTextStyle: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            columns: columns
-                                .map((column) => DataColumn(
-                                    label: Text(_erpDetailHeaderLabel(
-                                        spec.table, column))))
-                                .toList(),
-                            rows: details
-                                .map((detail) => DataRow(
-                                      cells: columns.map((column) {
-                                        final value =
-                                            _valueByColumn(detail, column);
-                                        if (_norm(column) == 'FOTO_URL') {
-                                          final photo =
-                                              value?.toString().trim() ?? '';
-                                          return DataCell(photo.isEmpty
-                                              ? const Icon(Icons.photo_outlined,
-                                                  color: Colors.grey)
-                                              : IconButton(
-                                                  tooltip:
-                                                      'Ver foto solicitada',
-                                                  onPressed: () =>
-                                                      ErpImageAttachment.show(
-                                                    dialogContext,
-                                                    storageUrl: photo,
-                                                  ),
-                                                  icon: const Icon(
-                                                    Icons.photo,
-                                                    color: Color(0xFF008C95),
-                                                  ),
-                                                ));
-                                        }
-                                        return DataCell(Text(
-                                          _displayCellValue(value),
-                                        ));
-                                      }).toList(),
-                                    ))
-                                .toList(),
-                          ),
-                        ),
-                      ),
+                : ErpStickyDetailTable<Map<String, dynamic>>(
+                    title: '${spec.title} · $parentValue',
+                    rows: details,
+                    frozenColumnCount: math.min(3, columns.length),
+                    maxBodyHeight: math.max(
+                      120,
+                      math.min(MediaQuery.sizeOf(context).height * .68, 620) -
+                          106,
                     ),
+                    bodyColor: Colors.white,
+                    alternateBodyColor: Colors.white,
+                    columns: columns
+                        .map((column) => ErpDetailColumn<Map<String, dynamic>>(
+                              label: _erpDetailHeaderLabel(spec.table, column),
+                              width: _erpDetailColumnWidth(column),
+                              cellBuilder: (cellContext, detail, _) {
+                                final value = _valueByColumn(detail, column);
+                                if (_norm(column) == 'FOTO_URL') {
+                                  final photo = value?.toString().trim() ?? '';
+                                  return photo.isEmpty
+                                      ? const Icon(Icons.photo_outlined,
+                                          color: Colors.grey)
+                                      : IconButton(
+                                          tooltip: 'Ver foto solicitada',
+                                          onPressed: () =>
+                                              ErpImageAttachment.show(
+                                            cellContext,
+                                            storageUrl: photo,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.photo,
+                                            color: Color(0xFF008C95),
+                                          ),
+                                        );
+                                }
+                                return Text(_displayCellValue(value));
+                              },
+                            ))
+                        .toList(),
                   ),
           ),
           actions: [
@@ -6065,10 +6041,30 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('No se pudo cargar el detalle: $error')),
       );
-    } finally {
-      horizontalController.dispose();
-      verticalController.dispose();
     }
+  }
+
+  double _erpDetailColumnWidth(String column) {
+    final normalized = _norm(column);
+    if (normalized == 'LINEA') return 82;
+    if (normalized == 'FOTO_URL') return 82;
+    if (normalized.contains('DESCRIPCION') ||
+        normalized.contains('OBSERVACION')) {
+      return 300;
+    }
+    if (normalized.contains('NUMERO') || normalized.endsWith('_CODIGO')) {
+      return 184;
+    }
+    if (normalized.contains('FECHA')) return 156;
+    if (normalized.contains('UNIDAD')) return 150;
+    if (normalized.contains('CANTIDAD') ||
+        normalized.contains('PRECIO') ||
+        normalized.contains('COSTO') ||
+        normalized.contains('TOTAL') ||
+        normalized.contains('DESCUENTO')) {
+      return 144;
+    }
+    return 168;
   }
 
   String _erpDetailHeaderLabel(String table, String column) {
@@ -8229,6 +8225,14 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     return 'ESTADO_APROBACION';
   }
 
+  Map<String, dynamic> _workflowRpcResult(dynamic value) {
+    if (value is Map) return Map<String, dynamic>.from(value);
+    if (value is List && value.isNotEmpty && value.first is Map) {
+      return Map<String, dynamic>.from(value.first as Map);
+    }
+    return const <String, dynamic>{};
+  }
+
   Future<void> _setSelectedWorkflowState(String nextState) async {
     final table = tableName;
     final desired = nextState.trim().toUpperCase();
@@ -8254,7 +8258,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
     for (final row in _selectedDeleteRows.values) {
       final column = _approvalColumnForRow(row);
       final current = row[column]?.toString().trim().toUpperCase() ?? '';
-      final stateAllowed = _workflowStateAllows(row, 'update');
+      final stateAllowed = desired == 'ANULADO'
+          ? _workflowStateAllows(row, 'update') ||
+              _workflowStateAllows(row, 'delete')
+          : _workflowStateAllows(row, 'update');
       final validTransition = switch (desired) {
         'REVISADO' => current == 'PENDIENTE' && stateAllowed,
         'APROBADO' => current == 'REVISADO' && stateAllowed,
@@ -8263,10 +8270,13 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
             current == 'PENDIENTE' &&
             stateAllowed,
         'ANULADO' => _isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT')
-            ? current != 'ANULADO'
+            ? current != 'ANULADO' && stateAllowed
             : _isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT')
-                ? const {'PENDIENTE', 'CONFIRMADO'}.contains(current)
-                : const {'PENDIENTE', 'REVISADO', 'APROBADO'}.contains(current),
+                ? const {'PENDIENTE', 'CONFIRMADO'}.contains(current) &&
+                    stateAllowed
+                : const {'PENDIENTE', 'REVISADO', 'APROBADO'}
+                        .contains(current) &&
+                    stateAllowed,
         _ => false,
       };
       if (validTransition) {
@@ -8332,33 +8342,66 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
         if (_isNamedTable(table, 'ERP_VALES_DESPACHO_APPGT')) {
           final number =
               _value(row, const ['numero', 'NUMERO'])?.toString().trim() ?? '';
-          if (number.isNotEmpty) {
-            await supabase.rpc('erp_cambiar_estado_vale_despacho_v1', params: {
+          if (number.isEmpty) {
+            throw StateError('El vale seleccionado no tiene número.');
+          } else {
+            final response = await supabase
+                .rpc('erp_cambiar_estado_vale_despacho_v1', params: {
               'p_vale_numero': number,
               'p_estado': desired,
             });
+            final result = _workflowRpcResult(response);
+            if (result['actualizado'] != true ||
+                result['estado']?.toString().toUpperCase() != desired) {
+              throw StateError(
+                  'El vale $number no confirmó el estado $desired.');
+            }
           }
         } else if (_isNamedTable(table, 'ERP_INGRESOS_ALMACEN_APPGT')) {
           final number =
               _value(row, const ['numero', 'NUMERO'])?.toString().trim() ?? '';
-          if (number.isNotEmpty) {
+          if (number.isEmpty) {
+            throw StateError('El ingreso seleccionado no tiene número.');
+          } else {
             if (desired == 'CONFIRMADO') {
-              await supabase.rpc('erp_confirmar_ingreso_almacen_v1', params: {
+              final response = await supabase
+                  .rpc('erp_confirmar_ingreso_almacen_v1', params: {
                 'p_ingreso_numero': number,
               });
+              final result = _workflowRpcResult(response);
+              if (result['confirmado'] != true ||
+                  result['estado']?.toString().toUpperCase() != 'CONFIRMADO') {
+                throw StateError(
+                    'El ingreso $number no confirmó el estado CONFIRMADO.');
+              }
             } else if (desired == 'ANULADO') {
-              await supabase.rpc('erp_anular_ingreso_compra_v1', params: {
+              final response =
+                  await supabase.rpc('erp_anular_ingreso_compra_v1', params: {
                 'p_ingreso_numero': number,
               });
+              final result = _workflowRpcResult(response);
+              if (result['anulado'] != true) {
+                throw StateError(
+                    'El ingreso $number no confirmó el estado ANULADO.');
+              }
             }
           }
         } else {
           final pkColumn = _primaryKeyColumn(row);
           if (pkColumn == null) continue;
           final column = _approvalColumnForRow(row);
-          await supabase
+          final response = await supabase
               .from(table)
-              .update({column: desired}).eq(pkColumn, row[pkColumn]);
+              .update({column: desired})
+              .eq(pkColumn, row[pkColumn])
+              .select(column);
+          final updated = _normalizeRows(response);
+          final persisted = updated.isNotEmpty &&
+              updated.first[column]?.toString().trim().toUpperCase() == desired;
+          if (!persisted) {
+            throw StateError(
+                'La base de datos no confirmó el estado $desired para el registro seleccionado.');
+          }
         }
       }
       _selectedDeleteRowKeys.clear();

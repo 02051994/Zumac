@@ -1,0 +1,65 @@
+CLAVES NECESARIAS
+
+1. SUPABASE_URL
+   URL pública del proyecto Supabase. Colocarla en una copia local de
+   supabase.runtime.example.json llamada supabase.runtime.json.
+
+2. SUPABASE_ANON_KEY
+   Clave publicable (anon/publishable) de Supabase. Colocarla en
+   supabase.runtime.json. No usar la clave service_role en Flutter.
+
+3. SUPABASE_ACCESS_TOKEN
+   Token personal para Supabase CLI, necesario únicamente para enlazar el
+   proyecto y aplicar migraciones desde una computadora nueva. Guardarlo en el
+   almacén local de la CLI o en una variable de entorno; no versionarlo.
+
+4. Contraseña de la base de datos de Supabase
+   Solo si se utilizará conexión PostgreSQL directa para respaldo o
+   diagnóstico. No es necesaria para ejecutar la aplicación Flutter.
+
+5. Credenciales de firma de Android/Windows (si se publica instalador)
+   Archivo de keystore/certificado y sus contraseñas. Deben permanecer fuera
+   de Git. Para desarrollo local no son necesarias.
+
+PROGRAMAS
+
+1. Git
+   Para clonar la rama source, crear commits y publicar source/main.
+
+2. Flutter SDK estable
+   Incluye Dart. Después de instalar, ejecutar flutter doctor y habilitar las
+   plataformas que se utilizarán (web, Android o Windows).
+
+3. Google Chrome
+   Requerido para ejecutar y depurar Flutter Web.
+
+4. Visual Studio 2022 Community con "Desktop development with C++"
+   Requerido únicamente para compilar la aplicación Windows.
+
+5. Android Studio, Android SDK, platform-tools y un JDK compatible
+   Requeridos únicamente para compilar o ejecutar Android. Aceptar las
+   licencias con flutter doctor --android-licenses.
+
+6. Supabase CLI
+   Requerida para enlazar el proyecto, consultar el historial y aplicar las
+   migraciones de supabase/migrations.
+
+7. Node.js LTS
+   Recomendado para la Supabase CLI, funciones Edge y utilidades JavaScript de
+   respaldo/restauración incluidas en el proyecto.
+
+8. PowerShell 7 o Windows PowerShell 5.1
+   Necesario para scripts/publish_web.ps1 y los scripts auxiliares de Windows.
+
+9. Editor recomendado: Visual Studio Code con extensiones Flutter y Dart
+   No es obligatorio, pero facilita análisis, depuración y formato.
+
+PASOS MÍNIMOS EN UNA COMPUTADORA NUEVA
+
+1. Clonar la rama source.
+2. Copiar supabase.runtime.example.json como supabase.runtime.json y colocar
+   SUPABASE_URL y SUPABASE_ANON_KEY reales.
+3. Ejecutar flutter pub get.
+4. Ejecutar flutter analyze y flutter test.
+5. Ejecutar con:
+   flutter run --dart-define-from-file=supabase.runtime.json

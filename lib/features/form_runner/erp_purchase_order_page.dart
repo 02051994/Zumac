@@ -731,6 +731,7 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
         line.amount + (lineTax(line) ?? 0);
 
     return ErpStickyDetailTable<_PurchaseOrderLine>(
+      title: 'Ítems de la orden de compra',
       frozenColumnCount: 2,
       rows: _lines,
       columns: [

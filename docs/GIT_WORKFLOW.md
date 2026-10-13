@@ -23,7 +23,9 @@ exclusivos.
 5. Agregar rutas concretas; no usar `git add .` sin revisar el estado.
 6. Crear un commit descriptivo y publicarlo en su upstream.
 7. Integrar el cambio verificado en `source` y publicar `source`.
-8. Generar y publicar la web en `main` con `scripts/publish_web.ps1`.
+8. Crear localmente `supabase.runtime.json` desde
+   `supabase.runtime.example.json` y generar/publicar la web en `main` con
+   `scripts/publish_web.ps1`.
 9. Verificar que GitHub Pages esté construido desde `main:/`.
 
 Ejemplo:
@@ -40,7 +42,8 @@ git push
 git switch source
 git merge --ff-only nombre-de-la-rama
 git push origin source
-.\scripts\publish_web.ps1 -Message "deploy(web): describe la versión"
+.\scripts\publish_web.ps1 -Message "deploy(web): describe la versión" `
+  -SupabaseDefinesFile .\supabase.runtime.json
 git status --short --branch
 ```
 
@@ -56,6 +59,8 @@ Las carpetas `.temp/`, `.video_runtime/`, `artifacts/`, `output/`,
 El respaldo local `supabase/backup_supabase_proyecto_zumac/` contiene datos y
 credenciales sensibles y jamás debe subirse a GitHub.
 
-Los archivos `.env`, claves privadas, certificados y almacenes de claves
-también están excluidos. Una plantilla versionable debe llamarse
-`.env.example` o `.env.<entorno>.example` y no contener valores reales.
+Los archivos `.env`, `supabase.runtime.json`, claves privadas, certificados y
+almacenes de claves también están excluidos. Las plantillas versionables
+(`.env.example`, `.env.<entorno>.example` y
+`supabase.runtime.example.json`) solo contienen marcadores, nunca valores
+reales.

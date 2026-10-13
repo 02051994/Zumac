@@ -19,6 +19,7 @@ Future<void> main() async {
     databaseFactory = databaseFactoryFfi;
   }
 
+  SupabaseConfig.ensureConfigured();
   await Supabase.initialize(
     url: SupabaseConfig.supabaseUrl,
     anonKey: SupabaseConfig.supabaseAnonKey,

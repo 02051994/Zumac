@@ -19,19 +19,27 @@ class ErpDetailColumn<T> {
 class ErpStickyDetailTable<T> extends StatefulWidget {
   final List<ErpDetailColumn<T>> columns;
   final List<T> rows;
+  final String title;
   final int frozenColumnCount;
   final double rowHeight;
   final double headingHeight;
   final double maxBodyHeight;
+  final bool allowExpand;
+  final Color bodyColor;
+  final Color alternateBodyColor;
 
   const ErpStickyDetailTable({
     super.key,
     required this.columns,
     required this.rows,
+    this.title = 'Detalle',
     this.frozenColumnCount = 1,
-    this.rowHeight = 64,
-    this.headingHeight = 56,
-    this.maxBodyHeight = 390,
+    this.rowHeight = 56,
+    this.headingHeight = 50,
+    this.maxBodyHeight = 360,
+    this.allowExpand = true,
+    this.bodyColor = Colors.white,
+    this.alternateBodyColor = const Color(0xFFF6F9FA),
   }) : assert(frozenColumnCount >= 0);
 
   @override
@@ -46,6 +54,7 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
   final _bodyVertical = ScrollController();
   bool _syncingHorizontal = false;
   bool _syncingVertical = false;
+  bool _showingExpanded = false;
 
   @override
   void initState() {
@@ -142,7 +151,7 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
         mainAxisSize: MainAxisSize.min,
         children: widget.rows.asMap().entries.map((entry) {
           final rowColor =
-              entry.key.isEven ? Colors.white : const Color(0xFFF6F9FA);
+              entry.key.isEven ? widget.bodyColor : widget.alternateBodyColor;
           return Row(
             children: columns
                 .map((column) => _cell(
@@ -159,8 +168,85 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
     );
   }
 
+  Future<void> _openExpanded() async {
+    if (_showingExpanded || !widget.allowExpand) return;
+    setState(() => _showingExpanded = true);
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    try {
+      await showDialog<void>(
+        context: context,
+        builder: (dialogContext) => Dialog(
+          insetPadding: const EdgeInsets.all(12),
+          backgroundColor: Colors.white,
+          surfaceTintColor: Colors.white,
+          shape: const RoundedRectangleBorder(),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        widget.title,
+                        style: Theme.of(dialogContext).textTheme.titleLarge,
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Cerrar vista ampliada',
+                      onPressed: () => Navigator.pop(dialogContext),
+                      icon: const Icon(Icons.close_fullscreen),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (context, constraints) => Align(
+                      alignment: Alignment.topCenter,
+                      child: ErpStickyDetailTable<T>(
+                        columns: widget.columns,
+                        rows: widget.rows,
+                        title: widget.title,
+                        frozenColumnCount: widget.frozenColumnCount,
+                        rowHeight: widget.rowHeight,
+                        headingHeight: widget.headingHeight,
+                        maxBodyHeight: math.max(
+                          widget.rowHeight,
+                          constraints.maxHeight - widget.headingHeight - 16,
+                        ),
+                        allowExpand: false,
+                        bodyColor: widget.bodyColor,
+                        alternateBodyColor: widget.alternateBodyColor,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _showingExpanded = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (_showingExpanded) {
+      return Container(
+        height: 44,
+        color: Colors.white,
+        alignment: Alignment.centerRight,
+        child: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 12),
+          child: Text('Tabla abierta en vista ampliada'),
+        ),
+      );
+    }
     final frozenCount =
         widget.frozenColumnCount.clamp(0, widget.columns.length);
     final frozen = widget.columns.take(frozenCount).toList();
@@ -181,9 +267,10 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
       final safeFrozenWidth = math.min(frozenWidth, availableWidth * .62);
       final remainingWidth = math.max(0.0, availableWidth - safeFrozenWidth);
 
-      return Container(
+      final grid = Container(
         height: widget.headingHeight + bodyHeight + 14,
         decoration: BoxDecoration(
+          color: Colors.white,
           border: Border.all(color: Colors.blueGrey.shade300),
         ),
         child: Column(
@@ -191,21 +278,25 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
             Row(
               children: [
                 SizedBox(
-                    width: safeFrozenWidth,
-                    child: ClipRect(child: _heading(frozen))),
+                  width: safeFrozenWidth,
+                  child: ClipRect(child: _heading(frozen)),
+                ),
                 Expanded(
                   child: SingleChildScrollView(
                     controller: _headingHorizontal,
                     scrollDirection: Axis.horizontal,
                     physics: const NeverScrollableScrollPhysics(),
                     child: SizedBox(
-                        width: scrollingWidth, child: _heading(scrolling)),
+                      width: scrollingWidth,
+                      child: _heading(scrolling),
+                    ),
                   ),
                 ),
               ],
             ),
             Expanded(
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   SizedBox(
                     width: safeFrozenWidth,
@@ -231,9 +322,17 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
                         padding: const EdgeInsets.only(bottom: 14),
                         child: SizedBox(
                           width: scrollingWidth,
-                          child: SingleChildScrollView(
+                          child: Scrollbar(
                             controller: _bodyVertical,
-                            child: _rows(context, scrolling, scrollingWidth),
+                            thumbVisibility: true,
+                            trackVisibility: true,
+                            scrollbarOrientation: ScrollbarOrientation.right,
+                            notificationPredicate: (notification) =>
+                                notification.metrics.axis == Axis.vertical,
+                            child: SingleChildScrollView(
+                              controller: _bodyVertical,
+                              child: _rows(context, scrolling, scrollingWidth),
+                            ),
                           ),
                         ),
                       ),
@@ -244,6 +343,25 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
             ),
           ],
         ),
+      );
+
+      if (!widget.allowExpand) return grid;
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Container(
+            height: 42,
+            color: Colors.white,
+            alignment: Alignment.centerRight,
+            child: IconButton(
+              tooltip: 'Expandir tabla',
+              onPressed: _openExpanded,
+              icon: const Icon(Icons.open_in_full),
+            ),
+          ),
+          grid,
+        ],
       );
     });
   }

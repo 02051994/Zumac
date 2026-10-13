@@ -548,6 +548,7 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
     }
 
     return ErpStickyDetailTable<_EditableArticleLine>(
+      title: 'Artículos e insumos de la solicitud',
       frozenColumnCount: 1,
       rows: _lines,
       columns: [
@@ -1100,8 +1101,18 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
   Future<void> _annul() async {
     setState(() => _saving = true);
     try {
-      await _client.rpc('erp_anular_ingreso_compra_v1',
-          params: {'p_ingreso_numero': _receiptNumber});
+      final result = _erpMap(
+        await _client.rpc(
+          'erp_anular_ingreso_compra_v1',
+          params: {'p_ingreso_numero': _receiptNumber},
+        ),
+      );
+      if (result['anulado'] != true ||
+          _erpText(result['estado']).toUpperCase() != 'ANULADO') {
+        throw StateError(
+          'La base de datos no confirmó la anulación del ingreso.',
+        );
+      }
       if (!mounted) return;
       _erpToast(context, 'Ingreso anulado y stock revertido.');
       _finishAfterSave();
@@ -1232,6 +1243,7 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
     ];
 
     return ErpStickyDetailTable<_ReceiptLine>(
+      title: 'Detalle recibido del ingreso en almacén',
       frozenColumnCount: 2,
       rows: _lines,
       columns: columns,
@@ -1627,6 +1639,7 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
     }
 
     return ErpStickyDetailTable<_EditableArticleLine>(
+      title: 'Artículos e insumos del vale de despacho',
       frozenColumnCount: 1,
       rows: _lines,
       columns: [

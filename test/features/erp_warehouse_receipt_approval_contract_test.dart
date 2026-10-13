@@ -82,12 +82,14 @@ void main() {
   });
 
   test('los scrollbars de detalles usan controladores explícitos', () {
-    expect(records, contains('controller: horizontalController'));
-    expect(records, contains('controller: verticalController'));
-    expect(records, contains('ScrollbarOrientation.bottom'));
+    expect(records, contains('ErpStickyDetailTable<Map<String, dynamic>>'));
+    expect(records, contains('alternateBodyColor: Colors.white'));
+    expect(records, contains('frozenColumnCount: math.min(3, columns.length)'));
     expect(stickyTable, contains('controller: _bodyHorizontal'));
     expect(stickyTable, contains('controller: _bodyVertical'));
     expect(stickyTable, contains('ScrollbarOrientation.bottom'));
+    expect(stickyTable, contains('ScrollbarOrientation.right'));
+    expect(stickyTable, contains("tooltip: 'Expandir tabla'"));
     expect(workflow, contains('ErpStickyDetailTable<'));
     expect(purchaseOrder, contains('ErpStickyDetailTable<'));
   });

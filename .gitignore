@@ -60,6 +60,7 @@ app.*.map.json
 .env.*
 !.env.example
 !.env.*.example
+/supabase.runtime.json
 *.pem
 *.key
 *.p12

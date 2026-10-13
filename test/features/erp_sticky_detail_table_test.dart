@@ -43,6 +43,13 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('Artículo código'), findsOneWidget);
     expect(find.text('ART-1'), findsOneWidget);
-    expect(find.byType(Scrollbar), findsOneWidget);
+    expect(find.byType(Scrollbar), findsNWidgets(2));
+    expect(find.byTooltip('Expandir tabla'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('Expandir tabla'));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.byTooltip('Cerrar vista ampliada'), findsOneWidget);
+    expect(find.text('ART-20'), findsOneWidget);
   });
 }

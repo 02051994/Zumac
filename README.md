@@ -24,9 +24,16 @@ multiempresa, reglas declarativas y constructor visual versionado.
 
 ## Configuración
 
-Definir la URL y la clave publicable (nunca `service_role`) en:
+Copiar `supabase.runtime.example.json` como `supabase.runtime.json` y reemplazar
+únicamente los dos marcadores. El archivo real está ignorado por Git. Nunca se
+debe usar ni versionar una clave `service_role` en la aplicación cliente.
 
-`lib/config/supabase_config.dart`
+Ejecutar y compilar pasando ese archivo:
+
+```text
+flutter run --dart-define-from-file=supabase.runtime.json
+flutter build web --release --base-href /Zumac/ --dart-define-from-file=supabase.runtime.json
+```
 
 ## Verificación y compilación
 
@@ -55,9 +62,8 @@ La documentación técnica y las garantías de despliegue están en
 `docs/ARCHITECTURE_IMPLEMENTATION_REPORT.md`.
 
 El flujo obligatorio de ramas, respaldo del código fuente y publicación web
-está documentado en `docs/GIT_WORKFLOW.md`. El código fuente vive en
-`main`; el build compilado de GitHub Pages vive de forma separada en
-`gh-pages`.
+está documentado en `docs/GIT_WORKFLOW.md`. El código fuente completo vive en
+`source`; `main` contiene únicamente el build web publicado en GitHub Pages.
 
 La operación de Zumac Consultor, Creator, motores de IA, sincronización por
 plataforma, escalabilidad y pasos pendientes de producción está documentada en
