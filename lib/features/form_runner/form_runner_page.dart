@@ -33,6 +33,7 @@ import '../../core/platform/app_platform.dart';
 import '../../core/platform/network_bytes.dart';
 import '../../core/services/sync_service.dart';
 import '../modules/modules_page.dart';
+import 'save_confirmation.dart';
 
 class FormRunnerPage extends StatefulWidget {
   final String moduleId;
@@ -4425,6 +4426,7 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     if (savingLocal || capturingPhoto) return;
     FocusScope.of(context).unfocus();
     final cachedUserId = await LocalSession().cachedUserId();
+    if (!mounted) return;
     final userId =
         Supabase.instance.client.auth.currentUser?.id ?? cachedUserId;
     if (userId == null) {
@@ -4460,25 +4462,6 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
     _formulaRecalcDebounce?.cancel();
     _recalculateDerivedFields();
     _recalculateMatrixDrivenFields();
-
-    if (_isPersonalPlanillaForm && !generarPhotocheck) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (dialogContext) => AlertDialog(
-          title: const Text('Guardar personal'),
-          content: const Text('Desea guardar sin generar photochek?'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(dialogContext, false),
-                child: const Text('Cancelar')),
-            FilledButton(
-                onPressed: () => Navigator.pop(dialogContext, true),
-                child: const Text('Aceptar')),
-          ],
-        ),
-      );
-      if (ok != true) return;
-    }
 
     for (final f in fields) {
       final requerido = _isEffectivelyRequiredField(f);
@@ -4555,6 +4538,29 @@ class _FormRunnerPageState extends State<FormRunnerPage> {
         );
         return;
       }
+    }
+
+    if (!await confirmRecordSave(context)) return;
+    if (!mounted) return;
+
+    if (_isPersonalPlanillaForm && !generarPhotocheck) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Guardar personal'),
+          content: const Text('Desea guardar sin generar photochek?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('Cancelar')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('Aceptar')),
+          ],
+        ),
+      );
+      if (ok != true) return;
+      if (!mounted) return;
     }
 
     final idLocal = widget.editIdLocal ?? uuid.v4();

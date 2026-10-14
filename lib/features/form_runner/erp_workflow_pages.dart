@@ -5,6 +5,7 @@ import '../../core/widgets/zumac_scaffold_messenger.dart';
 import 'erp_document_pdf.dart';
 import 'erp_image_attachment.dart';
 import 'erp_sticky_detail_table.dart';
+import 'save_confirmation.dart';
 
 List<Map<String, dynamic>> _erpRows(dynamic value) {
   if (value is! List) return const [];
@@ -433,6 +434,8 @@ class _ErpPurchaseRequestPageState extends State<ErpPurchaseRequestPage> {
       _erpToast(context, 'Seleccione proveedor y almacén.', error: true);
       return;
     }
+    if (!await confirmRecordSave(context)) return;
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
       await _uploadPendingImages();
@@ -1068,6 +1071,8 @@ class _ErpPurchaseReceiptPageState extends State<ErpPurchaseReceiptPage> {
           error: true);
       return;
     }
+    if (!await confirmRecordSave(context)) return;
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
       final result = _erpMap(await _client.rpc(
@@ -1579,6 +1584,8 @@ class _ErpDispatchVoucherPageState extends State<ErpDispatchVoucherPage> {
       return;
     }
     _costCenter = _lines.first.costCenter;
+    if (!await confirmRecordSave(context)) return;
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
       final result = _erpMap(await _client.rpc(

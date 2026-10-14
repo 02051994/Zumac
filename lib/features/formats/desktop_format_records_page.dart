@@ -8085,7 +8085,10 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _workflowStateForRow(Map<String, dynamic> row) {
-    for (final preferred in const ['ESTADO_APROBACION', 'ESTADO']) {
+    final preferredFields = _usesErpBusinessState
+        ? const ['ESTADO', 'ESTADO_APROBACION']
+        : const ['ESTADO_APROBACION', 'ESTADO'];
+    for (final preferred in preferredFields) {
       for (final entry in row.entries) {
         if (_norm(entry.key) == preferred) {
           return entry.value?.toString().trim().toUpperCase() ?? '';
@@ -8201,6 +8204,11 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
   }
 
   String _approvalColumnForRow(Map<String, dynamic> row) {
+    if (_usesErpBusinessState) {
+      for (final key in row.keys) {
+        if (_norm(key) == 'ESTADO') return key;
+      }
+    }
     for (final key in row.keys) {
       if (_norm(key) == 'ESTADO_APROBACION') return key;
     }
@@ -8222,8 +8230,15 @@ class _DesktopFormatRecordsPageState extends State<DesktopFormatRecordsPage> {
       final campo = field['campo']?.toString().trim() ?? '';
       if (_norm(campo) == 'ESTADO') return campo;
     }
-    return 'ESTADO_APROBACION';
+    return _usesErpBusinessState ? 'estado' : 'ESTADO_APROBACION';
   }
+
+  bool get _usesErpBusinessState => const {
+        'ERP_SOLICITUDES_COMPRA_APPGT',
+        'ERP_ORDENES_COMPRA_APPGT',
+        'ERP_INGRESOS_ALMACEN_APPGT',
+        'ERP_VALES_DESPACHO_APPGT',
+      }.contains(_norm(tableName ?? ''));
 
   Map<String, dynamic> _workflowRpcResult(dynamic value) {
     if (value is Map) return Map<String, dynamic>.from(value);

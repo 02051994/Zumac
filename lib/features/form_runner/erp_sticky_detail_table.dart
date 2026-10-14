@@ -48,6 +48,9 @@ class ErpStickyDetailTable<T> extends StatefulWidget {
 }
 
 class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
+  static const double _scrollbarClearance = 14;
+  static const double _minimumHorizontalTravel = 96;
+
   final _headingHorizontal = ScrollController();
   final _bodyHorizontal = ScrollController();
   final _frozenVertical = ScrollController();
@@ -266,9 +269,15 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
           : frozenWidth + scrollingWidth;
       final safeFrozenWidth = math.min(frozenWidth, availableWidth * .62);
       final remainingWidth = math.max(0.0, availableWidth - safeFrozenWidth);
+      // Always expose a usable horizontal track. Forms can otherwise fit by a
+      // handful of pixels and hide the only horizontal navigation affordance.
+      final scrollableContentWidth = math.max(
+        scrollingWidth,
+        remainingWidth + _minimumHorizontalTravel,
+      );
 
       final grid = Container(
-        height: widget.headingHeight + bodyHeight + 14,
+        height: widget.headingHeight + bodyHeight + _scrollbarClearance,
         decoration: BoxDecoration(
           color: Colors.white,
           border: Border.all(color: Colors.blueGrey.shade300),
@@ -287,7 +296,7 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
                     scrollDirection: Axis.horizontal,
                     physics: const NeverScrollableScrollPhysics(),
                     child: SizedBox(
-                      width: scrollingWidth,
+                      width: scrollableContentWidth,
                       child: _heading(scrolling),
                     ),
                   ),
@@ -302,7 +311,11 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
                     width: safeFrozenWidth,
                     child: ClipRect(
                       child: SingleChildScrollView(
+                        key: const ValueKey('erp-detail-frozen-vertical'),
                         controller: _frozenVertical,
+                        padding: const EdgeInsets.only(
+                          bottom: _scrollbarClearance,
+                        ),
                         child: _rows(context, frozen, frozenWidth),
                       ),
                     ),
@@ -310,28 +323,42 @@ class _ErpStickyDetailTableState<T> extends State<ErpStickyDetailTable<T>> {
                   SizedBox(
                     width: remainingWidth,
                     child: Scrollbar(
-                      controller: _bodyHorizontal,
+                      controller: _bodyVertical,
                       thumbVisibility: true,
                       trackVisibility: true,
-                      scrollbarOrientation: ScrollbarOrientation.bottom,
+                      interactive: true,
+                      thickness: 10,
+                      radius: Radius.zero,
+                      scrollbarOrientation: ScrollbarOrientation.right,
                       notificationPredicate: (notification) =>
-                          notification.metrics.axis == Axis.horizontal,
-                      child: SingleChildScrollView(
+                          notification.metrics.axis == Axis.vertical,
+                      child: Scrollbar(
                         controller: _bodyHorizontal,
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.only(bottom: 14),
-                        child: SizedBox(
-                          width: scrollingWidth,
-                          child: Scrollbar(
-                            controller: _bodyVertical,
-                            thumbVisibility: true,
-                            trackVisibility: true,
-                            scrollbarOrientation: ScrollbarOrientation.right,
-                            notificationPredicate: (notification) =>
-                                notification.metrics.axis == Axis.vertical,
+                        thumbVisibility: true,
+                        trackVisibility: true,
+                        interactive: true,
+                        thickness: 10,
+                        radius: Radius.zero,
+                        scrollbarOrientation: ScrollbarOrientation.bottom,
+                        notificationPredicate: (notification) =>
+                            notification.metrics.axis == Axis.horizontal,
+                        child: SingleChildScrollView(
+                          key: const ValueKey('erp-detail-body-horizontal'),
+                          controller: _bodyHorizontal,
+                          scrollDirection: Axis.horizontal,
+                          padding: const EdgeInsets.only(
+                            bottom: _scrollbarClearance,
+                          ),
+                          child: SizedBox(
+                            width: scrollableContentWidth,
                             child: SingleChildScrollView(
+                              key: const ValueKey('erp-detail-body-vertical'),
                               controller: _bodyVertical,
-                              child: _rows(context, scrolling, scrollingWidth),
+                              child: _rows(
+                                context,
+                                scrolling,
+                                scrollableContentWidth,
+                              ),
                             ),
                           ),
                         ),

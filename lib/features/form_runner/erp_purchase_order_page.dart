@@ -6,6 +6,7 @@ import 'erp_document_pdf.dart';
 import 'erp_image_attachment.dart';
 import 'erp_purchase_math.dart';
 import 'erp_sticky_detail_table.dart';
+import 'save_confirmation.dart';
 
 String _text(dynamic value) => value?.toString().trim() ?? '';
 
@@ -468,6 +469,8 @@ class _ErpPurchaseOrderPageState extends State<ErpPurchaseOrderPage> {
           error: true);
       return;
     }
+    if (!await confirmRecordSave(context)) return;
+    if (!mounted) return;
     setState(() => _saving = true);
     try {
       final raw = await _client.rpc('erp_guardar_orden_compra_v1', params: {

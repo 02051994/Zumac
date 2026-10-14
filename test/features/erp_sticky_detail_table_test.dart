@@ -44,7 +44,24 @@ void main() {
     expect(find.text('Artículo código'), findsOneWidget);
     expect(find.text('ART-1'), findsOneWidget);
     expect(find.byType(Scrollbar), findsNWidgets(2));
+    expect(
+      find.byKey(const ValueKey('erp-detail-body-horizontal')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('erp-detail-body-vertical')),
+      findsOneWidget,
+    );
     expect(find.byTooltip('Expandir tabla'), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('erp-detail-body-vertical')),
+      const Offset(0, -300),
+    );
+    await tester.pumpAndSettle();
+    final frozenRowY = tester.getTopLeft(find.text('ART-10')).dy;
+    final scrollingRowY = tester.getTopLeft(find.text('Artículo 10')).dy;
+    expect(frozenRowY, closeTo(scrollingRowY, .1));
 
     await tester.tap(find.byTooltip('Expandir tabla'));
     await tester.pumpAndSettle();
